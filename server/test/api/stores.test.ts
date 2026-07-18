@@ -30,9 +30,10 @@ import { runSnapshot, workflow } from './helpers.js';
 
 const dirs: string[] = [];
 const temporaryDir = (prefix: string): string => {
-  // realpathSync: Windows tmpdir() may use 8.3 short names and macOS /tmp is a
-  // symlink; the store canonicalizes via realpath, so tests must compare like.
-  const path = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  // realpathSync.native: Windows tmpdir() may use 8.3 short names; only the
+  // native realpath expands them, and the store canonicalizes with the native
+  // promises API, so tests must compare like with like.
+  const path = realpathSync.native(mkdtempSync(join(tmpdir(), prefix)));
   dirs.push(path);
   return path;
 };
