@@ -319,7 +319,7 @@ agy -p "<PROMPT>" --model "Gemini 3.1 Pro (High)" [--print-timeout 45m] [--dange
 
 ### 4.7 mock (rich)
 
-Deterministic scripted adapter for tests/demo. Model string programs it: `ok` (thinking→tool_use→tool_result→message→result), `fail` (error + exit 1), `slow:<ms>` (delays between events), `noisy` (many coalescable chunks). Used by engine/API tests and `--demo`.
+Deterministic scripted adapter for tests/demo. Model string programs it: `ok` (thinking→tool_use→tool_result→message→result), `fail` (error + exit 1), `slow:<ms>` (delays between events), `noisy` (many coalescable chunks). **Echo mode (all models)**: if `promptText` contains the marker `MOCK_REPLY:`, the final agent message text is everything after the marker — this lets engine tests script orchestrator decisions through prompt templates. Used by engine/API tests and `--demo`.
 
 ## 5. Workflow engine (server/src/engine)
 
@@ -441,7 +441,7 @@ Four-column CSS grid (Ted's mock), draggable dividers, dark theme default.
 | Wave | Worker | Owns (exclusive) |
 |------|--------|------------------|
 | 0 | scaffold | whole tree; all package/tsconfig/tailwind/vite; shared/src COMPLETE; web/src/components/** COMPLETE; web/src/app/store.ts COMPLETE (frozen); api client/ws; mock adapter COMPLETE; eventLog + dataDir COMPLETE; stubs elsewhere; fixtures vendored; build+test green |
-| 1 | W-adapters | server/src/adapters/{base,claude,codex,grok,agy,registry}.ts, server/src/spawn.ts, server/test/adapters/** |
+| 1 | W-adapters | server/src/adapters/** (incl. mock.ts — keep wave-0 mock tests green), server/src/spawn.ts, server/test/adapters/** |
 | 1 | W-engine | server/src/engine/**, server/src/orchestrator/**, server/test/engine/** |
 | 1 | W-store-api | server/src/store/{workspaces,workflows,runs}.ts, server/src/api/**, server/src/index.ts, server/test/api/** |
 | 1 | W-web-shell | web/src/panels/workspace/**, web/src/panels/workflow/**, web/src/app/App.tsx + layout (NOT store.ts) |
