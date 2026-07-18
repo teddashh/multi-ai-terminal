@@ -74,7 +74,7 @@ export function WorkspacePanel({ api = apiClient }: WorkspacePanelProps) {
     <div className="min-h-0 flex-1 space-y-2 overflow-auto p-3">
       {workspaces.map((workspace) => {
         const isSelected = selected === workspace.id;
-        const isLive = liveWorkspaceIds.has(workspace.id) || workspace.lastRun?.status === 'running' || workspace.lastRun?.status === 'gating';
+        const isLive = liveWorkspaceIds.has(workspace.id) || workspace.lastRun?.status === 'created' || workspace.lastRun?.status === 'running' || workspace.lastRun?.status === 'gating';
         return <article key={workspace.id} className={`rounded border ${isSelected ? 'border-accent bg-violet-950/20' : 'border-border bg-zinc-900/40'}`}>
           <button type="button" onClick={() => select(workspace.id)} className="w-full p-2 text-left" aria-pressed={isSelected}>
             <span className="flex items-center gap-2">
@@ -97,7 +97,7 @@ export function WorkspacePanel({ api = apiClient }: WorkspacePanelProps) {
     </div>
 
     <ModalDialog open={addOpen} title="Add workspace" onClose={closeAdd} footer={<div className="flex justify-end gap-2"><button type="button" onClick={closeAdd} className="rounded px-3 py-1.5 text-sm text-muted hover:bg-zinc-800">Cancel</button><button type="submit" form="add-workspace-form" disabled={saving} className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-zinc-950 disabled:opacity-50">{saving ? 'Adding…' : 'Add workspace'}</button></div>}>
-      <form id="add-workspace-form" onSubmit={(event) => void submitWorkspace(event)} className="space-y-4">
+      <form id="add-workspace-form" aria-label="Add workspace" onSubmit={(event) => void submitWorkspace(event)} className="space-y-4">
         <label className="block text-sm"><span className="mb-1 block text-muted">Name</span><input autoFocus required value={name} onChange={(event) => setName(event.target.value)} className="w-full rounded border border-border bg-zinc-950 px-3 py-2 text-ink outline-none focus:border-accent" /></label>
         <label className="block text-sm"><span className="mb-1 block text-muted">Absolute path</span><input required value={path} onChange={(event) => setPath(event.target.value)} placeholder="/home/ted/projects/example" className="w-full rounded border border-border bg-zinc-950 px-3 py-2 text-ink outline-none focus:border-accent" /></label>
         {formError && <p role="alert" className="rounded border border-red-900 bg-red-950/40 px-3 py-2 text-sm text-red-300">{formError}</p>}

@@ -9,7 +9,7 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import type { AgentBinding, ProviderInfo, Slot, Stage, WorkflowDef } from '@mat/shared';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { apiClient, type ApiClient } from '../../api/client.js';
 import { useMatStore } from '../../app/store.js';
 import { AgentChip } from '../../components/AgentChip.js';
@@ -83,7 +83,8 @@ export function WorkflowPanel({ api = apiClient }: WorkflowPanelProps) {
 
   const appendProvider = (stageId: string, providerId: string) => {
     const provider = providers.find((item) => item.id === providerId);
-    if (!provider?.ok) return;
+    const stage = workflow?.stages.find((item) => item.id === stageId);
+    if (!provider?.ok || !stage || stageAgentCount(stage) >= MAX_STAGE_AGENTS) return;
     updateStage(stageId, (stage) => appendSlotWithProviderDefaults(stage, provider));
   };
 
@@ -136,7 +137,7 @@ export function WorkflowPanel({ api = apiClient }: WorkflowPanelProps) {
       <h2 id="workflow-heading" className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Workflow</h2>
       <label className="block text-xs text-muted">Mode
         <select aria-label="Workflow" value={workflowId} onChange={(event) => { setWorkflowId(event.target.value); setOpenSlot(undefined); setOrchestratorOpen(false); }} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-2 text-sm text-ink">
-          {workflows.map((item) => <option key={item.id} value={item.id}>{item.builtin ? '⭐ ' : ''}{item.name}{item.id === selectedWorkspace.defaultWorkflowId ? ' (default)' : ''}</option>)}
+          {workflows.map((item) => <option key={item.id} value={item.id}>{item.builtin ? '⭐ ' : ''}{item.name}{item.id === selectedWorkspace?.defaultWorkflowId ? ' (default)' : ''}</option>)}
         </select>
       </label>
 
@@ -181,7 +182,7 @@ export function WorkflowPanel({ api = apiClient }: WorkflowPanelProps) {
 }
 
 interface StageEditorProps {
-  stage: Stage; providers: ProviderInfo[]; openSlot?: string;
+  stage: Stage; providers: ProviderInfo[]; openSlot: string | undefined;
   onOpenSlot(id: string): void; onUpdate(update: (stage: Stage) => Stage): void;
 }
 
@@ -209,14 +210,14 @@ function SlotEditor({ stage, slot, providers, onChange, onRemove, onClose }: { s
   const provider = providers.find((item) => item.id === slot.agent.provider);
   const listId = `models-${stage.id}-${slot.id}`;
   const canIncrease = validateSlotCount(stage, slot.id, slot.count + 1).valid;
-  const setAgent = (update: Partial<AgentBinding>) => onChange((current) => ({ ...current, agent: { ...current.agent, ...update } }));
+  const editAgent = (update: (agent: AgentBinding) => void) => onChange((current) => { const agent = { ...current.agent }; update(agent); return { ...current, agent }; });
   return <div role="dialog" aria-label={`Edit ${slot.label}`} className="absolute left-0 top-full z-30 mt-2 w-72 rounded border border-accent bg-panel p-3 shadow-2xl">
     <div className="flex items-center justify-between"><strong className="text-xs">{slot.label}</strong><button type="button" onClick={onClose} aria-label="Close slot editor" className="text-muted hover:text-ink">×</button></div>
-    <label className="mt-2 block text-xs text-muted">Model<input list={listId} value={slot.agent.model ?? ''} onChange={(event) => setAgent({ model: event.target.value || undefined })} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink" /></label>
+    <label className="mt-2 block text-xs text-muted">Model<input list={listId} value={slot.agent.model ?? ''} onChange={(event) => editAgent((agent) => { if (event.target.value) agent.model = event.target.value; else delete agent.model; })} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink" /></label>
     <datalist id={listId}>{provider?.models.map((model) => <option key={model} value={model} />)}</datalist>
-    <label className="mt-2 block text-xs text-muted">Effort<select value={slot.agent.effort ?? ''} onChange={(event) => setAgent({ effort: (event.target.value || undefined) as AgentBinding['effort'] })} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink"><option value="">default</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select></label>
+    <label className="mt-2 block text-xs text-muted">Effort<select value={slot.agent.effort ?? ''} onChange={(event) => editAgent((agent) => { if (event.target.value) agent.effort = event.target.value as NonNullable<AgentBinding['effort']>; else delete agent.effort; })} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink"><option value="">default</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select></label>
     <div className="mt-2 text-xs text-muted">Count<div className="mt-1 inline-flex items-center rounded border border-border bg-zinc-950"><button type="button" aria-label="Decrease count" disabled={slot.count <= 1} onClick={() => onChange((current) => ({ ...current, count: current.count - 1 }))} className="px-3 py-1 disabled:opacity-30">−</button><output className="min-w-8 text-center text-ink">{slot.count}</output><button type="button" aria-label="Increase count" disabled={!canIncrease} onClick={() => onChange((current) => ({ ...current, count: current.count + 1 }))} className="px-3 py-1 disabled:opacity-30">+</button></div></div>
-    <label className="mt-2 block text-xs text-muted">Permission<select value={slot.agent.permission} onChange={(event) => setAgent({ permission: event.target.value as AgentBinding['permission'] })} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink"><option value="safe">safe</option><option value="auto">auto</option><option value="full">full</option></select></label>
+    <label className="mt-2 block text-xs text-muted">Permission<select value={slot.agent.permission} onChange={(event) => editAgent((agent) => { agent.permission = event.target.value as AgentBinding['permission']; })} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink"><option value="safe">safe</option><option value="auto">auto</option><option value="full">full</option></select></label>
     <label className="mt-2 block text-xs text-muted">Prompt template<textarea value={slot.promptTemplate} onChange={(event) => onChange((current) => ({ ...current, promptTemplate: event.target.value }))} rows={5} className="mt-1 w-full resize-y rounded border border-border bg-zinc-950 px-2 py-1.5 font-mono text-xs text-ink" /></label>
     <button type="button" onClick={onRemove} className="mt-3 text-xs text-red-300 hover:text-red-200">Remove slot</button>
   </div>;
@@ -224,11 +225,12 @@ function SlotEditor({ stage, slot, providers, onChange, onRemove, onClose }: { s
 
 function BindingEditor({ title, binding, providers, onChange, onClose }: { title: string; binding: AgentBinding; providers: ProviderInfo[]; onChange(value: AgentBinding): void; onClose(): void }) {
   const provider = providers.find((item) => item.id === binding.provider);
+  const edit = (update: (copy: AgentBinding) => void) => { const copy = { ...binding }; update(copy); onChange(copy); };
   return <div role="dialog" aria-label={title} className="absolute left-0 top-full z-30 mt-2 w-full rounded border border-accent bg-panel p-3 shadow-2xl">
     <div className="flex items-center justify-between"><strong className="text-xs">{title}</strong><button type="button" onClick={onClose} aria-label="Close orchestrator editor" className="text-muted">×</button></div>
     <label className="mt-2 block text-xs text-muted">Provider<select value={binding.provider} onChange={(event) => { const next = providers.find((item) => item.id === event.target.value); if (next) onChange({ ...binding, provider: next.id, model: next.defaultModel }); }} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink">{providers.map((item) => <option key={item.id} value={item.id} disabled={!item.ok}>{item.id}</option>)}</select></label>
-    <label className="mt-2 block text-xs text-muted">Model<input list="orchestrator-models" value={binding.model ?? ''} onChange={(event) => onChange({ ...binding, model: event.target.value || undefined })} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink" /></label><datalist id="orchestrator-models">{provider?.models.map((model) => <option key={model} value={model} />)}</datalist>
-    <label className="mt-2 block text-xs text-muted">Effort<select value={binding.effort ?? ''} onChange={(event) => onChange({ ...binding, effort: (event.target.value || undefined) as AgentBinding['effort'] })} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink"><option value="">default</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select></label>
+    <label className="mt-2 block text-xs text-muted">Model<input list="orchestrator-models" value={binding.model ?? ''} onChange={(event) => edit((copy) => { if (event.target.value) copy.model = event.target.value; else delete copy.model; })} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink" /></label><datalist id="orchestrator-models">{provider?.models.map((model) => <option key={model} value={model} />)}</datalist>
+    <label className="mt-2 block text-xs text-muted">Effort<select value={binding.effort ?? ''} onChange={(event) => edit((copy) => { if (event.target.value) copy.effort = event.target.value as NonNullable<AgentBinding['effort']>; else delete copy.effort; })} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink"><option value="">default</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select></label>
     <label className="mt-2 block text-xs text-muted">Permission<select value={binding.permission} onChange={(event) => onChange({ ...binding, permission: event.target.value as AgentBinding['permission'] })} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink"><option value="safe">safe</option><option value="auto">auto</option><option value="full">full</option></select></label>
   </div>;
 }
@@ -237,7 +239,7 @@ function PaletteAgent({ provider }: { provider: ProviderInfo }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: `provider-${provider.id}`, data: { providerId: provider.id }, disabled: !provider.ok });
   const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
   const unavailable = provider.detail ? `Unavailable: ${provider.detail}` : 'Provider unavailable';
-  return <button ref={setNodeRef} type="button" style={style} {...listeners} {...attributes} disabled={!provider.ok} title={provider.ok ? `Drag ${provider.id} to a stage` : unavailable} className={`rounded-full text-left ${provider.ok ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed grayscale opacity-40'} ${isDragging ? 'z-50 opacity-70' : ''}`}><AgentChip agent={{ provider: provider.id, model: provider.defaultModel, permission: 'auto' }} /></button>;
+  return <span title={provider.ok ? `Drag ${provider.id} to a stage` : unavailable} className="inline-flex"><button ref={setNodeRef} type="button" style={style} {...listeners} {...attributes} disabled={!provider.ok} aria-label={`${provider.id} provider${provider.ok ? '' : ` unavailable: ${provider.detail ?? 'not detected'}`}`} className={`rounded-full text-left ${provider.ok ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed grayscale opacity-40'} ${isDragging ? 'z-50 opacity-70' : ''}`}><AgentChip agent={{ provider: provider.id, model: provider.defaultModel, permission: 'auto' }} /></button></span>;
 }
 
 function bindingSummary(binding: AgentBinding): string {
