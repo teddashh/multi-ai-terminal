@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --panel: #18181b;
+  --border: #27272a;
+  --ink: #e4e4e7;
+  --muted: #a1a1aa;
+  --accent: #a78bfa;
+  --provider-claude: #d97706;
+  --provider-codex: #10a37f;
+  --provider-agy: #4285f4;
+  --provider-grok: #e11d48;
+  --provider-mock: #71717a;
+}
+html, body, #root { min-height: 100%; margin: 0; }
+body { background: #09090b; color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+button, input, textarea, select { font: inherit; }
+button { cursor: pointer; }

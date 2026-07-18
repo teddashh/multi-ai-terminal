@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"019f74ad-caa0-79b2-8d0e-1260deb3a761"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll run that exact command and report what it prints."}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/bash -lc 'echo hello-mat .'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/bash -lc 'echo hello-mat .'","aggregated_output":"hello-mat .\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"`hello-mat .`"}}
+{"type":"turn.completed","usage":{"input_tokens":26436,"cached_input_tokens":22016,"output_tokens":83,"reasoning_output_tokens":0}}

@@ -1,0 +1,2 @@
+import type { Adapter } from './base.js';
+export const agyAdapter: Adapter = { id: 'agy', tier: 'plain', models: ['Gemini 3.5 Flash (Medium)', 'Gemini 3.5 Flash (High)', 'Gemini 3.5 Flash (Low)', 'Gemini 3.1 Pro (Low)', 'Gemini 3.1 Pro (High)', 'Claude Sonnet 4.6 (Thinking)', 'Claude Opus 4.6 (Thinking)', 'GPT-OSS 120B (Medium)'], defaultModel: 'Gemini 3.1 Pro (High)', async available() { return { ok: false, detail: 'stub' }; }, spawn() { throw new Error('NOT_IMPLEMENTED: adapters/agy'); } };

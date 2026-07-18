@@ -3,6 +3,7 @@ dist/
 build/
 coverage/
 *.log
+!server/test/fixtures/agy.log
 .DS_Store
 .vite/
 *.tsbuildinfo
