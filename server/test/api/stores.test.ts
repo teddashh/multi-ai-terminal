@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -30,7 +30,9 @@ import { runSnapshot, workflow } from './helpers.js';
 
 const dirs: string[] = [];
 const temporaryDir = (prefix: string): string => {
-  const path = mkdtempSync(join(tmpdir(), prefix));
+  // realpathSync: Windows tmpdir() may use 8.3 short names and macOS /tmp is a
+  // symlink; the store canonicalizes via realpath, so tests must compare like.
+  const path = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
   dirs.push(path);
   return path;
 };
