@@ -27,6 +27,16 @@ Open the UI, add a workspace (absolute path), pick a builtin workflow (Planning 
 
 Dev mode: `npm run dev` (vite + API with hot reload). Tests: `npm test` (143 tests). Typecheck: `npm run typecheck`.
 
+## Desktop app
+
+Install desktop builds from the repository's GitHub Releases page. The desktop app requires Node.js ≥ 20 on `PATH`; set `MAT_NODE` to the path of a specific compatible Node.js binary if needed.
+
+- Debian/Ubuntu: download the `.deb`, then run `sudo apt install ./file.deb`.
+- Other Linux distributions: download the `.AppImage`, run `chmod +x ./Multi-AI-Terminal*.AppImage`, then launch it. RPM packages are also provided.
+- macOS: open the downloaded `.dmg` and copy the app to Applications. Version 1 builds are unsigned and not notarized, so on first launch right-click Multi-AI Terminal and choose **Open** to pass Gatekeeper.
+
+The desktop shell runs the exact same bundled server on an ephemeral `127.0.0.1` port and keeps data in `~/.multi-ai-terminal/`, just like the web-served build. To build the desktop resources locally, run `npm run build` followed by `npm run desktop:bundle`; `npm run desktop:build` additionally requires the Rust and native Tauri build prerequisites.
+
 ## Providers (verified invocations)
 
 | Provider | CLI | Stream | Notes |
