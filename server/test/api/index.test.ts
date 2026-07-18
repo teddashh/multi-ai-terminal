@@ -54,7 +54,7 @@ describe('server options and trust boundary', () => {
     const app = await server();
     const response = await app.inject({ method: 'GET', url: '/api/health' });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ ok: true, version: '0.1.0' });
+    expect(response.json()).toEqual({ ok: true, version: expect.any(String) });
   });
 
   it('requires an exact bearer token on every REST endpoint when configured', async () => {

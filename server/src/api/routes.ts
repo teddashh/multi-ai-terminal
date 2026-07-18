@@ -15,6 +15,7 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { listProviders } from '../adapters/registry.js';
+import { VERSION } from '../version.js';
 import * as runManager from '../engine/runManager.js';
 import { readEventsAfter } from '../store/eventLog.js';
 import {
@@ -94,7 +95,7 @@ const defaultDependencies: ApiRouteDependencies = {
 export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiRouteDependencies = defaultDependencies): Promise<void> {
   app.setErrorHandler((error, _request, reply) => sendError(reply, error));
 
-  app.get('/api/health', wrap(async () => ({ ok: true, version: '0.1.0' })));
+  app.get('/api/health', wrap(async () => ({ ok: true, version: VERSION })));
   app.get('/api/providers', wrap(async () => dependencies.providers()));
 
   app.get('/api/workspaces', wrap(async () => dependencies.workspaces.list()));

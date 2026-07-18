@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,6 +23,15 @@ beforeEach(async () => {
 afterEach(async () => {
   await app.close();
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+describe('health endpoint', () => {
+  it('reports ok with the version kept in sync with server/package.json', async () => {
+    const response = await app.inject({ method: 'GET', url: '/api/health' });
+    const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string };
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true, version: manifest.version });
+  });
 });
 
 describe('workspace and workflow routes', () => {
