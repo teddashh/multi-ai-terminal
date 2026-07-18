@@ -234,6 +234,10 @@ export async function retryStage(runId: string, stageId: string, req: RetryStage
     if (!TERMINAL_RUN_STATUSES.has(run.status) || run.currentStageId !== stageId) {
       throw new EngineConflictError('A stage can be retried only while it is gating, or when it was the last stage executed in a terminal run');
     }
+    // The run is terminal, but the execution promise may still be settling its
+    // cleanup; wait for it instead of surfacing a spurious conflict.
+    const settling = executions.get(runId);
+    if (settling) await settling.catch(() => undefined);
     if (executions.has(runId)) throw new EngineConflictError(`Run ${runId} already has an active or scheduled execution`);
     const nodes = run.nodes.filter((node) => node.stageId === stageId);
     if (stage.gate && run.workflow.orchestrator.enabled) {

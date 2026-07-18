@@ -18,12 +18,13 @@ export function lastRunBadge(lastRun: { workflowName: string; status: RunStatus;
 }
 
 export function shortPath(path: string, maxSegments = 2): string {
-  const normalized = path.replace(/\/+$/, '') || '/';
-  const segments = normalized.split('/').filter(Boolean);
+  const normalized = path.replace(/[\\/]+$/, '') || '/';
+  const segments = normalized.split(/[\\/]/).filter(Boolean);
   if (segments.length <= maxSegments) return normalized;
   return `…/${segments.slice(-maxSegments).join('/')}`;
 }
 
 export function isAbsolutePath(path: string): boolean {
-  return path.startsWith('/');
+  // POSIX root, Windows drive (C:\ or C:/), or UNC (\\server\share).
+  return /^(?:[/\\]|[A-Za-z]:[/\\])/.test(path);
 }

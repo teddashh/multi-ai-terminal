@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   configureWorkspaceStore,
@@ -47,7 +47,7 @@ describe.sequential('workspace store', () => {
 
     await expect(createWorkspace({ name: 'bad', path: 'relative' })).rejects.toMatchObject({ code: 'INVALID_PATH' });
     const created = await createWorkspace({ name: 'Repo', path: workspaceDir });
-    const normalized = await createWorkspace({ name: 'Canonical', path: join(workspaceDir, '..', workspaceDir.split('/').at(-1)!) });
+    const normalized = await createWorkspace({ name: 'Canonical', path: join(workspaceDir, '..', basename(workspaceDir)) });
     expect(normalized.path).toBe(workspaceDir);
     expect(created.isGit).toBe(false);
     expect(readFileSync(join(dataDir, 'workspaces.json'), 'utf8')).toContain(created.id);

@@ -1,0 +1,6 @@
+# Adapters parse byte-exact CLI output; fixtures and sources must check out
+# with LF on every platform (Windows runners default to autocrlf).
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary
