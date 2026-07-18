@@ -12,14 +12,20 @@ export const mockAdapter: Adapter = {
   async available() { return { ok: true, version: 'builtin' }; },
   spawn(spec, io): SpawnedNode {
     const model = spec.binding.model ?? 'ok';
+    const markerIndex = spec.promptText.indexOf('MOCK_REPLY:');
+    const echoReply = markerIndex >= 0
+      ? spec.promptText.slice(markerIndex + 'MOCK_REPLY:'.length).trim()
+      : undefined;
     let killed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let resolveCompletion!: (outcome: NodeOutcome) => void;
     const completion = new Promise<NodeOutcome>((resolve) => { resolveCompletion = resolve; });
     const delay = model.startsWith('slow:') ? Math.max(0, Number(model.slice(5)) || 0) : 0;
-    const events = model === 'noisy'
+    const events = echoReply === undefined && model === 'noisy'
       ? Array.from({ length: 40 }, (_, index): AdapterContentEvent => ({ role: 'agent', kind: 'message', text: `chunk-${index} ` }))
-      : scriptedEvents;
+      : scriptedEvents.map((event, index) => index === scriptedEvents.length - 1 && echoReply !== undefined
+        ? { ...event, text: echoReply }
+        : event);
 
     const finish = (outcome: NodeOutcome): void => {
       if (timer) clearTimeout(timer);
@@ -27,13 +33,15 @@ export const mockAdapter: Adapter = {
     };
     const run = (index = 0): void => {
       if (killed) return;
-      if (model === 'fail') {
+      if (model === 'fail' && echoReply === undefined) {
         io.onRaw('mock failure', 'err');
         finish({ exitCode: 1, error: 'mock failure' });
         return;
       }
       if (index >= events.length) {
-        const resultText = model === 'noisy' ? events.map((event) => event.text).join('') : 'Mock task completed.';
+        const resultText = model === 'noisy'
+          ? events.map((event) => event.text).join('')
+          : echoReply ?? 'Mock task completed.';
         finish({ exitCode: 0, resultText });
         return;
       }
