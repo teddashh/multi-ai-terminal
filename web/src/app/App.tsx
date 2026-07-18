@@ -27,6 +27,7 @@ export function App() {
   const [bootError, setBootError] = useState<string>();
   const [aborting, setAborting] = useState(false);
   const activeRunId = useMatStore((state) => state.activeRunId);
+  const selectedWorkspaceId = useMatStore((state) => state.selectedWorkspaceId);
   const activeRun = useMatStore((state) => state.activeRunId ? state.runs[state.activeRunId] : undefined);
   const selectedWorkspace = useMatStore((state) => state.workspaces.find((workspace) => workspace.id === state.selectedWorkspaceId));
   const ws = useRef<ReconnectingWsClient>();
@@ -43,6 +44,33 @@ export function App() {
     ws.current.connect();
     return () => { live = false; ws.current?.close(); };
   }, []);
+
+  useEffect(() => {
+    let live = true;
+    const state = matStore.getState();
+    if (!selectedWorkspaceId) {
+      state.setActiveRunId(undefined);
+      state.setRunsLoading(false);
+      return () => { live = false; };
+    }
+    state.setRunsLoading(true);
+    state.setActiveRunId(undefined);
+    apiClient.getRuns({ workspaceId: selectedWorkspaceId, limit: 100 }).then((runs) => {
+      if (!live) return;
+      const current = matStore.getState();
+      for (const run of runs) current.upsertRun(run);
+      const active = runs.find((run) => ACTIVE_STATUSES.has(run.status));
+      if (active) ws.current?.subscribe(active.runId);
+      current.setActiveRunId(active?.runId);
+      current.setRunsLoading(false);
+    }).catch((error: unknown) => {
+      if (!live) return;
+      matStore.getState().setActiveRunId(undefined);
+      matStore.getState().setRunsLoading(false);
+      setBootError(error instanceof Error ? error.message : 'Could not load workspace runs.');
+    });
+    return () => { live = false; };
+  }, [selectedWorkspaceId]);
 
   useEffect(() => {
     if (!activeRunId) return;

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -31,5 +31,15 @@ describe('EventLog', () => {
     new EventLog(dir).appendEvent('r1', partial('r1', 'one'));
     new EventLog(dir).appendEvent('r1', partial('r1', 'two'));
     expect(new EventLog(dir).appendEvent('r1', partial('r1', 'three')).seq).toBe(3);
+  });
+
+  it('truncates a torn final fragment before the next append', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mat-event-log-')); dirs.push(dir);
+    const first = new EventLog(dir);
+    first.appendEvent('r1', partial('r1', 'one'));
+    appendFileSync(first.pathFor('r1'), '{"id":"torn"', 'utf8');
+    expect(new EventLog(dir).appendEvent('r1', partial('r1', 'two')).seq).toBe(2);
+    const lines = readFileSync(first.pathFor('r1'), 'utf8').trim().split('\n');
+    expect(lines.map((line) => JSON.parse(line).seq)).toEqual([1, 2]);
   });
 });

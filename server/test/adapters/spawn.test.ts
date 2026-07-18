@@ -54,4 +54,18 @@ describe('spawnManaged', () => {
     await once(managed.child, 'close');
     expect(timedOut).toBe(true);
   });
+
+  it('sweeps background descendants when the direct child exits naturally', async () => {
+    const managed = spawnManaged({ command: '/bin/sh', args: ['-c', 'sleep 30 >/dev/null 2>&1 & echo $!'], cwd: '/tmp' });
+    let output = '';
+    managed.child.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString('utf8'); });
+    await once(managed.child, 'close');
+    const descendantPid = Number(output.trim());
+    expect(Number.isInteger(descendantPid)).toBe(true);
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try { process.kill(descendantPid, 0); } catch { return; }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(() => process.kill(descendantPid, 0)).toThrow();
+  });
 });

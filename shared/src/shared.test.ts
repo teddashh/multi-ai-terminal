@@ -28,6 +28,16 @@ describe('shared schemas', () => {
     value.stages[0]!.slots[1]!.count = 8;
     expect(WorkflowDefSchema.safeParse(value).success).toBe(false);
   });
+
+  it.each([
+    ['workflow id', (value: any) => { value.id = '../escape'; }],
+    ['stage id', (value: any) => { value.stages[0].id = '../../escape'; }],
+    ['slot id', (value: any) => { value.stages[0].slots[0].id = 'a/b'; }],
+  ])('rejects traversal in %s', (_label, mutate) => {
+    const value = preset('planning');
+    mutate(value);
+    expect(WorkflowDefSchema.safeParse(value).success).toBe(false);
+  });
 });
 
 describe('builtin presets', () => {

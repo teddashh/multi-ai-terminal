@@ -109,10 +109,13 @@ async function main(): Promise<void> {
     await stopEngine(abortRun);
     await app.close();
   };
-  process.once('SIGINT', () => void shutdown());
-  process.once('SIGTERM', () => void shutdown());
+  process.once('SIGINT', () => { shutdown().catch((error: unknown) => console.error('[mat] shutdown failed', error)); });
+  process.once('SIGTERM', () => { shutdown().catch((error: unknown) => console.error('[mat] shutdown failed', error)); });
   await app.listen({ port: options.port, host: options.host });
 }
 
 const entry = process.argv[1] ? resolve(process.argv[1]) : '';
-if (entry === fileURLToPath(import.meta.url)) void main();
+if (entry === fileURLToPath(import.meta.url)) main().catch((error: unknown) => {
+  console.error('[mat] server startup failed', error);
+  process.exitCode = 1;
+});

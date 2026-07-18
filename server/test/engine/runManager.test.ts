@@ -1,5 +1,5 @@
 import { mkdtempSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -66,12 +66,13 @@ vi.mock('../../src/adapters/registry.js', () => ({
   }),
 }));
 
-import { configureEventLog, readEventsAfter } from '../../src/store/eventLog.js';
-import { abortRun, createRun, retryStage, sweepOnBoot } from '../../src/engine/runManager.js';
+import { appendEvent, configureEventLog, readEventsAfter } from '../../src/store/eventLog.js';
+import { abortRun, applyPatch, createRun, killNode, retryStage, sweepOnBoot } from '../../src/engine/runManager.js';
 import { waitForRun } from './fakes.js';
 
 const dirs: string[] = [];
 const oldDataDir = process.env.MAT_DATA_DIR;
+const oldPath = process.env.PATH;
 
 const binding = (model: string) => ({ provider: 'mock' as const, model, permission: 'safe' as const });
 const workflow = (options: { candidateModel?: string; orchestrator?: boolean; gateModel?: string; retries?: number; twoStages?: boolean } = {}): WorkflowDef => ({
@@ -98,13 +99,19 @@ beforeEach(() => {
   state.active = 0;
   state.maxActive = 0;
   state.kills = 0;
+  state.workspace.isGit = false;
   const dir = mkdtempSync(join(tmpdir(), 'mat-run-')); dirs.push(dir);
   process.env.MAT_DATA_DIR = dir;
   configureEventLog(dir);
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   if (oldDataDir === undefined) delete process.env.MAT_DATA_DIR; else process.env.MAT_DATA_DIR = oldDataDir;
+  process.env.PATH = oldPath;
+  delete process.env.MAT_TEST_GIT_LOG;
+  delete process.env.MAT_TEST_GIT_MARKER;
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -125,6 +132,7 @@ describe('run manager and stage state machine', () => {
     expect(state.maxActive).toBeLessThanOrEqual(2);
     expect(run.nodes.filter((node) => node.stageId === 'round').map((node) => node.status)).toEqual(['done', 'done', 'done']);
     expect(run.gateDecisions).toHaveLength(2);
+    expect(events.filter((event) => event.kind === 'decision').every((event) => event.stageId === null && event.nodeRunId === 'orchestrator')).toBe(true);
     const finalPrompt = events.find((event) => event.role === 'user' && event.stageId === 'final');
     expect(finalPrompt?.text).toContain('RESULT: TASK=Build it');
     expect(finalPrompt?.text).toContain('carry this');
@@ -177,6 +185,30 @@ describe('run manager and stage state machine', () => {
     expect(state.kills).toBe(1);
   });
 
+  it('keeps an immediate post-create abort terminal on the canonical live snapshot', async () => {
+    const def = workflow({ candidateModel: 'slow', orchestrator: false, twoStages: false });
+    def.stages[0]!.slots[0]!.count = 1;
+    const created = await createRun({ workspaceId: 'ws', workflowId: 'wf', task: 'Abort immediately', workflowOverride: def });
+    await abortRun(created.runId);
+    const run = state.runs.get(created.runId);
+    expect(run?.status).toBe('aborted');
+    expect(run?.nodes[0]?.status).toBe('killed');
+  });
+
+  it('kills a queued node durably and never dispatches it later', async () => {
+    const def = workflow({ candidateModel: 'slow', orchestrator: false, twoStages: false });
+    def.maxParallel = 1;
+    def.stages[0]!.slots[0]!.count = 2;
+    const created = await createRun({ workspaceId: 'ws', workflowId: 'wf', task: 'Skip queued', workflowOverride: def });
+    await waitForRun(() => state.runs.get(created.runId), (run) => run.nodes[0]?.status === 'running');
+    await killNode(created.runId, 'round.candidate.1');
+    await abortRun(created.runId);
+    const events = readEventsAfter(created.runId, 0, 10_000);
+    expect(state.runs.get(created.runId)?.nodes[1]?.status).toBe('killed');
+    expect(events.filter((event) => event.nodeRunId === 'round.candidate.1' && event.role === 'user')).toHaveLength(0);
+    expect(events.filter((event) => event.nodeRunId === 'round.candidate.1' && event.data?.status === 'killed')).toHaveLength(1);
+  });
+
   it('keeps an abort terminal when it interrupts an active gate', async () => {
     const def = workflow({ gateModel: 'gate-slow', twoStages: false });
     def.stages[0]!.slots[0]!.count = 1;
@@ -197,6 +229,42 @@ describe('run manager and stage state machine', () => {
     const retried = await waitForRun(() => state.runs.get(first.run.runId), (run) => run.status === 'done' && run.nodes[0]?.attempt === 2);
     expect(retried.nodes[0]?.resultText).toContain('human follow-up');
     await expect(retryStage(first.run.runId, 'round', {})).rejects.toThrow('budget');
+  });
+
+  it('serializes concurrent terminal retries and rejects the duplicate with a typed conflict', async () => {
+    const def = workflow({ orchestrator: false, twoStages: false, retries: 2 });
+    def.stages[0]!.gate = false;
+    def.stages[0]!.slots[0]!.count = 1;
+    const first = await start(def);
+    const results = await Promise.allSettled([
+      retryStage(first.run.runId, 'round', { promptAddendum: 'first' }),
+      retryStage(first.run.runId, 'round', { promptAddendum: 'duplicate' }),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.find((result) => result.status === 'rejected')).toMatchObject({ reason: { code: 'CONFLICT' } });
+    const done = await waitForRun(() => state.runs.get(first.run.runId), (run) => run.status === 'done' && run.nodes[0]?.attempt === 2);
+    expect(done.nodes[0]?.attempt).toBe(2);
+    expect(readEventsAfter(first.run.runId, 0, 10_000).filter((event) => event.nodeRunId === 'round.candidate.0' && event.attempt === 2 && event.role === 'user')).toHaveLength(1);
+  });
+
+  it('records manual gate interruption as user-retry and accepts it as a normal retry', async () => {
+    const def = workflow({ gateModel: 'gate-slow', twoStages: false });
+    def.stages[0]!.slots[0]!.count = 1;
+    const created = await createRun({ workspaceId: 'ws', workflowId: 'wf', task: 'Manual retry', workflowOverride: def });
+    await waitForRun(() => state.runs.get(created.runId), (run) => run.status === 'gating');
+    await retryStage(created.runId, 'round', { promptAddendum: 'try another angle' });
+    await waitForRun(() => state.runs.get(created.runId), (run) => run.nodes[0]?.attempt === 2);
+    const events = readEventsAfter(created.runId, 0, 10_000);
+    expect(events).toContainEqual(expect.objectContaining({ nodeRunId: 'orchestrator', data: expect.objectContaining({ status: 'killed', detail: 'user-retry' }) }));
+    await abortRun(created.runId);
+  });
+
+  it('records a synthetic decision for a gated stage when orchestration is disabled', async () => {
+    const def = workflow({ orchestrator: false, twoStages: false });
+    def.stages[0]!.slots[0]!.count = 1;
+    const result = await start(def);
+    expect(result.run.gateDecisions).toEqual([expect.objectContaining({ gateAttempt: 1, action: 'advance', rationale: 'Gate auto-advanced: orchestrator disabled', degraded: false })]);
+    expect(result.events.find((event) => event.kind === 'decision')).toMatchObject({ stageId: null, nodeRunId: 'orchestrator' });
   });
 
   it('re-asks once on parse failure, degrades invalid retry ids, and degrades a gate timeout', async () => {
@@ -223,13 +291,63 @@ describe('run manager and stage state machine', () => {
       nodes: [{ nodeRunId: 'round.candidate.0', stageId: 'round', slotId: 'candidate', instanceIndex: 0, agent: binding('ok'), label: 'Candidate · mock', status: 'running', attempt: 1, cwd: '/tmp/workspace', pid: 45678 }],
     };
     state.runs.set(stale.runId, stale);
+    vi.useFakeTimers();
     const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
     await sweepOnBoot();
     const swept = state.runs.get('stale');
     expect(kill).toHaveBeenCalledWith(-45678, 'SIGTERM');
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(kill).toHaveBeenCalledWith(-45678, 'SIGKILL');
     expect(swept).toMatchObject({ status: 'aborted', nodes: [{ status: 'killed' }] });
     expect(swept?.nodes[0]?.pid).toBeUndefined();
     expect(readEventsAfter('stale').at(-1)?.data?.detail).toBe('server-restart');
-    kill.mockRestore();
+  });
+
+  it('does not duplicate a server-restart recovery event already at the log tail', async () => {
+    const def = workflow({ twoStages: false });
+    state.runs.set('stale-tail', {
+      runId: 'stale-tail', workspaceId: 'ws', workflow: def, task: 'old', status: 'running', currentStageId: 'round', createdAt: 1, gateDecisions: [], nodes: [],
+    });
+    appendEvent('stale-tail', { runId: 'stale-tail', stageId: null, nodeRunId: null, attempt: 0, role: 'system', kind: 'status', text: 'restarting', data: { status: 'aborted', detail: 'server-restart' } });
+    await sweepOnBoot();
+    expect(readEventsAfter('stale-tail').filter((event) => event.data?.detail === 'server-restart')).toHaveLength(1);
+  });
+
+  it('serializes patch applies per workspace and falls back when old Git rejects check-with-3way', async () => {
+    const root = dirs.at(-1)!;
+    const bin = join(root, 'bin');
+    const log = join(root, 'git.log');
+    const marker = join(root, 'applied');
+    const patchFile = join(root, 'candidate.patch');
+    await writeFile(patchFile, 'diff --git a/a b/a\n', 'utf8');
+    await mkdir(bin);
+    const git = join(bin, 'git');
+    await writeFile(git, `#!/bin/sh
+echo "$*" >> "$MAT_TEST_GIT_LOG"
+case "$*" in
+  *"rev-parse --is-inside-work-tree"*) echo true; exit 0 ;;
+  *"apply --check --3way"*) echo "error: --check cannot be used together with --3way" >&2; exit 1 ;;
+  *"apply --check --binary"*) if [ -f "$MAT_TEST_GIT_MARKER" ]; then echo "error: patch does not apply" >&2; exit 1; fi; exit 0 ;;
+  *"apply --3way --binary"*) touch "$MAT_TEST_GIT_MARKER"; exit 0 ;;
+esac
+exit 1
+`, 'utf8');
+    await chmod(git, 0o755);
+    process.env.PATH = `${bin}:${oldPath ?? ''}`;
+    process.env.MAT_TEST_GIT_LOG = log;
+    process.env.MAT_TEST_GIT_MARKER = marker;
+    state.workspace.isGit = true;
+    const def = workflow({ orchestrator: false, twoStages: false });
+    state.runs.set('patch-run', {
+      runId: 'patch-run', workspaceId: 'ws', workflow: def, task: 'patch', status: 'done', currentStageId: 'round', createdAt: 1, endedAt: 2, gateDecisions: [],
+      nodes: [{ nodeRunId: 'round.candidate.0', stageId: 'round', slotId: 'candidate', instanceIndex: 0, agent: binding('ok'), label: 'Candidate', status: 'done', attempt: 1, cwd: '/tmp/workspace', patchFile }],
+    });
+
+    const [first, second] = await Promise.all([applyPatch('patch-run', 'round.candidate.0'), applyPatch('patch-run', 'round.candidate.0')]);
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(false);
+    const calls = (await readFile(log, 'utf8')).trim().split('\n');
+    expect(calls.filter((line) => line.includes('apply --check --3way'))).toHaveLength(2);
+    expect(calls.filter((line) => line.includes('apply --3way --binary') && !line.includes('--check'))).toHaveLength(1);
   });
 });

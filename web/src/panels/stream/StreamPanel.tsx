@@ -128,6 +128,7 @@ export function StreamPanel() {
       : replayLoading ? <div className="animate-pulse p-4 text-xs text-muted">Loading replay…</div>
       : events.length === 0 ? <div className="flex items-center gap-2 p-4 text-xs text-muted"><span className="h-2 w-2 animate-pulse rounded-full bg-sky-400" />Waiting for events…</div>
       : <div ref={scrollRef} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-auto" data-testid="stream-scroll-region">
+        {(events[0]?.seq ?? 1) > 1 && <div role="status" className="border-b border-amber-900/60 bg-amber-950/30 px-4 py-2 text-xs text-amber-200">Older events trimmed from memory — showing from seq {events[0]!.seq}</div>}
         <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
           {virtualizer.getVirtualItems().map((virtualItem) => {
             const item = items[virtualItem.index];

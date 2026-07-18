@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, openSync, closeSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, openSync, closeSync, readFileSync, truncateSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { nanoid } from 'nanoid';
 import { AgentEventSchema, type AgentEvent } from '@mat/shared';
@@ -55,7 +55,20 @@ export class EventLog {
     const path = this.pathFor(runId);
     let recovered = 0;
     if (existsSync(path)) {
-      const lines = readFileSync(path, 'utf8').split('\n');
+      let content = readFileSync(path);
+      if (content.length > 0 && content[content.length - 1] !== 0x0a) {
+        const newline = content.lastIndexOf(0x0a);
+        const fragment = content.subarray(newline + 1).toString('utf8');
+        try {
+          AgentEventSchema.parse(JSON.parse(fragment));
+          appendFileSync(path, '\n', 'utf8');
+          content = Buffer.concat([content, Buffer.from('\n')]);
+        } catch {
+          truncateSync(path, newline + 1);
+          content = content.subarray(0, newline + 1);
+        }
+      }
+      const lines = content.toString('utf8').split('\n');
       for (let index = lines.length - 1; index >= 0; index -= 1) {
         const line = lines[index];
         if (!line) continue;

@@ -12,6 +12,7 @@ export interface MatState {
   selectedWorkspaceId: string | undefined;
   ephemeralWorkflowEdits: Record<string, WorkflowDef>;
   activeRunId: string | undefined;
+  runsLoading: boolean;
   runs: Record<string, RunSnapshot>;
   events: Record<string, AgentEvent[]>;
   filters: MatFilters;
@@ -24,6 +25,7 @@ export interface MatActions {
   setSelectedWorkspaceId(id?: string): void;
   setEphemeralWorkflowEdit(id: string, value?: WorkflowDef): void;
   setActiveRunId(id?: string): void;
+  setRunsLoading(value: boolean): void;
   upsertRun(run: RunSnapshot): void;
   setEvents(runId: string, events: AgentEvent[]): void;
   setNodeFilter(ids: string[]): void;
@@ -39,18 +41,19 @@ const allRoles: EventRole[] = ['user', 'agent', 'tool', 'thinking', 'system', 'd
 
 export function createMatStore(client: ApiClient = apiClient): StoreApi<MatStore> {
   return createStore<MatStore>()((set, get) => ({
-    workspaces: [], workflows: [], providers: [], selectedWorkspaceId: undefined, ephemeralWorkflowEdits: {}, activeRunId: undefined, runs: {}, events: {},
+    workspaces: [], workflows: [], providers: [], selectedWorkspaceId: undefined, ephemeralWorkflowEdits: {}, activeRunId: undefined, runsLoading: true, runs: {}, events: {},
     filters: { nodeRunIds: [], roles: allRoles, follow: true }, ui: { focusedNodeRunId: undefined },
     setWorkspaces: (workspaces) => set({ workspaces }),
     setWorkflows: (workflows) => set({ workflows }),
     setProviders: (providers) => set({ providers }),
-    setSelectedWorkspaceId: (selectedWorkspaceId) => set({ selectedWorkspaceId }),
+    setSelectedWorkspaceId: (selectedWorkspaceId) => set({ selectedWorkspaceId, runsLoading: selectedWorkspaceId !== undefined }),
     setEphemeralWorkflowEdit: (id, value) => set((state) => {
       const edits = { ...state.ephemeralWorkflowEdits };
       if (value) edits[id] = value; else delete edits[id];
       return { ephemeralWorkflowEdits: edits };
     }),
     setActiveRunId: (activeRunId) => set({ activeRunId }),
+    setRunsLoading: (runsLoading) => set({ runsLoading }),
     upsertRun: (run) => set((state) => ({ runs: { ...state.runs, [run.runId]: run } })),
     setEvents: (runId, value) => set((state) => ({ events: { ...state.events, [runId]: uniqueSorted(value).slice(-EVENT_RING_LIMIT) } })),
     setNodeFilter: (nodeRunIds) => set((state) => ({ filters: { ...state.filters, nodeRunIds } })),
@@ -75,7 +78,7 @@ export function createMatStore(client: ApiClient = apiClient): StoreApi<MatStore
       const limit = Math.min(1000, oldest === undefined ? 1000 : oldest - 1);
       const afterSeq = oldest === undefined ? 0 : Math.max(0, oldest - limit - 1);
       const loaded = await client.getEvents(runId, afterSeq, limit);
-      set((state) => ({ events: { ...state.events, [runId]: uniqueSorted([...loaded.filter((event) => oldest === undefined || event.seq < oldest), ...(state.events[runId] ?? [])]).slice(-EVENT_RING_LIMIT) } }));
+      set((state) => ({ events: { ...state.events, [runId]: uniqueSorted([...loaded.filter((event) => oldest === undefined || event.seq < oldest), ...(state.events[runId] ?? [])]).slice(0, EVENT_RING_LIMIT) } }));
     },
   }));
 }

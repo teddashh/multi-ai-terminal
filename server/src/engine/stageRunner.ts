@@ -6,7 +6,7 @@ import { getWorkspace } from '../store/workspaces.js';
 import { evaluateGate } from '../orchestrator/gate.js';
 import { renderTemplate } from '../orchestrator/prompts.js';
 import { assembleArtifacts, buildDigest } from './digest.js';
-import { emitRetryBoundary, killActiveNode, registerNodeContext, runNode } from './nodeRunner.js';
+import { emitRetryBoundary, killActiveNode, registerNodeContext, resetNodeForRetry, runNode } from './nodeRunner.js';
 import { collectPatch, createWorktree, isGitRepository, isWorkspaceDirty, runDirectory } from './worktree.js';
 
 interface StageControl {
@@ -26,9 +26,9 @@ export function queueStageRetryAddendum(runId: string, stageId: string, promptAd
 
 export function requestActiveStageRetry(runId: string, stageId: string, promptAddendum?: string): boolean {
   const control = controls.get(runId);
-  if (!control || control.stageId !== stageId || !control.gating) return false;
+  if (!control || control.stageId !== stageId || !control.gating || control.pendingRetry) return false;
   control.pendingRetry = promptAddendum === undefined ? {} : { promptAddendum };
-  killActiveNode(runId, 'orchestrator', 'gate-timeout');
+  killActiveNode(runId, 'orchestrator', 'user-retry');
   return true;
 }
 
@@ -96,6 +96,7 @@ async function executeNodes(run: RunSnapshot, stage: Stage, nodes: NodeRun[], wo
     node.cwd = workspace.path;
     registerNodeContext(node, {
       runId: run.runId,
+      getRunStatus: () => run.status,
       persist: async () => persistRun(run),
       prepare: async () => {
         if (stage.isolation !== 'worktree' || !actuallyGit) return;
@@ -118,6 +119,7 @@ async function executeNodes(run: RunSnapshot, stage: Stage, nodes: NodeRun[], wo
     while (cursor < nodes.length && run.status !== 'aborted') {
       const node = nodes[cursor++];
       if (!node) return;
+      if (isAborted(run) || node.status !== 'queued') continue;
       const retryAddendum = addenda.get(node.nodeRunId) ?? '';
       if (node.attempt > 1) emitRetryBoundary(node);
       await runNode(node, stage, promptFor(run, stage, node, workspace, retryAddendum));
@@ -126,23 +128,12 @@ async function executeNodes(run: RunSnapshot, stage: Stage, nodes: NodeRun[], wo
   await Promise.all(Array.from({ length: Math.min(run.workflow.maxParallel, nodes.length) }, () => worker()));
 }
 
-function resetForRetry(node: NodeRun): void {
-  node.attempt += 1;
-  node.status = 'queued';
-  delete node.pid;
-  delete node.startedAt;
-  delete node.endedAt;
-  delete node.resultText;
-  delete node.patchFile;
-  delete node.baseCommit;
-  delete node.exitCode;
-}
-
 function appendDecision(run: RunSnapshot, decision: GateDecision): void {
   run.gateDecisions.push(decision);
   appendEvent(run.runId, {
     runId: run.runId,
-    stageId: decision.stageId,
+    // SPEC v1.1 §3.1 and §6 require orchestrator-identity events to use stageId:null.
+    stageId: null,
     nodeRunId: 'orchestrator',
     attempt: decision.gateAttempt,
     role: 'decision',
@@ -154,6 +145,7 @@ function appendDecision(run: RunSnapshot, decision: GateDecision): void {
 
 export async function runStage(run: RunSnapshot, stage: Stage): Promise<void> {
   const workspace = await getWorkspace(run.workspaceId);
+  if (isAborted(run)) return;
   const nodes = stageNodes(run, stage);
   const control: StageControl = { stageId: stage.id, gating: false };
   controls.set(run.runId, control);
@@ -177,7 +169,22 @@ export async function runStage(run: RunSnapshot, stage: Stage): Promise<void> {
         await persistRun(run);
         return;
       }
-      if (!stage.gate || !run.workflow.orchestrator.enabled) {
+      if (!stage.gate) {
+        run.status = 'running';
+        await persistRun(run);
+        return;
+      }
+
+      if (!run.workflow.orchestrator.enabled) {
+        const gateAttempt = run.gateDecisions.filter((candidate) => candidate.stageId === stage.id).length + 1;
+        appendDecision(run, {
+          stageId: stage.id,
+          gateAttempt,
+          action: 'advance',
+          rationale: 'Gate auto-advanced: orchestrator disabled',
+          degraded: false,
+          ts: Date.now(),
+        });
         run.status = 'running';
         await persistRun(run);
         return;
@@ -187,7 +194,6 @@ export async function runStage(run: RunSnapshot, stage: Stage): Promise<void> {
       control.gating = true;
       await persistRun(run);
       let decision = await evaluateGate(run, stage, buildDigest(nodes));
-      control.gating = false;
       if (isAborted(run)) return;
       const maxEvaluations = 1 + run.workflow.maxRetriesPerStage;
       const manual = control.pendingRetry;
@@ -216,16 +222,16 @@ export async function runStage(run: RunSnapshot, stage: Stage): Promise<void> {
         systemEvent(run, stage.id, `Gate advanced in degraded mode: ${decision.rationale}`, { detail: 'gate-degraded' });
       }
       appendDecision(run, decision);
-      await persistRun(run);
-
       if (decision.action === 'abort') {
         run.status = 'aborted';
         run.endedAt = Date.now();
+        control.gating = false;
         await persistRun(run);
         return;
       }
       if (decision.action === 'advance') {
         run.status = 'running';
+        control.gating = false;
         await persistRun(run);
         return;
       }
@@ -233,8 +239,9 @@ export async function runStage(run: RunSnapshot, stage: Stage): Promise<void> {
       const ids = new Set(decision.retryNodeRunIds ?? []);
       selected = nodes.filter((node) => ids.has(node.nodeRunId));
       addenda = new Map(selected.map((node) => [node.nodeRunId, decision.promptAddendum ?? '']));
-      for (const node of selected) resetForRetry(node);
+      for (const node of selected) resetNodeForRetry(node);
       run.status = 'running';
+      control.gating = false;
       await persistRun(run);
     }
   } finally {

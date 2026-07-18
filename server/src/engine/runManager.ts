@@ -13,18 +13,39 @@ import {
   type RunSnapshot,
   type WorkflowDef,
 } from '@mat/shared';
-import { appendEvent } from '../store/eventLog.js';
+import { appendEvent, readEventsAfter } from '../store/eventLog.js';
 import { getRun, listRuns, saveRun } from '../store/runs.js';
 import { listWorkflows } from '../store/workflows.js';
 import { getWorkspace } from '../store/workspaces.js';
-import { killActiveNode, killAllActiveNodes } from './nodeRunner.js';
+import { terminateProcessGroup } from '../spawn.js';
+import { EngineConflictError, EngineNotFoundError } from './errors.js';
+import { killActiveNode, killAllActiveNodes, markNodeKilled, resetNodeForRetry } from './nodeRunner.js';
 import { persistRun, queueStageRetryAddendum, requestActiveStageRetry, runStage } from './stageRunner.js';
 import { isGitRepository, pruneWorktrees, runDirectory } from './worktree.js';
 
 const execFileAsync = promisify(execFile);
 const activeRuns = new Map<string, RunSnapshot>();
 const executions = new Map<string, Promise<void>>();
+const runMutationTails = new Map<string, Promise<void>>();
+const workspaceApplyTails = new Map<string, Promise<void>>();
 const TERMINAL_RUN_STATUSES = new Set(['done', 'failed', 'aborted']);
+
+async function withMutex<T>(tails: Map<string, Promise<void>>, key: string, operation: () => Promise<T>): Promise<T> {
+  const prior = tails.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const tail = prior.catch(() => undefined).then(() => gate);
+  tails.set(key, tail);
+  await prior.catch(() => undefined);
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (tails.get(key) === tail) tails.delete(key);
+  }
+}
+
+const withRunMutation = <T>(runId: string, operation: () => Promise<T>): Promise<T> => withMutex(runMutationTails, runId, operation);
 
 function systemEvent(run: RunSnapshot, kind: 'status' | 'error', text: string, data?: Record<string, unknown>): void {
   appendEvent(run.runId, {
@@ -124,14 +145,13 @@ async function executeRun(run: RunSnapshot, startIndex = 0): Promise<void> {
     systemEvent(run, 'error', `Run failed: ${detail}`);
     await persistRun(run);
   } finally {
-    activeRuns.delete(run.runId);
+    if (activeRuns.get(run.runId) === run) activeRuns.delete(run.runId);
   }
 }
 
 function startExecution(run: RunSnapshot, startIndex = 0): void {
-  const previous = executions.get(run.runId);
-  const execution = (previous ? previous.catch(() => undefined) : Promise.resolve())
-    .then(() => executeRun(run, startIndex))
+  if (executions.has(run.runId)) throw new EngineConflictError(`Run ${run.runId} already has an active or scheduled execution`);
+  const execution = executeRun(run, startIndex)
     .finally(() => {
       if (executions.get(run.runId) === execution) executions.delete(run.runId);
     });
@@ -152,85 +172,90 @@ export async function createRun(req: RunCreateRequest): Promise<RunSnapshot> {
     gateDecisions: [],
     createdAt: Date.now(),
   };
-  await saveRun(run);
-  queueMicrotask(() => startExecution(run));
-  return structuredClone(run);
+  return withRunMutation(run.runId, async () => {
+    await saveRun(run);
+    activeRuns.set(run.runId, run);
+    startExecution(run);
+    return structuredClone(run);
+  });
 }
 
 export async function abortRun(runId: string): Promise<void> {
-  const run = activeRuns.get(runId) ?? await getRun(runId);
-  if (TERMINAL_RUN_STATUSES.has(run.status)) return;
-  run.status = 'aborted';
-  run.endedAt = Date.now();
-  for (const node of run.nodes) {
-    if (node.status === 'queued') {
-      node.status = 'killed';
-      node.endedAt = Date.now();
+  await withRunMutation(runId, async () => {
+    const run = activeRuns.get(runId) ?? await getRun(runId);
+    if (TERMINAL_RUN_STATUSES.has(run.status)) return;
+    run.status = 'aborted';
+    run.endedAt = Date.now();
+    for (const node of run.nodes) {
+      if (node.status === 'queued') markNodeKilled(node, runId, 'abort');
     }
-  }
-  killAllActiveNodes(runId, 'abort');
-  systemEvent(run, 'status', 'Run aborted by user.', { status: 'aborted' });
-  await persistRun(run);
-  const execution = executions.get(runId);
-  if (execution) await execution.catch(() => undefined);
+    killAllActiveNodes(runId, 'abort');
+    systemEvent(run, 'status', 'Run aborted by user.', { status: 'aborted' });
+    await persistRun(run);
+    const execution = executions.get(runId);
+    if (execution) await execution.catch(() => undefined);
+  });
 }
 
 export async function killNode(runId: string, nodeRunId: string): Promise<void> {
   const run = activeRuns.get(runId) ?? await getRun(runId);
   const node = run.nodes.find((candidate) => candidate.nodeRunId === nodeRunId);
-  if (!node) throw new Error(`Node not found: ${nodeRunId}`);
-  if (TERMINAL_NODE_STATUSES.includes(node.status as (typeof TERMINAL_NODE_STATUSES)[number])) return;
-  if (!killActiveNode(runId, nodeRunId, 'user')) throw new Error(`Node is not currently running: ${nodeRunId}`);
-}
-
-function clearAttempt(node: NodeRun): void {
-  node.attempt += 1;
-  node.status = 'queued';
-  delete node.pid;
-  delete node.startedAt;
-  delete node.endedAt;
-  delete node.resultText;
-  delete node.patchFile;
-  delete node.baseCommit;
-  delete node.exitCode;
+  if (!node) throw new EngineNotFoundError(`Node not found: ${nodeRunId}`);
+  if (TERMINAL_NODE_STATUSES.includes(node.status as (typeof TERMINAL_NODE_STATUSES)[number])) {
+    throw new EngineConflictError(`Node has already finished: ${nodeRunId}`);
+  }
+  if (node.status === 'queued') {
+    markNodeKilled(node, runId, 'user');
+    await persistRun(run);
+    return;
+  }
+  if (!killActiveNode(runId, nodeRunId, 'user')) throw new EngineConflictError(`Node is no longer running: ${nodeRunId}`);
 }
 
 export async function retryStage(runId: string, stageId: string, req: RetryStageRequest): Promise<RunSnapshot> {
-  const run = activeRuns.get(runId) ?? await getRun(runId);
-  const stageIndex = run.workflow.stages.findIndex((stage) => stage.id === stageId);
-  if (stageIndex < 0) throw new Error(`Stage not found: ${stageId}`);
-  const stage = run.workflow.stages[stageIndex];
-  if (!stage) throw new Error(`Stage not found: ${stageId}`);
-  const decisionCount = run.gateDecisions.filter((decision) => decision.stageId === stageId).length;
-  const maxEvaluations = 1 + run.workflow.maxRetriesPerStage;
+  if (runMutationTails.has(runId)) throw new EngineConflictError(`Run ${runId} already has a mutation in progress`);
+  return withRunMutation(runId, async () => {
+    let run = activeRuns.get(runId);
+    if (!run) {
+      run = await getRun(runId);
+      activeRuns.set(runId, run);
+    }
+    const stageIndex = run.workflow.stages.findIndex((stage) => stage.id === stageId);
+    if (stageIndex < 0) throw new EngineNotFoundError(`Stage not found: ${stageId}`);
+    const stage = run.workflow.stages[stageIndex];
+    if (!stage) throw new EngineNotFoundError(`Stage not found: ${stageId}`);
+    const decisionCount = run.gateDecisions.filter((decision) => decision.stageId === stageId).length;
+    const maxEvaluations = 1 + run.workflow.maxRetriesPerStage;
 
-  if (run.status === 'gating' && run.currentStageId === stageId) {
-    if (decisionCount >= run.workflow.maxRetriesPerStage) throw new Error('Stage gate retry budget is exhausted');
-    if (!requestActiveStageRetry(runId, stageId, req.promptAddendum)) throw new Error('Stage is no longer accepting a retry');
+    if (run.status === 'gating' && run.currentStageId === stageId) {
+      if (decisionCount >= run.workflow.maxRetriesPerStage) throw new EngineConflictError('Stage gate retry budget is exhausted');
+      if (!requestActiveStageRetry(runId, stageId, req.promptAddendum)) throw new EngineConflictError('Stage is no longer accepting a retry');
+      return structuredClone(run);
+    }
+
+    if (!TERMINAL_RUN_STATUSES.has(run.status) || run.currentStageId !== stageId) {
+      throw new EngineConflictError('A stage can be retried only while it is gating, or when it was the last stage executed in a terminal run');
+    }
+    if (executions.has(runId)) throw new EngineConflictError(`Run ${runId} already has an active or scheduled execution`);
+    const nodes = run.nodes.filter((node) => node.stageId === stageId);
+    if (stage.gate && run.workflow.orchestrator.enabled) {
+      if (decisionCount >= maxEvaluations) throw new EngineConflictError('Stage gate retry budget is exhausted');
+    } else {
+      const priorManualRetries = Math.max(0, ...nodes.map((node) => node.attempt - 1));
+      if (priorManualRetries >= run.workflow.maxRetriesPerStage) throw new EngineConflictError('Stage retry budget is exhausted');
+    }
+    for (const node of nodes) resetNodeForRetry(node);
+    const laterStageIds = new Set(run.workflow.stages.slice(stageIndex + 1).map((stage) => stage.id));
+    for (const node of run.nodes) {
+      if (node.stageId !== null && laterStageIds.has(node.stageId) && node.status === 'killed') node.status = 'queued';
+    }
+    queueStageRetryAddendum(runId, stageId, req.promptAddendum);
+    run.status = 'running';
+    delete run.endedAt;
+    await saveRun(run);
+    startExecution(run, stageIndex);
     return structuredClone(run);
-  }
-
-  if (!TERMINAL_RUN_STATUSES.has(run.status) || run.currentStageId !== stageId) {
-    throw new Error('A stage can be retried only while it is gating, or when it was the last stage executed in a terminal run');
-  }
-  const nodes = run.nodes.filter((node) => node.stageId === stageId);
-  if (stage.gate && run.workflow.orchestrator.enabled) {
-    if (decisionCount >= maxEvaluations) throw new Error('Stage gate retry budget is exhausted');
-  } else {
-    const priorManualRetries = Math.max(0, ...nodes.map((node) => node.attempt - 1));
-    if (priorManualRetries >= run.workflow.maxRetriesPerStage) throw new Error('Stage retry budget is exhausted');
-  }
-  for (const node of nodes) clearAttempt(node);
-  const laterStageIds = new Set(run.workflow.stages.slice(stageIndex + 1).map((stage) => stage.id));
-  for (const node of run.nodes) {
-    if (node.stageId !== null && laterStageIds.has(node.stageId) && node.status === 'killed') node.status = 'queued';
-  }
-  queueStageRetryAddendum(runId, stageId, req.promptAddendum);
-  run.status = 'running';
-  delete run.endedAt;
-  await saveRun(run);
-  startExecution(run, stageIndex);
-  return structuredClone(run);
+  });
 }
 
 function conflictsFromOutput(output: string): string[] {
@@ -249,32 +274,44 @@ function conflictsFromOutput(output: string): string[] {
 export async function applyPatch(runId: string, nodeRunId: string): Promise<ApplyPatchResponse> {
   const run = activeRuns.get(runId) ?? await getRun(runId);
   const node = run.nodes.find((candidate) => candidate.nodeRunId === nodeRunId);
-  if (!node) throw new Error(`Node not found: ${nodeRunId}`);
+  if (!node) throw new EngineNotFoundError(`Node not found: ${nodeRunId}`);
   const patchFile = node.patchFile ?? join(runDirectory(runId), 'artifacts', `${node.nodeRunId}.a${node.attempt}.patch`);
   if (!existsSync(patchFile)) return { ok: false, message: 'No captured patch is available for this node.' };
   const workspace = await getWorkspace(run.workspaceId);
   if (!workspace.isGit || !await isGitRepository(workspace.path)) return { ok: false, message: 'Patches can only be applied to a Git workspace.' };
-  try {
-    await execFileAsync('git', ['-C', workspace.path, 'apply', '--check', '--3way', '--binary', patchFile], { encoding: 'utf8' });
-  } catch (error) {
-    const value = error as { stdout?: string; stderr?: string; message?: string };
-    const output = `${value.stdout ?? ''}\n${value.stderr ?? ''}`.trim();
-    const conflicts = conflictsFromOutput(output);
-    return {
-      ok: false,
-      ...(conflicts.length ? { conflicts } : {}),
-      message: output || value.message || 'Patch validation failed.',
-    };
-  }
-  try {
-    await execFileAsync('git', ['-C', workspace.path, 'apply', '--3way', '--binary', patchFile], { encoding: 'utf8' });
-    return { ok: true, message: 'Patch applied.' };
-  } catch (error) {
-    const value = error as { stdout?: string; stderr?: string; message?: string };
-    const output = `${value.stdout ?? ''}\n${value.stderr ?? ''}`.trim();
-    const conflicts = conflictsFromOutput(output);
-    return { ok: false, ...(conflicts.length ? { conflicts } : {}), message: output || value.message || 'Patch application failed.' };
-  }
+  return withMutex(workspaceApplyTails, workspace.id, async () => {
+    try {
+      await execFileAsync('git', ['-C', workspace.path, 'apply', '--check', '--3way', '--binary', patchFile], { encoding: 'utf8' });
+    } catch (error) {
+      const value = error as { stdout?: string; stderr?: string; message?: string };
+      let output = `${value.stdout ?? ''}\n${value.stderr ?? ''}`.trim();
+      const unsupportedDetail = `${output}\n${value.message ?? ''}`;
+      const unsupportedCombination = unsupportedDetail.includes('--check') && unsupportedDetail.includes('--3way')
+        && /does not work|cannot be used together|incompatible/i.test(unsupportedDetail);
+      if (unsupportedCombination) {
+        try {
+          await execFileAsync('git', ['-C', workspace.path, 'apply', '--check', '--binary', patchFile], { encoding: 'utf8' });
+        } catch (fallbackError) {
+          const fallback = fallbackError as { stdout?: string; stderr?: string; message?: string };
+          output = `${fallback.stdout ?? ''}\n${fallback.stderr ?? ''}`.trim();
+          const conflicts = conflictsFromOutput(output);
+          return { ok: false, ...(conflicts.length ? { conflicts } : {}), message: output || fallback.message || 'Patch validation failed.' };
+        }
+      } else {
+        const conflicts = conflictsFromOutput(output);
+        return { ok: false, ...(conflicts.length ? { conflicts } : {}), message: output || value.message || 'Patch validation failed.' };
+      }
+    }
+    try {
+      await execFileAsync('git', ['-C', workspace.path, 'apply', '--3way', '--binary', patchFile], { encoding: 'utf8' });
+      return { ok: true, message: 'Patch applied.' };
+    } catch (error) {
+      const value = error as { stdout?: string; stderr?: string; message?: string };
+      const output = `${value.stdout ?? ''}\n${value.stderr ?? ''}`.trim();
+      const conflicts = conflictsFromOutput(output);
+      return { ok: false, ...(conflicts.length ? { conflicts } : {}), message: output || value.message || 'Patch application failed.' };
+    }
+  });
 }
 
 export async function sweepOnBoot(): Promise<void> {
@@ -282,9 +319,7 @@ export async function sweepOnBoot(): Promise<void> {
   for (const run of runs) {
     if (TERMINAL_RUN_STATUSES.has(run.status)) continue;
     for (const node of run.nodes) {
-      if (node.pid) {
-        try { process.kill(-node.pid, 'SIGTERM'); } catch { /* Stale or already dead. */ }
-      }
+      if (node.pid) terminateProcessGroup(node.pid);
       if (node.status === 'running' || node.status === 'stalled') {
         node.status = 'killed';
         node.endedAt = Date.now();
@@ -294,7 +329,11 @@ export async function sweepOnBoot(): Promise<void> {
     try { await pruneWorktrees(run.runId); } catch { /* Recovery continues even when git metadata is damaged. */ }
     run.status = 'aborted';
     run.endedAt = Date.now();
-    systemEvent(run, 'status', 'Run aborted during server restart recovery.', { status: 'aborted', detail: 'server-restart' });
+    const events = readEventsAfter(run.runId, 0, Number.MAX_SAFE_INTEGER);
+    const tail = events.at(-1);
+    if (!(tail?.kind === 'status' && tail.data?.detail === 'server-restart' && tail.runId === run.runId)) {
+      systemEvent(run, 'status', 'Run aborted during server restart recovery.', { status: 'aborted', detail: 'server-restart' });
+    }
     await saveRun(run);
   }
 }

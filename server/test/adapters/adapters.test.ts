@@ -249,6 +249,20 @@ describe('coalescing and agy plain output', () => {
     ]);
   });
 
+  it('starts a fresh continuation block for thinking after a message block', () => {
+    const events: AdapterContentEvent[] = [];
+    const coalescer = new ContentCoalescer((event) => events.push(event));
+    coalescer.push('thinking', 'thinking', 'first thought');
+    coalescer.push('agent', 'message', 'answer');
+    coalescer.push('thinking', 'thinking', 'second thought');
+    coalescer.end();
+    expect(events).toEqual([
+      { role: 'thinking', kind: 'thinking', text: 'first thought' },
+      { role: 'agent', kind: 'message', text: 'answer' },
+      { role: 'thinking', kind: 'thinking', text: 'second thought' },
+    ]);
+  });
+
   it('streams and coalesces agy stdout while preserving full resultText', async () => {
     process.env.MAT_AGY_SIZED = '1';
     delete process.env.MAT_FIXTURE;

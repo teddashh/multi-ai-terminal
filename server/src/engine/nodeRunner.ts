@@ -1,12 +1,12 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { AdapterContentEvent, NodeRun, Stage, Usage } from '@mat/shared';
+import type { AdapterContentEvent, NodeRun, RunStatus, Stage, Usage } from '@mat/shared';
 import { getAdapter } from '../adapters/registry.js';
 import type { NodeOutcome, ResolvedNodeSpec, SpawnedNode } from '../adapters/base.js';
 import type { Adapter } from '../adapters/base.js';
 import { appendEvent } from '../store/eventLog.js';
 import { runDirectory } from './worktree.js';
-import { recordToolUse } from './digest.js';
+import { recordToolUse, resetToolCount } from './digest.js';
 
 export interface NodeExecutionContext {
   runId: string;
@@ -14,6 +14,7 @@ export interface NodeExecutionContext {
   resumeSessionRef?: string;
   adapter?: Adapter;
   persist(): Promise<void>;
+  getRunStatus?(): RunStatus;
   prepare?(): Promise<void>;
   finalize?(): Promise<void>;
 }
@@ -22,11 +23,13 @@ interface LiveNode {
   spawned: SpawnedNode;
   node: NodeRun;
   context: NodeExecutionContext;
-  killedReason?: 'user' | 'abort' | 'timeout' | 'gate-timeout';
+  killedReason?: 'user' | 'user-retry' | 'abort' | 'timeout' | 'gate-timeout';
   wasStalled?: boolean;
 }
 
 const contexts = new WeakMap<NodeRun, NodeExecutionContext>();
+const killedLifecycleAttempts = new WeakMap<NodeRun, Set<number>>();
+const reportedPersistFailures = new WeakSet<NodeExecutionContext>();
 const liveNodes = new Map<string, LiveNode>();
 const liveKey = (runId: string, nodeRunId: string): string => `${runId}\0${nodeRunId}`;
 
@@ -51,6 +54,63 @@ function lifecycle(node: NodeRun, context: NodeExecutionContext, kind: 'status' 
     text,
     ...(data ? { data } : {}),
   });
+}
+
+function emitKilledLifecycle(node: NodeRun, context: NodeExecutionContext, reason: NonNullable<LiveNode['killedReason']>): void {
+  const attempts = killedLifecycleAttempts.get(node) ?? new Set<number>();
+  if (attempts.has(node.attempt)) return;
+  attempts.add(node.attempt);
+  killedLifecycleAttempts.set(node, attempts);
+  lifecycle(node, context, 'status', 'killed', { status: 'killed', detail: reason, attempt: node.attempt });
+}
+
+function reportPersistFailure(node: NodeRun, context: NodeExecutionContext, error: unknown): void {
+  if (reportedPersistFailures.has(context)) return;
+  reportedPersistFailures.add(context);
+  const detail = error instanceof Error ? error.message : String(error);
+  try {
+    lifecycle(node, context, 'error', `Snapshot persistence failed: ${detail}`, { detail: 'persist-failed' });
+  } catch (appendError) {
+    const appendDetail = appendError instanceof Error ? appendError.message : String(appendError);
+    console.error(`[mat] snapshot persistence failed for ${context.runId}/${node.nodeRunId}: ${detail}; event append failed: ${appendDetail}`);
+  }
+}
+
+async function persistSafely(node: NodeRun, context: NodeExecutionContext): Promise<void> {
+  try {
+    await context.persist();
+  } catch (error) {
+    reportPersistFailure(node, context, error);
+  }
+}
+
+function persistInBackground(node: NodeRun, context: NodeExecutionContext): void {
+  persistSafely(node, context).catch((error: unknown) => {
+    // persistSafely is defensive, but keep the fire-and-forget boundary rejection-safe.
+    console.error(`[mat] unexpected persistence handler failure for ${context.runId}/${node.nodeRunId}: ${String(error)}`);
+  });
+}
+
+export function markNodeKilled(node: NodeRun, runId: string, reason: NonNullable<LiveNode['killedReason']>): void {
+  const context = contexts.get(node) ?? { runId, stageId: node.stageId, persist: async () => undefined };
+  node.status = 'killed';
+  node.endedAt ??= Date.now();
+  delete node.pid;
+  emitKilledLifecycle(node, context, reason);
+}
+
+export function resetNodeForRetry(node: NodeRun): void {
+  node.attempt += 1;
+  node.status = 'queued';
+  delete node.pid;
+  delete node.startedAt;
+  delete node.endedAt;
+  delete node.resultText;
+  delete node.patchFile;
+  delete node.baseCommit;
+  delete node.exitCode;
+  delete node.sessionRef;
+  resetToolCount(node);
 }
 
 export function emitRetryBoundary(node: NodeRun): void {
@@ -95,13 +155,26 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
   if (!context) throw new Error(`No execution context registered for ${node.nodeRunId}`);
   const identity = eventIdentity(node, context);
   const adapter = context.adapter ?? getAdapter(node.agent.provider);
+  const shouldSkipSpawn = (): boolean => node.status === 'killed' || context.getRunStatus?.() === 'aborted';
   const rawPath = join(runDirectory(context.runId), 'raw', `${node.nodeRunId}.a${node.attempt}.jsonl`);
   mkdirSync(dirname(rawPath), { recursive: true });
 
   appendEvent(context.runId, { ...identity, role: 'user', kind: 'message', text: promptText });
+  if (shouldSkipSpawn()) {
+    if (node.status !== 'killed') markNodeKilled(node, context.runId, 'abort');
+    else emitKilledLifecycle(node, context, 'user');
+    await persistSafely(node, context);
+    return;
+  }
   try {
     await context.prepare?.();
   } catch (error) {
+    if (shouldSkipSpawn()) {
+      if (node.status !== 'killed') markNodeKilled(node, context.runId, 'abort');
+      else emitKilledLifecycle(node, context, 'user');
+      await persistSafely(node, context);
+      return;
+    }
     const detail = error instanceof Error ? error.message : String(error);
     node.status = 'failed';
     node.startedAt ??= Date.now();
@@ -109,7 +182,16 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
     node.exitCode = null;
     node.resultText = detail;
     lifecycle(node, context, 'error', `Preparation failed: ${detail}`, { status: 'failed', exitCode: null });
-    await context.persist();
+    await persistSafely(node, context);
+    return;
+  }
+
+  // prepare() may take seconds. A queued kill or run abort during that await must
+  // win before an adapter process can be created.
+  if (shouldSkipSpawn()) {
+    if (node.status !== 'killed') markNodeKilled(node, context.runId, 'abort');
+    else emitKilledLifecycle(node, context, 'user');
+    await persistSafely(node, context);
     return;
   }
 
@@ -126,14 +208,14 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
       if (!live || node.status !== 'running') return;
       node.status = 'stalled';
       lifecycle(node, context, 'status', 'stalled', { status: 'stalled', attempt: node.attempt });
-      void context.persist();
+      persistInBackground(node, context);
     }, effectiveStallMs);
   };
   const activity = (): void => {
     if (node.status === 'stalled') {
       node.status = 'running';
       lifecycle(node, context, 'status', 'running', { status: 'running', detail: 'recovered', attempt: node.attempt });
-      void context.persist();
+      persistInBackground(node, context);
     }
     armStall();
   };
@@ -166,7 +248,7 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
     node.exitCode = null;
     node.resultText = detail;
     lifecycle(node, context, 'error', detail, { status: 'failed', exitCode: null });
-    await context.persist();
+    await persistSafely(node, context);
     return;
   }
 
@@ -181,12 +263,6 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
   else delete node.pid;
   lifecycle(node, context, 'status', 'spawned', { status: 'spawned', attempt: node.attempt });
   lifecycle(node, context, 'status', 'running', { status: 'running', attempt: node.attempt });
-  readyForContent = true;
-  for (const event of pendingContent) {
-    activity();
-    appendContent(node, context, event);
-  }
-  await context.persist();
   armStall();
   hardTimer = setTimeout(() => {
     const current = liveNodes.get(key);
@@ -194,6 +270,12 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
     current.killedReason = 'timeout';
     current.spawned.kill('SIGTERM');
   }, stage.timeoutSec * 1000);
+  readyForContent = true;
+  for (const event of pendingContent) {
+    activity();
+    appendContent(node, context, event);
+  }
+  await persistSafely(node, context);
 
   let outcome: NodeOutcome;
   try {
@@ -214,9 +296,9 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
   if (usage !== undefined) node.usage = usage;
   node.resultText = outcome.resultText ?? outcome.error ?? '';
 
-  if (killedReason === 'user' || killedReason === 'abort' || killedReason === 'gate-timeout') {
+  if (killedReason === 'user' || killedReason === 'user-retry' || killedReason === 'abort' || killedReason === 'gate-timeout') {
     node.status = 'killed';
-    lifecycle(node, context, 'status', 'killed', { status: 'killed', detail: killedReason, attempt: node.attempt });
+    emitKilledLifecycle(node, context, killedReason);
     if (liveState?.wasStalled) {
       lifecycle(node, context, 'error', 'Stalled node attempt was killed', { status: 'killed', detail: killedReason });
     }
@@ -239,7 +321,7 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
     const detail = error instanceof Error ? error.message : String(error);
     lifecycle(node, context, 'error', `Artifact capture failed: ${detail}`);
   }
-  await context.persist();
+  await persistSafely(node, context);
 }
 
 export function killActiveNode(runId: string, nodeRunId: string, reason: LiveNode['killedReason'] = 'user'): boolean {

@@ -6,20 +6,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, NodeRun, Stage } from '@mat/shared';
 import type { Adapter, NodeOutcome, SpawnedNode } from '../../src/adapters/base.js';
 import { EventLog, configureEventLog } from '../../src/store/eventLog.js';
-import { emitRetryBoundary, killActiveNode, registerNodeContext, runNode } from '../../src/engine/nodeRunner.js';
+import { emitRetryBoundary, killActiveNode, markNodeKilled, registerNodeContext, resetNodeForRetry, runNode } from '../../src/engine/nodeRunner.js';
 
 const dirs: string[] = [];
 const oldDataDir = process.env.MAT_DATA_DIR;
 const stage: Stage = { id: 's', name: 'Stage', slots: [], isolation: 'none', join: 'all', timeoutSec: 10, stallSec: 10, gate: false };
 const makeNode = (): NodeRun => ({ nodeRunId: 's.slot.0', stageId: 's', slotId: 'slot', instanceIndex: 0, agent: { provider: 'mock', permission: 'safe' }, label: 'Slot · mock', status: 'queued', attempt: 1, cwd: '/' });
 
-function setup(adapter: Adapter): { node: NodeRun; events: () => AgentEvent[]; persisted: { count: number } } {
+function setup(adapter: Adapter, persist?: () => Promise<void>): { node: NodeRun; events: () => AgentEvent[]; persisted: { count: number } } {
   const dir = mkdtempSync(join(tmpdir(), 'mat-node-')); dirs.push(dir);
   process.env.MAT_DATA_DIR = dir;
   const log = configureEventLog(dir);
   const node = makeNode();
   const persisted = { count: 0 };
-  registerNodeContext(node, { runId: 'run', adapter, persist: async () => { persisted.count += 1; } });
+  registerNodeContext(node, { runId: 'run', adapter, persist: persist ?? (async () => { persisted.count += 1; }) });
   return { node, events: () => log.afterSeq('run'), persisted };
 }
 
@@ -161,5 +161,75 @@ describe('node runner lifecycle', () => {
     expect(setupResult.events()).toContainEqual(expect.objectContaining({
       role: 'system', kind: 'error', text: 'provider failed', data: expect.objectContaining({ status: 'failed', exitCode: 7 }),
     }));
+  });
+
+  it('does not spawn after a queued node is killed while prepare is blocked', async () => {
+    let releasePrepare!: () => void;
+    let prepareStarted!: () => void;
+    const started = new Promise<void>((resolve) => { prepareStarted = resolve; });
+    const blocked = new Promise<void>((resolve) => { releasePrepare = resolve; });
+    const spawn = vi.fn(() => ({ pid: 12345, kill() {}, completion: Promise.resolve({ exitCode: 0, resultText: 'unexpected' }) }));
+    const result = setup(adapterFrom(spawn));
+    registerNodeContext(result.node, {
+      runId: 'run',
+      adapter: adapterFrom(spawn),
+      prepare: async () => { prepareStarted(); await blocked; },
+      persist: async () => undefined,
+    });
+    const running = runNode(result.node, stage, 'prompt');
+    await started;
+    markNodeKilled(result.node, 'run', 'user');
+    releasePrepare();
+    await running;
+    expect(spawn).not.toHaveBeenCalled();
+    expect(result.node.status).toBe('killed');
+    expect(result.events().filter((event) => event.data?.status === 'killed')).toHaveLength(1);
+  });
+
+  it('reports a rejected fire-and-forget persist once and continues the attempt', async () => {
+    vi.useFakeTimers();
+    let resolve!: (outcome: NodeOutcome) => void;
+    let calls = 0;
+    const result = setup(adapterFrom(() => ({
+      pid: 12345,
+      kill() {},
+      completion: new Promise<NodeOutcome>((done) => { resolve = done; }),
+    })), async () => {
+      calls += 1;
+      if (calls === 2) throw new Error('disk temporarily unavailable');
+    });
+    const running = runNode(result.node, { ...stage, stallSec: 0.01 }, 'prompt');
+    await vi.advanceTimersByTimeAsync(11);
+    expect(result.events().filter((event) => event.data?.detail === 'persist-failed')).toHaveLength(1);
+    resolve({ exitCode: 0, resultText: 'done' });
+    await running;
+    expect(result.node.status).toBe('done');
+  });
+
+  it('arms the hard timeout before the initial snapshot persist finishes', async () => {
+    vi.useFakeTimers();
+    let releasePersist!: () => void;
+    const persistBlocked = new Promise<void>((resolve) => { releasePersist = resolve; });
+    let killed = false;
+    let finish!: (outcome: NodeOutcome) => void;
+    const result = setup(adapterFrom(() => ({
+      pid: 12345,
+      completion: new Promise<NodeOutcome>((resolve) => { finish = resolve; }),
+      kill(signal = 'SIGTERM') { killed = true; finish({ exitCode: null, signal, error: 'timeout' }); },
+    })), async () => persistBlocked);
+    const running = runNode(result.node, { ...stage, timeoutSec: 0.01 }, 'prompt');
+    await vi.advanceTimersByTimeAsync(11);
+    expect(killed).toBe(true);
+    releasePersist();
+    await running;
+    expect(result.node.status).toBe('failed');
+  });
+
+  it('uses one retry reset helper for attempt state, sessions, and tool counts', () => {
+    const node = { ...makeNode(), status: 'done' as const, sessionRef: 'stale', resultText: 'old', pid: 123, startedAt: 1, endedAt: 2 };
+    resetNodeForRetry(node);
+    expect(node).toMatchObject({ attempt: 2, status: 'queued' });
+    expect(node.sessionRef).toBeUndefined();
+    expect(node.resultText).toBeUndefined();
   });
 });

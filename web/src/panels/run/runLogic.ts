@@ -52,7 +52,12 @@ export function canRetryStage(run: RunSnapshot, stageId: string): boolean {
   const inValidityWindow = (run.status === 'gating' && run.currentStageId === stageId)
     || (['done', 'failed', 'aborted'].includes(run.status) && lastExecutedStageId(run) === stageId);
   if (!inValidityWindow) return false;
-  const evaluations = run.gateDecisions.filter((decision) => decision.stageId === stageId).length;
-  return evaluations < 1 + run.workflow.maxRetriesPerStage;
+  const stage = run.workflow.stages.find((candidate) => candidate.id === stageId);
+  if (!stage) return false;
+  if (stage.gate && run.workflow.orchestrator.enabled) {
+    const evaluations = run.gateDecisions.filter((decision) => decision.stageId === stageId).length;
+    return evaluations < 1 + run.workflow.maxRetriesPerStage;
+  }
+  const retries = Math.max(0, ...run.nodes.filter((candidate) => candidate.stageId === stageId).map((candidate) => candidate.attempt - 1));
+  return retries < run.workflow.maxRetriesPerStage;
 }
-

@@ -82,6 +82,18 @@ describe('run routes', () => {
     expect(response.json().workflow).toEqual(override);
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ workflowId: 'planning', workflowOverride: override }));
     expect((await getRun('run-1')).workflow).toEqual(override);
+
+    for (const [label, mutate] of [
+      ['workflow', (value: ReturnType<typeof workflow>) => { value.id = '../escape'; }],
+      ['stage', (value: ReturnType<typeof workflow>) => { value.stages[0]!.id = '../../escape'; }],
+      ['slot', (value: ReturnType<typeof workflow>) => { value.stages[0]!.slots[0]!.id = 'slot/escape'; }],
+    ] as const) {
+      const traversal = workflow({ id: 'safe' });
+      mutate(traversal);
+      const rejected = await app.inject({ method: 'POST', url: '/api/runs', payload: { workspaceId: 'workspace-1', workflowId: 'planning', task: 'Build it', workflowOverride: traversal } });
+      expect(rejected.statusCode, `${label} traversal should fail validation`).toBe(400);
+      expect(rejected.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+    }
   });
 
   it('validates event cursors and forwards afterSeq paging', async () => {
@@ -141,6 +153,21 @@ describe('run routes', () => {
   it('returns 409 when deleting a non-terminal run', async () => {
     dependencies.runs.delete = async () => { throw Object.assign(new Error('abort it before deleting'), { code: 'CONFLICT' }); };
     const response = await app.inject({ method: 'DELETE', url: '/api/runs/run-1' });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ error: { code: 'CONFLICT' } });
+  });
+
+  it('maps kill-on-finished-node engine conflicts to 409', async () => {
+    dependencies.runs.killNode = async () => { throw Object.assign(new Error('Node has already finished'), { code: 'CONFLICT' }); };
+    const response = await app.inject({ method: 'POST', url: '/api/runs/run-1/nodes/stage-1.slot-1.0/kill' });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ error: { code: 'CONFLICT' } });
+  });
+
+  it('maps a retry rejected in the gate decision window to 409', async () => {
+    dependencies.runs.get = async () => runSnapshot({ status: 'gating', currentStageId: 'stage-1' });
+    dependencies.runs.retryStage = async () => { throw Object.assign(new Error('Stage is no longer accepting a retry'), { code: 'CONFLICT' }); };
+    const response = await app.inject({ method: 'POST', url: '/api/runs/run-1/stages/stage-1/retry', payload: {} });
     expect(response.statusCode).toBe(409);
     expect(response.json()).toMatchObject({ error: { code: 'CONFLICT' } });
   });

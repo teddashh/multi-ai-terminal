@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -38,6 +38,7 @@ describe('worktree lifecycle', () => {
     const patchPath = join(data, 'runs', 'run1', 'artifacts', 'node.patch');
     await collectPatch(first.cwd, first.baseCommit, patchPath);
     expect(readFileSync(patchPath, 'utf8')).toContain('untracked.txt');
+    expect((await readdir(join(data, 'runs', 'run1', 'artifacts'))).filter((name) => name.endsWith('.tmp'))).toEqual([]);
 
     const retrySafe = await createWorktree(repo, 'run1', 'stage.slot.0', 1);
     expect(retrySafe.cwd).toBe(first.cwd);

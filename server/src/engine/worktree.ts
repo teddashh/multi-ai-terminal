@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+import { nanoid } from 'nanoid';
 import { getDataDir } from '../store/dataDir.js';
 import type { RunSnapshot } from '@mat/shared';
 import { getRun } from '../store/runs.js';
@@ -50,8 +51,10 @@ export async function createWorktree(workspacePath: string, runId: string, nodeR
 export async function collectPatch(cwd: string, baseCommit: string, patchPath: string): Promise<void> {
   await git(cwd, ['add', '-A']);
   const patch = await gitRaw(cwd, ['diff', '--cached', '--binary', baseCommit]);
-  await mkdir(join(patchPath, '..'), { recursive: true });
-  await writeFile(patchPath, patch, 'utf8');
+  await mkdir(dirname(patchPath), { recursive: true });
+  const temporary = join(dirname(patchPath), `.${process.pid}.${nanoid()}.patch.tmp`);
+  await writeFile(temporary, patch, 'utf8');
+  await rename(temporary, patchPath);
 }
 
 export async function pruneRunWorktrees(workspacePath: string, runId: string): Promise<void> {

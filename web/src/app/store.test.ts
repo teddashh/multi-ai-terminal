@@ -31,4 +31,18 @@ describe('MAT store', () => {
     expect(getEvents).toHaveBeenCalledWith('r1', 0, 9);
     expect(store.getState().events.r1?.map((item) => item.seq)).toEqual([8, 9, 10]);
   });
+
+  it('keeps the oldest side for history loads while live appends keep the newest side', async () => {
+    const older = Array.from({ length: 1000 }, (_, index) => event(index + 1));
+    const getEvents = vi.fn().mockResolvedValue(older);
+    const store = createMatStore({ getEvents } as any);
+    store.setState({ events: { r1: Array.from({ length: EVENT_RING_LIMIT }, (_, index) => event(index + 1001)) } });
+    await store.getState().loadOlderEvents('r1');
+    expect(store.getState().events.r1?.[0]?.seq).toBe(1);
+    expect(store.getState().events.r1?.at(-1)?.seq).toBe(EVENT_RING_LIMIT);
+
+    store.getState().applyWsMsg({ type: 'event', event: event(EVENT_RING_LIMIT + 1) });
+    expect(store.getState().events.r1?.[0]?.seq).toBe(2);
+    expect(store.getState().events.r1?.at(-1)?.seq).toBe(EVENT_RING_LIMIT + 1);
+  });
 });

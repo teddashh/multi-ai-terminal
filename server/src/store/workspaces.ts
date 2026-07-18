@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join } from 'node:path';
+import { mkdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { WorkspaceSchema, type Workspace } from '@mat/shared';
 import { nanoid } from 'nanoid';
@@ -99,14 +99,16 @@ export async function deleteWorkspace(id: string): Promise<void> {
 
 async function validateWorkspacePath(path: string): Promise<string> {
   if (!isAbsolute(path)) throw new WorkspaceStoreError('INVALID_PATH', 'Workspace path must be absolute');
+  const resolved = resolve(path);
   try {
-    const info = await stat(path);
+    const canonical = await realpath(resolved);
+    const info = await stat(canonical);
     if (!info.isDirectory()) throw new WorkspaceStoreError('INVALID_PATH', `Workspace path is not a directory: ${path}`);
+    return canonical;
   } catch (error) {
     if (error instanceof WorkspaceStoreError) throw error;
     throw new WorkspaceStoreError('INVALID_PATH', `Workspace path does not exist: ${path}`);
   }
-  return path;
 }
 
 async function computeIsGit(path: string): Promise<boolean> {

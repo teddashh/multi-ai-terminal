@@ -45,6 +45,7 @@ export async function evaluateGate(run: RunSnapshot, stage: Stage, digest: strin
     registerNodeContext(node, {
       runId: run.runId,
       stageId: null,
+      getRunStatus: () => run.status,
       ...(canResume && node.sessionRef ? { resumeSessionRef: node.sessionRef } : {}),
       persist: async () => saveRun(run),
     });

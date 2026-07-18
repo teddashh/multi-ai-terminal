@@ -41,10 +41,11 @@ describe('run panel logic', () => {
   });
 
   it('enables retry only in the API validity window and below the gate budget', () => {
-    expect(canRetryStage(run(), 's1')).toBe(true);
+    const gated = run({ workflow: { ...run().workflow, orchestrator: { ...run().workflow.orchestrator, enabled: true } } });
+    expect(canRetryStage(gated, 's1')).toBe(true);
     expect(canRetryStage(run({ status: 'running' }), 's1')).toBe(false);
-    expect(canRetryStage(run({ status: 'done', gateDecisions: [decision] }), 's1')).toBe(true);
-    expect(canRetryStage(run({ gateDecisions: [decision, { ...decision, gateAttempt: 2 }, { ...decision, gateAttempt: 3 }] }), 's1')).toBe(false);
+    expect(canRetryStage({ ...gated, status: 'done', gateDecisions: [decision] }, 's1')).toBe(true);
+    expect(canRetryStage({ ...gated, gateDecisions: [decision, { ...decision, gateAttempt: 2 }, { ...decision, gateAttempt: 3 }] }, 's1')).toBe(false);
+    expect(canRetryStage(run({ nodes: [{ ...node, attempt: 3 }] }), 's1')).toBe(false);
   });
 });
-

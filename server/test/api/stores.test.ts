@@ -47,6 +47,8 @@ describe.sequential('workspace store', () => {
 
     await expect(createWorkspace({ name: 'bad', path: 'relative' })).rejects.toMatchObject({ code: 'INVALID_PATH' });
     const created = await createWorkspace({ name: 'Repo', path: workspaceDir });
+    const normalized = await createWorkspace({ name: 'Canonical', path: join(workspaceDir, '..', workspaceDir.split('/').at(-1)!) });
+    expect(normalized.path).toBe(workspaceDir);
     expect(created.isGit).toBe(false);
     expect(readFileSync(join(dataDir, 'workspaces.json'), 'utf8')).toContain(created.id);
 
@@ -54,6 +56,7 @@ describe.sequential('workspace store', () => {
     expect((await getWorkspace(created.id)).isGit).toBe(true);
     expect((await updateWorkspace(created.id, { name: 'Renamed' })).name).toBe('Renamed');
     await deleteWorkspace(created.id);
+    await deleteWorkspace(normalized.id);
     expect(await listWorkspaces()).toEqual([]);
   });
 });

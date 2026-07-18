@@ -40,6 +40,7 @@ export interface WorkflowDef {
 }
 
 export const ProviderIdSchema = z.enum(['claude', 'codex', 'grok', 'agy', 'mock']);
+export const WorkflowIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/, 'must be 1-64 letters, numbers, underscores, or hyphens');
 export const AgentBindingSchema = z.object({
   provider: ProviderIdSchema,
   model: z.string().min(1).optional(),
@@ -49,14 +50,14 @@ export const AgentBindingSchema = z.object({
   maxTurns: z.number().int().positive().optional(),
 }).strict();
 export const SlotSchema = z.object({
-  id: z.string().min(1),
+  id: WorkflowIdSchema,
   label: z.string().min(1),
   agent: AgentBindingSchema,
   count: z.number().int().min(1).max(8),
   promptTemplate: z.string(),
 }).strict();
 export const StageSchema = z.object({
-  id: z.string().min(1),
+  id: WorkflowIdSchema,
   name: z.string().min(1),
   slots: z.array(SlotSchema).min(1),
   isolation: z.enum(['none', 'worktree']).default('none'),
@@ -75,7 +76,7 @@ export const OrchestratorConfigSchema = z.object({
 }).strict();
 export const WorkflowDefSchema = z.object({
   schemaVersion: z.literal(1),
-  id: z.string().min(1),
+  id: WorkflowIdSchema,
   name: z.string().min(1),
   description: z.string(),
   builtin: z.boolean().optional(),

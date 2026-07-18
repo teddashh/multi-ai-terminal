@@ -72,6 +72,7 @@ export const parseJsonObject = (line: string): Record<string, unknown> | undefin
 
 export class ContentCoalescer {
   #current: { role: 'agent' | 'thinking'; kind: 'message' | 'thinking'; text: string } | undefined;
+  #blockKind: 'message' | 'thinking' | undefined;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #flushCounts = new Map<'message' | 'thinking', number>();
 
@@ -82,7 +83,11 @@ export class ContentCoalescer {
   ) {}
 
   push(role: 'agent' | 'thinking', kind: 'message' | 'thinking', text: string): void {
-    if (this.#current && this.#current.kind !== kind) this.flush();
+    if (this.#blockKind !== kind) {
+      if (this.#current) this.flush();
+      this.#flushCounts.set(kind, 0);
+      this.#blockKind = kind;
+    }
     if (!this.#current) this.#current = { role, kind, text: '' };
     this.#current.text += text;
     if (Buffer.byteLength(this.#current.text) >= this.maxBytes) {
@@ -105,6 +110,7 @@ export class ContentCoalescer {
 
   end(): void {
     this.flush();
+    this.#blockKind = undefined;
   }
 
   #armTimer(): void {

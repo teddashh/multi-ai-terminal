@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { NodeRun } from '@mat/shared';
-import { assembleArtifacts, buildDigest, digestResultBudget } from '../../src/engine/digest.js';
+import { assembleArtifacts, buildDigest, digestResultBudget, recordToolUse, resetToolCount } from '../../src/engine/digest.js';
 
 const dirs: string[] = [];
 const node = (id: string, resultText = 'answer', provider: NodeRun['agent']['provider'] = 'mock'): NodeRun => ({
@@ -28,6 +28,14 @@ describe('fan-in digest', () => {
     expect(digest.indexOf('## z')).toBeLessThan(digest.indexOf('## a'));
     expect(digest).toContain('…[truncated]');
     expect(digest).toContain('tool-calls: n/a');
+  });
+
+  it('resets tool-call counts between attempts', () => {
+    const candidate = node('candidate');
+    recordToolUse(candidate);
+    expect(buildDigest([candidate])).toContain('tool-calls: 1');
+    resetToolCount(candidate);
+    expect(buildDigest([candidate])).toContain('tool-calls: 0');
   });
 
   it('assembles patch headers and paths under the 30k cap', () => {

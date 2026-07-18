@@ -11,6 +11,10 @@ export function recordToolUse(node: NodeRun): void {
   toolCounts.set(node, (toolCounts.get(node) ?? 0) + 1);
 }
 
+export function resetToolCount(node: NodeRun): void {
+  toolCounts.delete(node);
+}
+
 function truncateTail(text: string, budget: number): string {
   const marker = '…[truncated]';
   if (text.length <= budget) return text;

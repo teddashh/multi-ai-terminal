@@ -17,6 +17,24 @@ export interface ManagedProcess {
 
 const KILL_ESCALATION_MS = 10_000;
 
+function signalProcessGroup(pid: number, signal: NodeJS.Signals): boolean {
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    // Process cleanup is always best-effort; permission and recycled-process
+    // failures must not crash the server.
+    return false;
+  }
+}
+
+export function terminateProcessGroup(pid: number): void {
+  if (!Number.isInteger(pid) || pid <= 0 || !signalProcessGroup(pid, 'SIGTERM')) return;
+  const timer = setTimeout(() => { signalProcessGroup(pid, 'SIGKILL'); }, KILL_ESCALATION_MS);
+  timer.unref();
+}
+
 export function sanitizedEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   const env = { ...process.env, ...overrides };
   delete env.LD_LIBRARY_PATH;
@@ -40,35 +58,34 @@ export function spawnManaged(options: SpawnProcessOptions): ManagedProcess {
 
   let escalationTimer: ReturnType<typeof setTimeout> | undefined;
   let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
-  let closed = false;
-
-  const clearTimers = (): void => {
-    if (escalationTimer) clearTimeout(escalationTimer);
+  let sweptOnExit = false;
+  const clearTimeoutTimer = (): void => {
     if (timeoutTimer) clearTimeout(timeoutTimer);
-    escalationTimer = undefined;
     timeoutTimer = undefined;
   };
 
   const signalGroup = (signal: NodeJS.Signals): void => {
-    if (!child.pid || closed) return;
-    try {
-      process.kill(-child.pid, signal);
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== 'ESRCH') throw error;
-    }
+    if (!child.pid) return;
+    signalProcessGroup(child.pid, signal);
   };
 
   const killGroup = (signal: NodeJS.Signals = 'SIGTERM'): void => {
     signalGroup(signal);
-    if (signal !== 'SIGTERM' || closed || escalationTimer) return;
+    if (signal !== 'SIGTERM' || escalationTimer || !child.pid) return;
     escalationTimer = setTimeout(() => signalGroup('SIGKILL'), KILL_ESCALATION_MS);
     escalationTimer.unref();
   };
 
+  child.once('exit', () => {
+    if (child.pid && !escalationTimer) {
+      sweptOnExit = true;
+      terminateProcessGroup(child.pid);
+    }
+  });
+
   child.once('close', () => {
-    closed = true;
-    clearTimers();
+    clearTimeoutTimer();
+    if (child.pid && !escalationTimer && !sweptOnExit) terminateProcessGroup(child.pid);
   });
 
   if (options.stdin !== undefined) {
