@@ -284,12 +284,13 @@ codex exec --json -m gpt-5.6-sol [-c model_reasoning_effort=E] --cd <CWD> \
 ### 4.3 grok (rich) — verified, Grok Build TUI headless (fixtures: grok.jsonl, grok-tool.jsonl)
 
 ```
-grok -p --prompt-file <FILE> --output-format streaming-json [-m grok-4.5] \
+grok --prompt-file <FILE> --output-format streaming-json [-m grok-4.5] \
   [--reasoning-effort E] --cwd <CWD> [--permission-mode PM] [--max-turns N]
 ```
+- grok ≥ 0.2.93: `-p/--single` takes an inline prompt VALUE; do not combine it with `--prompt-file` (live-smoke verified 2026-07-18: `--prompt-file` alone selects headless mode).
 - **Probe-confirmed reality: streaming-json emits ONLY `thought`/`text`/`end` events.** Tool calls execute silently between thought tokens — there are NO tool events in v1; grok nodes show no tool rows and the digest reports tool-count "n/a" for grok. Unknown event types, if they ever appear, → tool rows named by type (forward-compat).
 - `thought` deltas → coalesce → thinking; `text` deltas → coalesce → agent/message (resultText = full text); `end` → outcome {exitCode 0, sessionRef=sessionId}. Silent gaps during tools are expected — see §5 stall.
-- Resume (orchestrator only): `grok -r <sessionRef> -p --prompt-file <FILE> --output-format streaming-json` + same flags.
+- Resume (orchestrator only): `grok -r <sessionRef> --prompt-file <FILE> --output-format streaming-json` + same flags.
 - Orchestrator-as-grok bonus: pass `--json-schema` for hard decision enforcement.
 
 ### 4.4 agy (plain) — verified; Antigravity CLI, no JSON mode (fixture: agy.log)

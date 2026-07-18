@@ -23,7 +23,8 @@ const permissionArgs = (permission: ResolvedNodeSpec['binding']['permission']): 
 export function buildGrokArgs(spec: ResolvedNodeSpec, promptFile: string): string[] {
   const args = [
     ...(spec.resumeSessionRef ? ['-r', spec.resumeSessionRef] : []),
-    '-p', '--prompt-file', promptFile,
+    // grok >= 0.2.93: `-p/--single` demands an inline prompt value; --prompt-file alone selects headless mode.
+    '--prompt-file', promptFile,
     '--output-format', 'streaming-json',
     '-m', spec.binding.model ?? 'grok-4.5',
   ];
