@@ -32,7 +32,7 @@ describe('workspace and workflow routes', () => {
     expect(invalid.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
 
     const created = await app.inject({ method: 'POST', url: '/api/workspaces', payload: { name: 'Temp', path: '/tmp' } });
-    expect(created.statusCode).toBe(201);
+    expect(created.statusCode).toBe(200);
     const id = created.json().id as string;
     expect((await app.inject({ method: 'GET', url: `/api/workspaces/${id}` })).json()).toMatchObject({ name: 'Temp' });
     expect((await app.inject({ method: 'PATCH', url: `/api/workspaces/${id}`, payload: { name: 'Changed' } })).json()).toMatchObject({ name: 'Changed' });

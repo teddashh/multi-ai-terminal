@@ -8,7 +8,7 @@ import { registerApiRoutes, type ApiRouteDependencies } from './api/routes.js';
 import { registerWsHub } from './api/wsHub.js';
 import { abortRun, sweepOnBoot } from './engine/runManager.js';
 import { pruneWorktrees } from './engine/worktree.js';
-import { resolveDataDir } from './store/dataDir.js';
+import { configureDataDir, resolveDataDir } from './store/dataDir.js';
 import { configureEventLog } from './store/eventLog.js';
 import { configureRunStore, listRuns } from './store/runs.js';
 import { configureWorkflowStore } from './store/workflows.js';
@@ -58,7 +58,7 @@ export async function buildServer(
 ): Promise<FastifyInstance> {
   const dependencies = { ...defaultBuildDependencies, ...overrides };
   const app = fastify({ logger: false });
-  const dataDir = resolveDataDir({ dataDir: options.dataDir });
+  const dataDir = configureDataDir(resolveDataDir({ dataDir: options.dataDir }));
 
   configureWorkspaceStore(dataDir);
   configureWorkflowStore(dataDir);

@@ -9,7 +9,7 @@ import { updateWorkspaceLastRun } from './workspaces.js';
 const TERMINAL_RUN_STATUSES = new Set<RunSnapshot['status']>(['done', 'failed', 'aborted']);
 const safeRunId = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export type RunSubscriber = (run: RunSnapshot) => void;
-export type RunCleanup = (runId: string) => Promise<void>;
+export type RunCleanup = (runId: string, run: RunSnapshot) => Promise<void>;
 
 export class RunStoreError extends Error {
   constructor(readonly code: 'NOT_FOUND' | 'CONFLICT' | 'INVALID_DATA', message: string) {
@@ -110,17 +110,24 @@ export async function deleteRun(runId: string): Promise<void> {
     if (!TERMINAL_RUN_STATUSES.has(run.status)) {
       throw new RunStoreError('CONFLICT', `Run ${runId} is not terminal; abort it before deleting`);
     }
-    await cleanupAndRemove(runId);
+    await cleanupAndRemove(runId, run);
   });
 }
 
 async function pruneWorkspaceRuns(workspaceId: string): Promise<void> {
   const runs = await listRunsDirect(workspaceId);
-  for (const run of runs.slice(100)) await cleanupAndRemove(run.runId);
+  let excess = runs.length - 100;
+  if (excess <= 0) return;
+  for (const run of [...runs].reverse()) {
+    if (excess <= 0) break;
+    if (!TERMINAL_RUN_STATUSES.has(run.status)) continue;
+    await cleanupAndRemove(run.runId, run);
+    excess -= 1;
+  }
 }
 
-async function cleanupAndRemove(runId: string): Promise<void> {
-  if (cleanupRun) await cleanupRun(runId);
+async function cleanupAndRemove(runId: string, run: RunSnapshot): Promise<void> {
+  if (cleanupRun) await cleanupRun(runId, run);
   await rm(join(runsDir(), runId), { recursive: true, force: true });
 }
 

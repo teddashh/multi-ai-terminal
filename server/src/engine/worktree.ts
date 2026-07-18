@@ -2,7 +2,8 @@ import { execFile } from 'node:child_process';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { resolveDataDir } from '../store/dataDir.js';
+import { getDataDir } from '../store/dataDir.js';
+import type { RunSnapshot } from '@mat/shared';
 import { getRun } from '../store/runs.js';
 import { getWorkspace } from '../store/workspaces.js';
 
@@ -10,7 +11,7 @@ const execFileAsync = promisify(execFile);
 
 export interface WorktreeResult { cwd: string; baseCommit: string; branch: string }
 
-export const engineDataDir = (): string => resolveDataDir({ dataDir: process.env.MAT_DATA_DIR });
+export const engineDataDir = (): string => getDataDir();
 export const runDirectory = (runId: string): string => join(engineDataDir(), 'runs', runId);
 
 async function git(cwd: string, args: string[]): Promise<string> {
@@ -73,8 +74,8 @@ export async function pruneRunWorktrees(workspacePath: string, runId: string): P
   await rm(root, { recursive: true, force: true });
 }
 
-export async function pruneWorktrees(runId: string): Promise<void> {
-  const run = await getRun(runId);
+export async function pruneWorktrees(runId: string, snapshot?: RunSnapshot): Promise<void> {
+  const run = snapshot ?? await getRun(runId);
   const workspace = await getWorkspace(run.workspaceId);
   await pruneRunWorktrees(workspace.path, runId);
 }

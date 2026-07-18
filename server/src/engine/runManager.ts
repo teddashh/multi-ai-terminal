@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { nanoid } from 'nanoid';
 import {
@@ -18,7 +19,7 @@ import { listWorkflows } from '../store/workflows.js';
 import { getWorkspace } from '../store/workspaces.js';
 import { killActiveNode, killAllActiveNodes } from './nodeRunner.js';
 import { persistRun, queueStageRetryAddendum, requestActiveStageRetry, runStage } from './stageRunner.js';
-import { isGitRepository, pruneWorktrees } from './worktree.js';
+import { isGitRepository, pruneWorktrees, runDirectory } from './worktree.js';
 
 const execFileAsync = promisify(execFile);
 const activeRuns = new Map<string, RunSnapshot>();
@@ -142,7 +143,7 @@ export async function createRun(req: RunCreateRequest): Promise<RunSnapshot> {
   const workspace = await getWorkspace(req.workspaceId);
   const workflow = await resolvedWorkflow(req);
   const run: RunSnapshot = {
-    runId: nanoid(),
+    runId: `r_${nanoid()}`,
     workspaceId: workspace.id,
     workflow,
     task: req.task,
@@ -170,6 +171,8 @@ export async function abortRun(runId: string): Promise<void> {
   killAllActiveNodes(runId, 'abort');
   systemEvent(run, 'status', 'Run aborted by user.', { status: 'aborted' });
   await persistRun(run);
+  const execution = executions.get(runId);
+  if (execution) await execution.catch(() => undefined);
 }
 
 export async function killNode(runId: string, nodeRunId: string): Promise<void> {
@@ -233,8 +236,12 @@ export async function retryStage(runId: string, stageId: string, req: RetryStage
 function conflictsFromOutput(output: string): string[] {
   const conflicts = new Set<string>();
   for (const line of output.split('\n')) {
-    const match = /(?:patch failed|does not apply|conflict(?: in)?):?\s+(.+?)(?::\d+)?$/i.exec(line.trim());
-    if (match?.[1]) conflicts.add(match[1]);
+    const value = line.trim();
+    const match =
+      /^error:\s+(.+?):\s+(?:does not match index|patch does not apply)$/i.exec(value)
+      ?? /^error:\s+patch failed:\s+(.+?)(?::\d+)?$/i.exec(value)
+      ?? /(?:conflict(?:s)?(?: in)?|with conflicts?)[^A-Za-z0-9._/-]*['"]?([^'"]+?)['"]?$/i.exec(value);
+    if (match?.[1]) conflicts.add(match[1].trim());
   }
   return [...conflicts];
 }
@@ -243,11 +250,12 @@ export async function applyPatch(runId: string, nodeRunId: string): Promise<Appl
   const run = activeRuns.get(runId) ?? await getRun(runId);
   const node = run.nodes.find((candidate) => candidate.nodeRunId === nodeRunId);
   if (!node) throw new Error(`Node not found: ${nodeRunId}`);
-  if (!node.patchFile || !existsSync(node.patchFile)) return { ok: false, message: 'No captured patch is available for this node.' };
+  const patchFile = node.patchFile ?? join(runDirectory(runId), 'artifacts', `${node.nodeRunId}.a${node.attempt}.patch`);
+  if (!existsSync(patchFile)) return { ok: false, message: 'No captured patch is available for this node.' };
   const workspace = await getWorkspace(run.workspaceId);
   if (!workspace.isGit || !await isGitRepository(workspace.path)) return { ok: false, message: 'Patches can only be applied to a Git workspace.' };
   try {
-    await execFileAsync('git', ['-C', workspace.path, 'apply', '--check', '--3way', '--binary', node.patchFile], { encoding: 'utf8' });
+    await execFileAsync('git', ['-C', workspace.path, 'apply', '--check', '--3way', '--binary', patchFile], { encoding: 'utf8' });
   } catch (error) {
     const value = error as { stdout?: string; stderr?: string; message?: string };
     const output = `${value.stdout ?? ''}\n${value.stderr ?? ''}`.trim();
@@ -259,7 +267,7 @@ export async function applyPatch(runId: string, nodeRunId: string): Promise<Appl
     };
   }
   try {
-    await execFileAsync('git', ['-C', workspace.path, 'apply', '--3way', '--binary', node.patchFile], { encoding: 'utf8' });
+    await execFileAsync('git', ['-C', workspace.path, 'apply', '--3way', '--binary', patchFile], { encoding: 'utf8' });
     return { ok: true, message: 'Patch applied.' };
   } catch (error) {
     const value = error as { stdout?: string; stderr?: string; message?: string };

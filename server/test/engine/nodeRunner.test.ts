@@ -95,4 +95,71 @@ describe('node runner lifecycle', () => {
     expect(node.status).toBe('killed');
     expect(events().some((event) => event.data?.status === 'killed')).toBe(true);
   });
+
+  it('hard-times out an attempt through the adapter group-kill surface and emits a failed error event', async () => {
+    vi.useFakeTimers();
+    let resolve!: (outcome: NodeOutcome) => void;
+    let killSignal: NodeJS.Signals | undefined;
+    const adapter = adapterFrom(() => ({
+      pid: 12345,
+      completion: new Promise<NodeOutcome>((done) => { resolve = done; }),
+      kill(signal = 'SIGTERM') {
+        killSignal = signal;
+        resolve({ exitCode: null, signal, error: 'killed by timeout' });
+      },
+    }));
+    const { node, events } = setup(adapter);
+    const running = runNode(node, { ...stage, timeoutSec: 0.01 }, 'prompt');
+    await vi.advanceTimersByTimeAsync(11);
+    await running;
+    expect(killSignal).toBe('SIGTERM');
+    expect(node.status).toBe('failed');
+    expect(events()).toContainEqual(expect.objectContaining({
+      role: 'system',
+      kind: 'error',
+      data: expect.objectContaining({ status: 'failed', detail: 'timeout' }),
+    }));
+  });
+
+  it('emits an error-category lifecycle event when a stalled attempt is killed', async () => {
+    vi.useFakeTimers();
+    let resolve!: (outcome: NodeOutcome) => void;
+    const adapter = adapterFrom(() => ({
+      pid: 12345,
+      completion: new Promise<NodeOutcome>((done) => { resolve = done; }),
+      kill(signal = 'SIGTERM') { resolve({ exitCode: null, signal, error: 'killed while stalled' }); },
+    }));
+    const { node, events } = setup(adapter);
+    const running = runNode(node, { ...stage, stallSec: 0.01 }, 'prompt');
+    await vi.advanceTimersByTimeAsync(11);
+    expect(node.status).toBe('stalled');
+    expect(killActiveNode('run', node.nodeRunId, 'user')).toBe(true);
+    await running;
+    expect(events()).toContainEqual(expect.objectContaining({
+      role: 'system',
+      kind: 'error',
+      text: 'Stalled node attempt was killed',
+      data: expect.objectContaining({ status: 'killed', detail: 'user' }),
+    }));
+  });
+
+  it('normalizes synchronous spawn failures and nonzero outcomes into lifecycle error events', async () => {
+    let setupResult = setup(adapterFrom(() => { throw new Error('spawn exploded'); }));
+    await runNode(setupResult.node, stage, 'prompt');
+    expect(setupResult.node.status).toBe('failed');
+    expect(setupResult.events()).toContainEqual(expect.objectContaining({
+      role: 'system', kind: 'error', text: 'spawn exploded', data: expect.objectContaining({ status: 'failed' }),
+    }));
+
+    setupResult = setup(adapterFrom(() => ({
+      pid: 12346,
+      kill() {},
+      completion: Promise.resolve({ exitCode: 7, error: 'provider failed' }),
+    })));
+    await runNode(setupResult.node, stage, 'prompt');
+    expect(setupResult.node.status).toBe('failed');
+    expect(setupResult.events()).toContainEqual(expect.objectContaining({
+      role: 'system', kind: 'error', text: 'provider failed', data: expect.objectContaining({ status: 'failed', exitCode: 7 }),
+    }));
+  });
 });

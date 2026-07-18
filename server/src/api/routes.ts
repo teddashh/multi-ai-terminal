@@ -98,9 +98,9 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
   app.get('/api/providers', wrap(async () => dependencies.providers()));
 
   app.get('/api/workspaces', wrap(async () => dependencies.workspaces.list()));
-  app.post('/api/workspaces', wrap(async (request, reply) => {
+  app.post('/api/workspaces', wrap(async (request) => {
     const body = WorkspaceCreateRequestSchema.parse(request.body);
-    return reply.code(201).send(await dependencies.workspaces.create(body as unknown as Omit<Workspace, 'id' | 'isGit'>));
+    return dependencies.workspaces.create(body as unknown as Omit<Workspace, 'id' | 'isGit'>);
   }));
   app.get('/api/workspaces/:id', wrap(async (request) => dependencies.workspaces.get(parseId(request))));
   app.patch('/api/workspaces/:id', wrap(async (request) => {
@@ -243,7 +243,6 @@ function sendError(reply: FastifyReply, error: unknown): FastifyReply {
   if (typeof candidate.statusCode === 'number' && candidate.statusCode >= 400 && candidate.statusCode < 500) {
     return reply.code(candidate.statusCode).send(errorBody(typeof candidate.code === 'string' ? candidate.code : 'BAD_REQUEST', messageOf(error)));
   }
-  if (messageOf(error).startsWith('NOT_IMPLEMENTED:')) return reply.code(501).send(errorBody('NOT_IMPLEMENTED', messageOf(error)));
   reply.log.error(error);
   return reply.code(500).send(errorBody('INTERNAL_ERROR', 'Internal server error'));
 }

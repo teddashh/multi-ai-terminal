@@ -23,6 +23,7 @@ interface LiveNode {
   node: NodeRun;
   context: NodeExecutionContext;
   killedReason?: 'user' | 'abort' | 'timeout' | 'gate-timeout';
+  wasStalled?: boolean;
 }
 
 const contexts = new WeakMap<NodeRun, NodeExecutionContext>();
@@ -107,7 +108,7 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
     node.endedAt = Date.now();
     node.exitCode = null;
     node.resultText = detail;
-    lifecycle(node, context, 'error', `Preparation failed: ${detail}`, { exitCode: null });
+    lifecycle(node, context, 'error', `Preparation failed: ${detail}`, { status: 'failed', exitCode: null });
     await context.persist();
     return;
   }
@@ -164,7 +165,7 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
     node.endedAt = Date.now();
     node.exitCode = null;
     node.resultText = detail;
-    lifecycle(node, context, 'error', detail, { exitCode: null });
+    lifecycle(node, context, 'error', detail, { status: 'failed', exitCode: null });
     await context.persist();
     return;
   }
@@ -174,7 +175,10 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
   node.status = 'running';
   node.startedAt = Date.now();
   delete node.endedAt;
-  node.pid = spawned.pid;
+  // In-process adapters (mock) use the server pid, and a failed OS spawn can
+  // report -1. Neither is a child process group that crash recovery may reap.
+  if (Number.isInteger(spawned.pid) && spawned.pid > 0 && spawned.pid !== process.pid) node.pid = spawned.pid;
+  else delete node.pid;
   lifecycle(node, context, 'status', 'spawned', { status: 'spawned', attempt: node.attempt });
   lifecycle(node, context, 'status', 'running', { status: 'running', attempt: node.attempt });
   readyForContent = true;
@@ -199,7 +203,8 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
   }
   if (stallTimer) clearTimeout(stallTimer);
   if (hardTimer) clearTimeout(hardTimer);
-  const killedReason = liveNodes.get(key)?.killedReason;
+  const liveState = liveNodes.get(key);
+  const killedReason = liveState?.killedReason;
   liveNodes.delete(key);
   delete node.pid;
   node.endedAt = Date.now();
@@ -212,14 +217,17 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
   if (killedReason === 'user' || killedReason === 'abort' || killedReason === 'gate-timeout') {
     node.status = 'killed';
     lifecycle(node, context, 'status', 'killed', { status: 'killed', detail: killedReason, attempt: node.attempt });
+    if (liveState?.wasStalled) {
+      lifecycle(node, context, 'error', 'Stalled node attempt was killed', { status: 'killed', detail: killedReason });
+    }
   } else if (killedReason === 'timeout') {
     node.status = 'failed';
-    lifecycle(node, context, 'error', 'Node attempt timed out', { exitCode: outcome.exitCode, detail: 'timeout' });
+    lifecycle(node, context, 'error', 'Node attempt timed out', { status: 'failed', exitCode: outcome.exitCode, detail: 'timeout' });
   } else if (outcome.exitCode === 0 && !outcome.error) {
     node.status = 'done';
   } else {
     node.status = 'failed';
-    lifecycle(node, context, 'error', outcome.error ?? `Node exited with code ${String(outcome.exitCode)}`, { exitCode: outcome.exitCode });
+    lifecycle(node, context, 'error', outcome.error ?? `Node exited with code ${String(outcome.exitCode)}`, { status: 'failed', exitCode: outcome.exitCode });
   }
   lifecycle(node, context, 'result', node.resultText ?? '', {
     exitCode: outcome.exitCode,
@@ -237,6 +245,7 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
 export function killActiveNode(runId: string, nodeRunId: string, reason: LiveNode['killedReason'] = 'user'): boolean {
   const live = liveNodes.get(liveKey(runId, nodeRunId));
   if (!live) return false;
+  if (live.node.status === 'stalled') live.wasStalled = true;
   live.killedReason = reason;
   live.spawned.kill('SIGTERM');
   return true;
@@ -246,6 +255,7 @@ export function killAllActiveNodes(runId?: string, reason: LiveNode['killedReaso
   let count = 0;
   for (const [key, live] of liveNodes) {
     if (runId !== undefined && live.context.runId !== runId) continue;
+    if (live.node.status === 'stalled') live.wasStalled = true;
     live.killedReason = reason;
     live.spawned.kill('SIGTERM');
     count += 1;
