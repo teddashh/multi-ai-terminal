@@ -26,7 +26,7 @@ Interactive terminals/stdin; dynamic runtime graph growth (only retries of exist
 
 ## 1. Primary user story
 
-Ted opens MAT on castle1 via browser (Tailscale). Left rail shows workspaces (repos) with the last workflow mode each ran. He picks a workspace, selects **Planning Mode** (builtin), drags `codex` and two `grok` chips onto *Round Table* **directly on the builtin** (edits are an ephemeral run-scoped copy; "Duplicate" only to save), sets one candidate's model/effort, types the task, hits **Run**. Node cards light up; the stream panel shows every agent's your/agent/tool/thinking messages live (aggregated feed; click a node card to focus it — true side-by-side panes are v1.1). At the gate, the Orchestrator's decision card explains why R2 is retried with an addendum. The Final Reviewer produces the consolidated plan; the run is replayable after a server restart.
+The user opens MAT on a headless dev box via browser (Tailscale). Left rail shows workspaces (repos) with the last workflow mode each ran. The user picks a workspace, selects **Planning Mode** (builtin), drags `codex` and two `grok` chips onto *Round Table* **directly on the builtin** (edits are an ephemeral run-scoped copy; "Duplicate" only to save), sets one candidate's model/effort, types the task, hits **Run**. Node cards light up; the stream panel shows every agent's your/agent/tool/thinking messages live (aggregated feed; click a node card to focus it — true side-by-side panes are v1.1). At the gate, the Orchestrator's decision card explains why R2 is retried with an addendum. The Final Reviewer produces the consolidated plan; the run is replayable after a server restart.
 
 ## 2. Architecture & stack
 
@@ -37,7 +37,7 @@ Ted opens MAT on castle1 via browser (Tailscale). Left rail shows workspaces (re
 - Shared package: **zod schemas + TS types** consumed by both sides.
 - Monorepo: npm workspaces (`shared/`, `server/`, `web/`). ESM, TS strict. Engines `>=20`.
 
-Why web-served instead of Tauri: Ted's fleet is headless servers over Tailscale; BAT needs an xvfb hack there. A web app is natively headless, e2e-verifiable by agents, wrappable in Tauri later. *(Deviation from debate round 12, deliberate: "reuse BAT peripheral scaffolding" was dropped because BAT is Tauri-bound; its lifecycle/worktree patterns are re-specified natively here.)*
+Why web-served instead of Tauri: the target fleet is headless servers over Tailscale; BAT needs an xvfb hack there. A web app is natively headless, e2e-verifiable by agents, wrappable in Tauri later. *(Deviation from debate round 12, deliberate: "reuse BAT peripheral scaffolding" was dropped because BAT is Tauri-bound; its lifecycle/worktree patterns are re-specified natively here.)*
 
 **Bind & trust**: default `--host 127.0.0.1`. `--host 0.0.0.0` (or a tailscale IP) opts into remote access; v1 trust model is the network boundary (tailnet ACLs). Optional `--token <secret>` (or `MAT_TOKEN`): when set, REST requires `Authorization: Bearer <secret>` and WS requires `?token=<secret>`; when unset, no auth. Server never exposes itself beyond the chosen bind.
 
@@ -315,6 +315,7 @@ agy -p "<PROMPT>" --model "Gemini 3.1 Pro (High)" [--print-timeout 45m] [--dange
 - env: inherit minus `LD_LIBRARY_PATH` (BAT AppImage breaks child TLS); ensure PATH includes `~/.local/bin`, `/usr/local/bin`.
 - `stdio: ['pipe'|'ignore','pipe','pipe']` per adapter (stdin pipe only to write the prompt, then end()).
 - **Process groups**: spawn `detached: true`; kill via `process.kill(-pid, sig)`; SIGTERM → SIGKILL escalation after 10 s. Never parent-only kills (CLIs spawn shells/compilers).
+- On win32, spawn without detaching and terminate the full process tree with forced `taskkill /PID <pid> /T /F` instead of POSIX signals.
 - Incremental line buffer (partial lines, multi-line chunks, CRLF).
 - Per-attempt hard timeout (stage.timeoutSec) → group-kill + `failed` (detail 'timeout').
 
@@ -349,7 +350,7 @@ Per candidate: label, provider/model, status, attempt, duration, usage, tool-cal
 
 ### 5.4 Crash recovery & shutdown
 
-- run.json persists `pid` per live node. On server boot: any run with non-terminal status → best-effort `process.kill(-pid)` of recorded pids, prune its worktrees, mark run `aborted` + system event `status {detail:'server-restart'}`; nodes left `running` → `killed`.
+- run.json persists `pid` per live node. On server boot: any run with non-terminal status → best-effort platform process-tree kill of recorded pids, prune its worktrees, mark run `aborted` + system event `status {detail:'server-restart'}`; nodes left `running` → `killed`.
 - SIGTERM/SIGINT handler: group-kill all live children before exit.
 - `DELETE /api/runs/:id` on a non-terminal run → 409 (abort first).
 
@@ -413,7 +414,7 @@ WS `/ws[?token=]`: client `{type:'sub'|'unsub', runId}`; server pushes per §3.4
 
 ## 9. Frontend spec (web/)
 
-Four-column CSS grid (Ted's mock), draggable dividers, dark theme default.
+Four-column CSS grid (from the design mock), draggable dividers, dark theme default.
 
 1. **Workspace rail**: cards — name, short path, `lastRun` badge ("Planning · done · 2h ago"), live pulse when running; add-workspace dialog (server validates; shows isGit chip).
 2. **Workflow panel**: workflow dropdown (builtin ⭐ + custom). Stage sections with slot chips (`AgentChip`: provider color dot + provider + model + effort + ×count). Chip popover: model input w/ datalist, effort select, count stepper (1–8), permission select, promptTemplate textarea, remove. Stage header: isolation toggle, timeout, gate toggle. **Agent palette at the bottom** (draggable chips per provider; grayed when unavailable); drag onto a stage appends a slot (provider defaults); "+ add agent" menu as fallback. **Editing a builtin mutates an ephemeral run-scoped copy** submitted as `workflowOverride` — banner offers "Duplicate to save". **Run box**: task textarea, orchestrator toggle + binding summary, Start (disabled while a run is active in this workspace).

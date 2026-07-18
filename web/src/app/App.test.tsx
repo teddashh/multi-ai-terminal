@@ -34,7 +34,7 @@ import { apiClient } from '../api/client.js';
 import { App } from './App.js';
 import { matStore } from './store.js';
 
-const workspace: Workspace = { id: 'w1', name: 'Workspace', path: '/tmp', isGit: false };
+const workspace: Workspace = { id: 'w1', name: 'Workspace', path: 'test-workspace', isGit: false };
 const activeRun = {
   runId: 'active-run', workspaceId: 'w1', task: 'Resume monitoring', status: 'running', createdAt: 2, nodes: [], gateDecisions: [],
   workflow: { schemaVersion: 1, id: 'wf', name: 'Workflow', description: '', orchestrator: { enabled: false, agent: { provider: 'mock', permission: 'safe' }, gateTimeoutSec: 30 }, stages: [], maxParallel: 1, maxRetriesPerStage: 1 },

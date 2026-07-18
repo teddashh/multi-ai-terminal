@@ -30,7 +30,7 @@ const run: RunSnapshot = {
     orchestrator: { enabled: false, agent: { provider: 'mock', permission: 'safe' }, gateTimeoutSec: 30 },
     stages: [{ id: 's1', name: 'Stage', slots: [], isolation: 'none', join: 'all', timeoutSec: 60, stallSec: 30, gate: true }],
   },
-  nodes: [{ nodeRunId: 's1.a.0', stageId: 's1', slotId: 'a', instanceIndex: 0, agent: { provider: 'mock', permission: 'safe' }, label: 'A · mock', status: 'running', attempt: 1, cwd: '/tmp' }], gateDecisions: [],
+  nodes: [{ nodeRunId: 's1.a.0', stageId: 's1', slotId: 'a', instanceIndex: 0, agent: { provider: 'mock', permission: 'safe' }, label: 'A · mock', status: 'running', attempt: 1, cwd: 'test-workspace' }], gateDecisions: [],
 };
 const base = { runId: 'r1', stageId: 's1', nodeRunId: 's1.a.0', attempt: 1 } as const;
 const events: AgentEvent[] = [

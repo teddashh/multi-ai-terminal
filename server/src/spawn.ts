@@ -1,5 +1,7 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn as spawnChild, type ChildProcess } from 'node:child_process';
 import { homedir } from 'node:os';
+import { delimiter as pathDelimiter } from 'node:path';
+import crossSpawn from 'cross-spawn';
 
 export interface SpawnProcessOptions {
   command: string;
@@ -17,6 +19,26 @@ export interface ManagedProcess {
 
 const KILL_ESCALATION_MS = 10_000;
 
+interface EnvironmentOptions {
+  platform?: NodeJS.Platform;
+  delimiter?: string;
+  homedir?: string;
+}
+
+function taskkillProcessTree(pid: number): void {
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  try {
+    const killer = spawnChild('taskkill', ['/PID', String(pid), '/T', '/F'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+    killer.on('error', () => undefined);
+    killer.unref();
+  } catch {
+    // Process cleanup is always best-effort.
+  }
+}
+
 function signalProcessGroup(pid: number, signal: NodeJS.Signals): boolean {
   try {
     process.kill(-pid, signal);
@@ -30,28 +52,58 @@ function signalProcessGroup(pid: number, signal: NodeJS.Signals): boolean {
 }
 
 export function terminateProcessGroup(pid: number): void {
+  if (process.platform === 'win32') {
+    taskkillProcessTree(pid);
+    return;
+  }
   if (!Number.isInteger(pid) || pid <= 0 || !signalProcessGroup(pid, 'SIGTERM')) return;
   const timer = setTimeout(() => { signalProcessGroup(pid, 'SIGKILL'); }, KILL_ESCALATION_MS);
   timer.unref();
 }
 
-export function sanitizedEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+export function sanitizedEnvironment(
+  overrides: NodeJS.ProcessEnv = {},
+  options: EnvironmentOptions = {},
+): NodeJS.ProcessEnv {
+  const platform = options.platform ?? process.platform;
+  const delimiter = options.delimiter ?? pathDelimiter;
   const env = { ...process.env, ...overrides };
   delete env.LD_LIBRARY_PATH;
 
-  const additions = [`${homedir()}/.local/bin`, '/usr/local/bin'];
-  const entries = (env.PATH ?? '').split(':').filter(Boolean);
+  const overridePathKey = Object.keys(overrides).find((key) => key.toLowerCase() === 'path');
+  const inheritedPathKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path');
+  const pathKey = platform === 'win32'
+    ? (overridePathKey ?? inheritedPathKey ?? 'Path')
+    : 'PATH';
+  const pathValue = overridePathKey
+    ? overrides[overridePathKey]
+    : inheritedPathKey
+      ? process.env[inheritedPathKey]
+      : undefined;
+
+  if (platform === 'win32') {
+    for (const key of Object.keys(env)) {
+      if (key.toLowerCase() === 'path') delete env[key];
+    }
+  }
+
+  const additions = platform === 'win32'
+    ? []
+    : [`${options.homedir ?? homedir()}/.local/bin`, '/usr/local/bin'];
+  const entries = (pathValue ?? '').split(delimiter).filter(Boolean);
   for (const addition of additions) {
     if (!entries.includes(addition)) entries.push(addition);
   }
-  env.PATH = entries.join(':');
+  env[pathKey] = entries.join(delimiter);
   return env;
 }
 
 export function spawnManaged(options: SpawnProcessOptions): ManagedProcess {
-  const child = spawn(options.command, options.args, {
+  const windows = process.platform === 'win32';
+  const child = crossSpawn(options.command, options.args, {
     cwd: options.cwd,
-    detached: true,
+    detached: !windows,
+    windowsHide: windows,
     env: sanitizedEnvironment(options.env),
     stdio: [options.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
   });
@@ -59,6 +111,7 @@ export function spawnManaged(options: SpawnProcessOptions): ManagedProcess {
   let escalationTimer: ReturnType<typeof setTimeout> | undefined;
   let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
   let sweptOnExit = false;
+  let taskkillStarted = false;
   const clearTimeoutTimer = (): void => {
     if (timeoutTimer) clearTimeout(timeoutTimer);
     timeoutTimer = undefined;
@@ -66,12 +119,19 @@ export function spawnManaged(options: SpawnProcessOptions): ManagedProcess {
 
   const signalGroup = (signal: NodeJS.Signals): void => {
     if (!child.pid) return;
+    if (windows) {
+      if (!taskkillStarted) {
+        taskkillStarted = true;
+        taskkillProcessTree(child.pid);
+      }
+      return;
+    }
     signalProcessGroup(child.pid, signal);
   };
 
   const killGroup = (signal: NodeJS.Signals = 'SIGTERM'): void => {
     signalGroup(signal);
-    if (signal !== 'SIGTERM' || escalationTimer || !child.pid) return;
+    if (windows || signal !== 'SIGTERM' || escalationTimer || !child.pid) return;
     escalationTimer = setTimeout(() => signalGroup('SIGKILL'), KILL_ESCALATION_MS);
     escalationTimer.unref();
   };
@@ -79,13 +139,17 @@ export function spawnManaged(options: SpawnProcessOptions): ManagedProcess {
   child.once('exit', () => {
     if (child.pid && !escalationTimer) {
       sweptOnExit = true;
-      terminateProcessGroup(child.pid);
+      if (windows) signalGroup('SIGTERM');
+      else terminateProcessGroup(child.pid);
     }
   });
 
   child.once('close', () => {
     clearTimeoutTimer();
-    if (child.pid && !escalationTimer && !sweptOnExit) terminateProcessGroup(child.pid);
+    if (child.pid && !escalationTimer && !sweptOnExit) {
+      if (windows) signalGroup('SIGTERM');
+      else terminateProcessGroup(child.pid);
+    }
   });
 
   if (options.stdin !== undefined) {

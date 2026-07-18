@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AdapterContentEvent, AgentBinding } from '@mat/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -10,6 +10,7 @@ import { buildClaudeArgs, claudeAdapter } from '../../src/adapters/claude.js';
 import { buildCodexArgs, codexAdapter } from '../../src/adapters/codex.js';
 import { buildGrokArgs, grokAdapter } from '../../src/adapters/grok.js';
 import { mockAdapter } from '../../src/adapters/mock.js';
+import { createFakeExecutable, prependPath } from '../helpers/fakeExecutable.js';
 
 const fixture = (name: string): string => fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
 let fakeRoot = '';
@@ -20,38 +21,49 @@ beforeAll(() => {
   fakeRoot = mkdtempSync(join(tmpdir(), 'mat-adapter-tests-'));
   captureDir = join(fakeRoot, 'captures');
   for (const provider of ['claude', 'codex', 'grok', 'agy']) {
-    const executable = join(fakeRoot, provider);
-    writeFileSync(executable, `#!/bin/sh
-mkdir -p "$MAT_CAPTURE_DIR"
-if [ "$1" = "--version" ]; then
-  printf '${provider} 1.0.0\\n'
-  exit 0
-fi
-if [ '${provider}' = 'claude' ] || [ '${provider}' = 'codex' ]; then
-  /bin/cat > "$MAT_CAPTURE_DIR/${provider}.stdin"
-fi
-if [ '${provider}' = 'grok' ]; then
-  want_path=0
-  for argument in "$@"; do
-    if [ "$want_path" = 1 ]; then
-      printf '%s' "$argument" > "$MAT_CAPTURE_DIR/grok.prompt-path"
-      /bin/cp "$argument" "$MAT_CAPTURE_DIR/grok.prompt"
-      break
-    fi
-    if [ "$argument" = '--prompt-file' ]; then want_path=1; fi
-  done
-fi
-if [ '${provider}' = 'agy' ] && [ "$MAT_AGY_SIZED" = 1 ]; then
-  /usr/bin/head -c 2048 /dev/zero | /usr/bin/tr '\\0' a
-  /bin/sleep 0.02
-  printf b
-elif [ -n "$MAT_FIXTURE" ]; then
-  /bin/cat "$MAT_FIXTURE"
-fi
-`, { mode: 0o755 });
+    createFakeExecutable(fakeRoot, provider, `
+const { copyFileSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs');
+const { join } = require('node:path');
+const provider = ${JSON.stringify(provider)};
+const captureDir = process.env.MAT_CAPTURE_DIR;
+mkdirSync(captureDir, { recursive: true });
+
+if (process.argv[2] === '--version') {
+  console.log(provider + ' 1.0.0');
+  process.exit(0);
+}
+
+function emitFixture() {
+  if (provider === 'grok') {
+    const index = process.argv.indexOf('--prompt-file');
+    if (index >= 0 && process.argv[index + 1]) {
+      const promptPath = process.argv[index + 1];
+      writeFileSync(join(captureDir, 'grok.prompt-path'), promptPath);
+      copyFileSync(promptPath, join(captureDir, 'grok.prompt'));
+    }
+  }
+  if (provider === 'agy' && process.env.MAT_AGY_SIZED === '1') {
+    process.stdout.write('a'.repeat(2048));
+    setTimeout(() => process.stdout.write('b'), 20);
+  } else if (process.env.MAT_FIXTURE) {
+    process.stdout.write(readFileSync(process.env.MAT_FIXTURE));
+  }
+}
+
+if (provider === 'claude' || provider === 'codex') {
+  const chunks = [];
+  process.stdin.on('data', (chunk) => chunks.push(chunk));
+  process.stdin.on('end', () => {
+    writeFileSync(join(captureDir, provider + '.stdin'), Buffer.concat(chunks));
+    emitFixture();
+  });
+} else {
+  emitFixture();
+}
+`);
   }
   originalPath = process.env.PATH;
-  process.env.PATH = `${fakeRoot}:${originalPath ?? ''}`;
+  process.env.PATH = prependPath(fakeRoot, originalPath);
   process.env.MAT_CAPTURE_DIR = captureDir;
 });
 
@@ -79,7 +91,7 @@ async function runFixture(adapter: Adapter, nodeSpec: ResolvedNodeSpec, name: st
   raw: Array<{ line: string; stream: 'out' | 'err' }>;
   outcome: Awaited<ReturnType<Adapter['spawn']>['completion']>;
 }> {
-  process.env.MAT_FIXTURE = name.startsWith('/') ? name : fixture(name);
+  process.env.MAT_FIXTURE = isAbsolute(name) ? name : fixture(name);
   const events: AdapterContentEvent[] = [];
   const raw: Array<{ line: string; stream: 'out' | 'err' }> = [];
   const spawned = adapter.spawn(nodeSpec, {
@@ -230,7 +242,7 @@ describe('grok adapter', () => {
     const promptPath = readFileSync(join(captureDir, 'grok.prompt-path'), 'utf8');
     expect(readFileSync(join(captureDir, 'grok.prompt'), 'utf8')).toBe('file prompt');
     expect(existsSync(promptPath)).toBe(false);
-    expect(buildGrokArgs(spec('grok', { effort: 'high' }), '/tmp/prompt')).toContain('--reasoning-effort');
+    expect(buildGrokArgs(spec('grok', { effort: 'high' }), join(tmpdir(), 'prompt'))).toContain('--reasoning-effort');
   });
 });
 

@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::{
     collections::VecDeque,
     env,
@@ -12,10 +14,15 @@ use std::{
 };
 use tauri::Manager;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const STDERR_HISTORY: usize = 20;
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 struct ServerProcess {
     child: Mutex<Option<Child>>,
@@ -54,10 +61,16 @@ fn sanitize_child_environment(command: &mut Command) {
     }
 }
 
+fn hide_command_window(command: &mut Command) {
+    #[cfg(windows)]
+    { command.creation_flags(CREATE_NO_WINDOW); }
+}
+
 fn validate_node(binary: &OsStr) -> Result<String, String> {
     let mut command = Command::new(binary);
     command.args(["-e", "console.log(process.versions.node)"]);
     sanitize_child_environment(&mut command);
+    hide_command_window(&mut command);
     let output = command.output().map_err(|error| format!(
         "Could not run Node.js at '{}': {error}\n\nInstall Node.js 20 or newer and ensure `node` is on PATH, or set MAT_NODE to a specific Node.js binary.",
         binary.to_string_lossy()
@@ -144,6 +157,7 @@ fn start_server(window: tauri::WebviewWindow, resources: PathBuf, process: Arc<S
     command.arg(&entry).args(["--port", port_arg.as_str(), "--host", "127.0.0.1"])
         .stdout(Stdio::piped()).stderr(Stdio::piped());
     sanitize_child_environment(&mut command);
+    hide_command_window(&mut command);
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -237,7 +251,30 @@ fn terminate_child(child: &mut Child) {
         let _ = child.wait();
         return;
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        let pid = child.id().to_string();
+        let mut command = Command::new("taskkill");
+        command.args(["/PID", pid.as_str(), "/T", "/F"])
+            .stdout(Stdio::null()).stderr(Stdio::null());
+        hide_command_window(&mut command);
+        if let Ok(mut taskkill) = command.spawn() {
+            let deadline = Instant::now() + SHUTDOWN_TIMEOUT;
+            while Instant::now() < deadline {
+                match taskkill.try_wait() {
+                    Ok(Some(_)) => break,
+                    Ok(None) => thread::sleep(Duration::from_millis(50)),
+                    Err(_) => break,
+                }
+            }
+            let _ = taskkill.kill();
+            let _ = taskkill.wait();
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        return;
+    }
+    #[cfg(not(any(unix, windows)))]
     { let _ = child.kill(); let _ = child.wait(); }
 }
 

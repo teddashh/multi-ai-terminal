@@ -1,7 +1,5 @@
-import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 import { nanoid } from 'nanoid';
 import {
   TERMINAL_NODE_STATUSES,
@@ -17,13 +15,13 @@ import { appendEvent, readEventsAfter } from '../store/eventLog.js';
 import { getRun, listRuns, saveRun } from '../store/runs.js';
 import { listWorkflows } from '../store/workflows.js';
 import { getWorkspace } from '../store/workspaces.js';
+import { execFile } from '../execFile.js';
 import { terminateProcessGroup } from '../spawn.js';
 import { EngineConflictError, EngineNotFoundError } from './errors.js';
 import { killActiveNode, killAllActiveNodes, markNodeKilled, resetNodeForRetry } from './nodeRunner.js';
 import { persistRun, queueStageRetryAddendum, requestActiveStageRetry, runStage } from './stageRunner.js';
 import { isGitRepository, pruneWorktrees, runDirectory } from './worktree.js';
 
-const execFileAsync = promisify(execFile);
 const activeRuns = new Map<string, RunSnapshot>();
 const executions = new Map<string, Promise<void>>();
 const runMutationTails = new Map<string, Promise<void>>();
@@ -281,7 +279,7 @@ export async function applyPatch(runId: string, nodeRunId: string): Promise<Appl
   if (!workspace.isGit || !await isGitRepository(workspace.path)) return { ok: false, message: 'Patches can only be applied to a Git workspace.' };
   return withMutex(workspaceApplyTails, workspace.id, async () => {
     try {
-      await execFileAsync('git', ['-C', workspace.path, 'apply', '--check', '--3way', '--binary', patchFile], { encoding: 'utf8' });
+      await execFile('git', ['-C', workspace.path, 'apply', '--check', '--3way', '--binary', patchFile]);
     } catch (error) {
       const value = error as { stdout?: string; stderr?: string; message?: string };
       let output = `${value.stdout ?? ''}\n${value.stderr ?? ''}`.trim();
@@ -290,7 +288,7 @@ export async function applyPatch(runId: string, nodeRunId: string): Promise<Appl
         && /does not work|cannot be used together|incompatible/i.test(unsupportedDetail);
       if (unsupportedCombination) {
         try {
-          await execFileAsync('git', ['-C', workspace.path, 'apply', '--check', '--binary', patchFile], { encoding: 'utf8' });
+          await execFile('git', ['-C', workspace.path, 'apply', '--check', '--binary', patchFile]);
         } catch (fallbackError) {
           const fallback = fallbackError as { stdout?: string; stderr?: string; message?: string };
           output = `${fallback.stdout ?? ''}\n${fallback.stderr ?? ''}`.trim();
@@ -303,7 +301,7 @@ export async function applyPatch(runId: string, nodeRunId: string): Promise<Appl
       }
     }
     try {
-      await execFileAsync('git', ['-C', workspace.path, 'apply', '--3way', '--binary', patchFile], { encoding: 'utf8' });
+      await execFile('git', ['-C', workspace.path, 'apply', '--3way', '--binary', patchFile]);
       return { ok: true, message: 'Patch applied.' };
     } catch (error) {
       const value = error as { stdout?: string; stderr?: string; message?: string };

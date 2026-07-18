@@ -1,5 +1,7 @@
 # Multi-AI Terminal
 
+**English** | [繁體中文](./README.zh-TW.md)
+
 A local web workbench for composing and running **multi-agent workflows across headless CLI coding agents** — Claude Code, Codex CLI, Grok CLI, and Antigravity (Gemini). Drag agents onto workflow stages, let a real LLM orchestrator gate each stage, and watch every agent's output stream into one categorized, replayable feed.
 
 Successor to [multi-ai-chat-desktop](https://github.com/teddashh/multi-ai-chat-desktop): instead of scraping web chats, every agent is a real headless CLI process whose JSONL stream is normalized into a single event schema.
@@ -25,12 +27,13 @@ npm start                      # serves web UI + API on http://127.0.0.1:7788
 
 Open the UI, add a workspace (absolute path), pick a builtin workflow (Planning / Build / Review), drop agents onto stages, write the task, Start.
 
-Dev mode: `npm run dev` (vite + API with hot reload). Tests: `npm test` (143 tests). Typecheck: `npm run typecheck`.
+Dev mode: `npm run dev` (vite + API with hot reload). Tests: `npm test` (145 tests). Typecheck: `npm run typecheck`.
 
 ## Desktop app
 
 Install desktop builds from the repository's GitHub Releases page. The desktop app requires Node.js ≥ 20 on `PATH`; set `MAT_NODE` to the path of a specific compatible Node.js binary if needed.
 
+- Windows: download the `-setup.exe` (NSIS) or `.msi` and run it. The WebView2 runtime is preinstalled on Windows 10/11, and the installer bootstraps it if missing. Install Node.js ≥ 20 with `winget install OpenJS.NodeJS.LTS`; Git for Windows is also required for worktree isolation features. Set `MAT_NODE` to the path of a specific `node.exe` if needed.
 - Debian/Ubuntu: download the `.deb`, then run `sudo apt install ./file.deb`.
 - Other Linux distributions: download the `.AppImage`, run `chmod +x ./Multi-AI-Terminal*.AppImage`, then launch it. RPM packages are also provided.
 - macOS: open the downloaded `.dmg` and copy the app to Applications. Version 1 builds are unsigned and not notarized, so on first launch right-click Multi-AI Terminal and choose **Open** to pass Gatekeeper.
@@ -71,3 +74,4 @@ Built by a 4-model panel process: spec + code review by Claude Fable 5, Codex GP
 - Antigravity (`agy`) has no headless JSON mode — plain-text stream, no session resume (orchestrator re-briefs each gate).
 - After a machine reboot, crash recovery kills stale process groups by persisted PID; PID-recycling risk is accepted.
 - Event ring keeps 20k events in browser memory; older history pages in from the server with an explicit trim notice.
+- On Windows, process termination uses `taskkill /T /F` (forced tree kill); if node exits on its own first, detached grandchildren are reaped by the stale-PID sweep on next server start.

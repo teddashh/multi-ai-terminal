@@ -1,13 +1,11 @@
-import { execFile } from 'node:child_process';
 import { mkdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import { WorkspaceSchema, type Workspace } from '@mat/shared';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
+import { execFile } from '../execFile.js';
 import { resolveDataDir } from './dataDir.js';
 
-const execFileAsync = promisify(execFile);
 const WorkspaceListSchema = z.array(WorkspaceSchema);
 export type WorkspaceSubscriber = () => void;
 
@@ -117,7 +115,7 @@ async function computeIsGit(path: string): Promise<boolean> {
     if (marker.isDirectory() || marker.isFile()) return true;
   } catch { /* A nested worktree may still be inside a repository; ask git below. */ }
   try {
-    const { stdout } = await execFileAsync('git', ['-C', path, 'rev-parse', '--is-inside-work-tree'], { encoding: 'utf8' });
+    const { stdout } = await execFile('git', ['-C', path, 'rev-parse', '--is-inside-work-tree']);
     return stdout.trim() === 'true';
   } catch {
     return false;

@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, rm, stat } from 'node:fs/promises';
+import { cp, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
@@ -8,6 +8,7 @@ const serverEntry = resolve(root, 'server/src/index.ts');
 const webDist = resolve(root, 'web/dist');
 const resources = resolve(root, 'desktop/resources');
 const bundledServer = resolve(resources, 'server/dist/index.js');
+const bundledServerPackage = resolve(resources, 'server/dist/package.json');
 const bundledWeb = resolve(resources, 'web/dist');
 
 let webDistStats;
@@ -41,6 +42,7 @@ await build({
   minify: false,
   sourcemap: false,
 });
+await writeFile(bundledServerPackage, '{"type":"module"}', 'utf8');
 
 await mkdir(bundledWeb, { recursive: true });
 await cp(webDist, bundledWeb, { recursive: true });
@@ -62,4 +64,4 @@ const [{ size }, webFileCount] = await Promise.all([
 
 console.log(`[desktop:bundle] Server bundle: ${(size / 1024 / 1024).toFixed(2)} MiB`);
 console.log(`[desktop:bundle] SPA files copied: ${webFileCount}`);
-console.log('[desktop:bundle] Layout: desktop/resources/{server/dist/index.js,web/dist/}');
+console.log('[desktop:bundle] Layout: desktop/resources/{server/dist/{index.js,package.json},web/dist/}');

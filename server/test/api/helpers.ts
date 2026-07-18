@@ -1,5 +1,6 @@
 import type { ApiRouteDependencies } from '../../src/api/routes.js';
 import type { AgentEvent, RunCreateRequest, RunSnapshot, WorkflowDef, Workspace } from '@mat/shared';
+import { tmpdir } from 'node:os';
 
 export const workflow = (overrides: Partial<WorkflowDef> = {}): WorkflowDef => ({
   schemaVersion: 1,
@@ -48,7 +49,7 @@ export const runSnapshot = (overrides: Partial<RunSnapshot> = {}): RunSnapshot =
     label: 'Candidate · mock',
     status: 'done',
     attempt: 1,
-    cwd: '/tmp',
+    cwd: tmpdir(),
   }],
   gateDecisions: [],
   createdAt: 100,

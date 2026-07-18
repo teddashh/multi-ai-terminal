@@ -1,5 +1,5 @@
 import { mkdtempSync } from 'node:fs';
-import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,7 +7,7 @@ import type { AgentEvent, RunSnapshot, WorkflowDef, Workspace } from '@mat/share
 
 const state = vi.hoisted(() => ({
   runs: new Map<string, RunSnapshot>(),
-  workspace: { id: 'ws', name: 'Workspace', path: '/tmp/workspace', isGit: false } as Workspace,
+  workspace: { id: 'ws', name: 'Workspace', path: process.cwd(), isGit: false } as Workspace,
   replies: [] as string[],
   active: 0,
   maxActive: 0,
@@ -69,6 +69,7 @@ vi.mock('../../src/adapters/registry.js', () => ({
 import { appendEvent, configureEventLog, readEventsAfter } from '../../src/store/eventLog.js';
 import { abortRun, applyPatch, createRun, killNode, retryStage, sweepOnBoot } from '../../src/engine/runManager.js';
 import { waitForRun } from './fakes.js';
+import { createFakeExecutable, prependPath } from '../helpers/fakeExecutable.js';
 
 const dirs: string[] = [];
 const oldDataDir = process.env.MAT_DATA_DIR;
@@ -288,16 +289,19 @@ describe('run manager and stage state machine', () => {
     const def = workflow({ twoStages: false });
     const stale: RunSnapshot = {
       runId: 'stale', workspaceId: 'ws', workflow: def, task: 'old', status: 'running', currentStageId: 'round', createdAt: 1, gateDecisions: [],
-      nodes: [{ nodeRunId: 'round.candidate.0', stageId: 'round', slotId: 'candidate', instanceIndex: 0, agent: binding('ok'), label: 'Candidate · mock', status: 'running', attempt: 1, cwd: '/tmp/workspace', pid: 45678 }],
+      nodes: [{ nodeRunId: 'round.candidate.0', stageId: 'round', slotId: 'candidate', instanceIndex: 0, agent: binding('ok'), label: 'Candidate · mock', status: 'running', attempt: 1, cwd: state.workspace.path, pid: 45678 }],
     };
     state.runs.set(stale.runId, stale);
-    vi.useFakeTimers();
-    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    const windows = process.platform === 'win32';
+    if (!windows) vi.useFakeTimers();
+    const kill = windows ? undefined : vi.spyOn(process, 'kill').mockImplementation(() => true);
     await sweepOnBoot();
     const swept = state.runs.get('stale');
-    expect(kill).toHaveBeenCalledWith(-45678, 'SIGTERM');
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(kill).toHaveBeenCalledWith(-45678, 'SIGKILL');
+    if (kill) {
+      expect(kill).toHaveBeenCalledWith(-45678, 'SIGTERM');
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(kill).toHaveBeenCalledWith(-45678, 'SIGKILL');
+    }
     expect(swept).toMatchObject({ status: 'aborted', nodes: [{ status: 'killed' }] });
     expect(swept?.nodes[0]?.pid).toBeUndefined();
     expect(readEventsAfter('stale').at(-1)?.data?.detail).toBe('server-restart');
@@ -321,31 +325,31 @@ describe('run manager and stage state machine', () => {
     const patchFile = join(root, 'candidate.patch');
     await writeFile(patchFile, 'diff --git a/a b/a\n', 'utf8');
     await mkdir(bin);
-    const git = join(bin, 'git');
-    await writeFile(git, `#!/bin/sh
-echo "$*" >> "$MAT_TEST_GIT_LOG"
-case "$*" in
-  *"rev-parse --is-inside-work-tree"*) echo true; exit 0 ;;
-  *"apply --check --3way"*) echo "error: --check cannot be used together with --3way" >&2; exit 1 ;;
-  *"apply --check --binary"*) if [ -f "$MAT_TEST_GIT_MARKER" ]; then echo "error: patch does not apply" >&2; exit 1; fi; exit 0 ;;
-  *"apply --3way --binary"*) touch "$MAT_TEST_GIT_MARKER"; exit 0 ;;
-esac
-exit 1
-`, 'utf8');
-    await chmod(git, 0o755);
-    process.env.PATH = `${bin}:${oldPath ?? ''}`;
+    createFakeExecutable(bin, 'git', `
+const { appendFileSync, existsSync, writeFileSync } = require('node:fs');
+const args = process.argv.slice(2).join(' ');
+appendFileSync(process.env.MAT_TEST_GIT_LOG, args + '\\n');
+if (args.includes('rev-parse --is-inside-work-tree')) { console.log('true'); process.exit(0); }
+if (args.includes('apply --check --3way')) { console.error('error: --check cannot be used together with --3way'); process.exit(1); }
+if (args.includes('apply --check --binary')) {
+  if (existsSync(process.env.MAT_TEST_GIT_MARKER)) { console.error('error: patch does not apply'); process.exit(1); }
+  process.exit(0);
+}
+if (args.includes('apply --3way --binary')) { writeFileSync(process.env.MAT_TEST_GIT_MARKER, ''); process.exit(0); }
+process.exit(1);
+`);
+    process.env.PATH = prependPath(bin, oldPath);
     process.env.MAT_TEST_GIT_LOG = log;
     process.env.MAT_TEST_GIT_MARKER = marker;
     state.workspace.isGit = true;
     const def = workflow({ orchestrator: false, twoStages: false });
     state.runs.set('patch-run', {
       runId: 'patch-run', workspaceId: 'ws', workflow: def, task: 'patch', status: 'done', currentStageId: 'round', createdAt: 1, endedAt: 2, gateDecisions: [],
-      nodes: [{ nodeRunId: 'round.candidate.0', stageId: 'round', slotId: 'candidate', instanceIndex: 0, agent: binding('ok'), label: 'Candidate', status: 'done', attempt: 1, cwd: '/tmp/workspace', patchFile }],
+      nodes: [{ nodeRunId: 'round.candidate.0', stageId: 'round', slotId: 'candidate', instanceIndex: 0, agent: binding('ok'), label: 'Candidate', status: 'done', attempt: 1, cwd: state.workspace.path, patchFile }],
     });
 
     const [first, second] = await Promise.all([applyPatch('patch-run', 'round.candidate.0'), applyPatch('patch-run', 'round.candidate.0')]);
-    expect(first.ok).toBe(true);
-    expect(second.ok).toBe(false);
+    expect([first.ok, second.ok].sort()).toEqual([false, true]);
     const calls = (await readFile(log, 'utf8')).trim().split('\n');
     expect(calls.filter((line) => line.includes('apply --check --3way'))).toHaveLength(2);
     expect(calls.filter((line) => line.includes('apply --3way --binary') && !line.includes('--check'))).toHaveLength(1);

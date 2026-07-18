@@ -39,12 +39,14 @@ async function server(token?: string, webDist?: string): Promise<FastifyInstance
 
 describe('server options and trust boundary', () => {
   it('parses CLI values over environment fallbacks', () => {
+    const envDataDir = join(tmpdir(), 'from-env');
+    const cliDataDir = join(tmpdir(), 'cli');
     expect(parseArgs([], {
-      MAT_PORT: '9000', MAT_HOST: '100.64.0.1', MAT_DATA_DIR: '/tmp/from-env', MAT_TOKEN: 'env-token',
-    })).toEqual({ port: 9000, host: '100.64.0.1', dataDir: '/tmp/from-env', token: 'env-token' });
-    expect(parseArgs(['--port', '7789', '--host', '0.0.0.0', '--data-dir', '/tmp/cli', '--token', 'cli'], {
+      MAT_PORT: '9000', MAT_HOST: '100.64.0.1', MAT_DATA_DIR: envDataDir, MAT_TOKEN: 'env-token',
+    })).toEqual({ port: 9000, host: '100.64.0.1', dataDir: envDataDir, token: 'env-token' });
+    expect(parseArgs(['--port', '7789', '--host', '0.0.0.0', '--data-dir', cliDataDir, '--token', 'cli'], {
       MAT_PORT: '9000', MAT_HOST: '127.0.0.1',
-    })).toEqual({ port: 7789, host: '0.0.0.0', dataDir: '/tmp/cli', token: 'cli' });
+    })).toEqual({ port: 7789, host: '0.0.0.0', dataDir: cliDataDir, token: 'cli' });
     expect(() => parseArgs(['--port', '70000'])).toThrow('Invalid port');
   });
 

@@ -4,7 +4,7 @@ import { canRetryStage, decisionDisplay, formatElapsed, nodeDisplayStatus } from
 
 const node: NodeRun = {
   nodeRunId: 's1.r1.0', stageId: 's1', slotId: 'r1', instanceIndex: 0,
-  agent: { provider: 'codex', permission: 'safe' }, label: 'R1 · codex', status: 'running', attempt: 1, cwd: '/tmp/work',
+  agent: { provider: 'codex', permission: 'safe' }, label: 'R1 · codex', status: 'running', attempt: 1, cwd: 'test-workspace',
 };
 const event: AgentEvent = { id: 'e1', seq: 1, runId: 'run-1', stageId: 's1', nodeRunId: node.nodeRunId, attempt: 1, role: 'thinking', kind: 'thinking', text: 'reasoning', ts: 10 };
 const decision: GateDecision = { stageId: 's1', gateAttempt: 1, action: 'advance', rationale: 'Ready', ts: 20 };

@@ -1,14 +1,11 @@
-import { execFile } from 'node:child_process';
 import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { promisify } from 'node:util';
 import { nanoid } from 'nanoid';
+import { execFile } from '../execFile.js';
 import { getDataDir } from '../store/dataDir.js';
 import type { RunSnapshot } from '@mat/shared';
 import { getRun } from '../store/runs.js';
 import { getWorkspace } from '../store/workspaces.js';
-
-const execFileAsync = promisify(execFile);
 
 export interface WorktreeResult { cwd: string; baseCommit: string; branch: string }
 
@@ -20,7 +17,7 @@ async function git(cwd: string, args: string[]): Promise<string> {
 }
 
 async function gitRaw(cwd: string, args: string[]): Promise<string> {
-  const result = await execFileAsync('git', ['-C', cwd, ...args], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+  const result = await execFile('git', ['-C', cwd, ...args], { maxBuffer: 32 * 1024 * 1024 });
   return result.stdout;
 }
 

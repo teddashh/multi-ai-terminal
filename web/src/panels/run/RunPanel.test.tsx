@@ -24,9 +24,9 @@ const workflow: RunSnapshot['workflow'] = {
 const run: RunSnapshot = {
   runId: 'r1', workspaceId: 'w1', workflow, task: 'Build a plan', status: 'running', currentStageId: 'final', createdAt: 1,
   nodes: [
-    { nodeRunId: 'round.r1.0', stageId: 'round', slotId: 'r1', instanceIndex: 0, agent: { provider: 'codex', permission: 'safe' }, label: 'R1 · codex', status: 'done', attempt: 2, cwd: '/tmp', startedAt: 1000, endedAt: 66_000, usage: { inputTokens: 10, outputTokens: 20, costUsd: 0.01 }, patchFile: 'r1.patch' },
-    { nodeRunId: 'orchestrator', stageId: null, slotId: 'orchestrator', instanceIndex: 0, agent: { provider: 'claude', permission: 'safe' }, label: 'Orchestrator · claude', status: 'done', attempt: 1, cwd: '/tmp' },
-    { nodeRunId: 'final.f1.0', stageId: 'final', slotId: 'f1', instanceIndex: 0, agent: { provider: 'grok', permission: 'safe' }, label: 'Final · grok', status: 'running', attempt: 1, cwd: '/tmp', startedAt: Date.now() },
+    { nodeRunId: 'round.r1.0', stageId: 'round', slotId: 'r1', instanceIndex: 0, agent: { provider: 'codex', permission: 'safe' }, label: 'R1 · codex', status: 'done', attempt: 2, cwd: 'test-workspace', startedAt: 1000, endedAt: 66_000, usage: { inputTokens: 10, outputTokens: 20, costUsd: 0.01 }, patchFile: 'r1.patch' },
+    { nodeRunId: 'orchestrator', stageId: null, slotId: 'orchestrator', instanceIndex: 0, agent: { provider: 'claude', permission: 'safe' }, label: 'Orchestrator · claude', status: 'done', attempt: 1, cwd: 'test-workspace' },
+    { nodeRunId: 'final.f1.0', stageId: 'final', slotId: 'f1', instanceIndex: 0, agent: { provider: 'grok', permission: 'safe' }, label: 'Final · grok', status: 'running', attempt: 1, cwd: 'test-workspace', startedAt: Date.now() },
   ],
   gateDecisions: [{ stageId: 'round', gateAttempt: 1, action: 'advance', rationale: 'The candidates agree.', contextForNext: 'Prefer the safe design.', degraded: true, ts: 100 }],
 };

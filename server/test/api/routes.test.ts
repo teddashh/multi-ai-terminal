@@ -27,11 +27,11 @@ afterEach(async () => {
 
 describe('workspace and workflow routes', () => {
   it('performs workspace CRUD and returns validation errors in the API envelope', async () => {
-    const invalid = await app.inject({ method: 'POST', url: '/api/workspaces', payload: { name: '', path: '/tmp' } });
+    const invalid = await app.inject({ method: 'POST', url: '/api/workspaces', payload: { name: '', path: tmpdir() } });
     expect(invalid.statusCode).toBe(400);
     expect(invalid.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
 
-    const created = await app.inject({ method: 'POST', url: '/api/workspaces', payload: { name: 'Temp', path: '/tmp' } });
+    const created = await app.inject({ method: 'POST', url: '/api/workspaces', payload: { name: 'Temp', path: tmpdir() } });
     expect(created.statusCode).toBe(200);
     const id = created.json().id as string;
     expect((await app.inject({ method: 'GET', url: `/api/workspaces/${id}` })).json()).toMatchObject({ name: 'Temp' });
