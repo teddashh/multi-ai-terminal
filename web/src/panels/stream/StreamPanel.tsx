@@ -12,6 +12,9 @@ const ROLE_STYLE: Record<EventRole, string> = {
   thinking: 'border-violet-700 text-violet-200', system: 'border-zinc-700 text-zinc-400', decision: 'border-emerald-700 text-emerald-200',
 };
 
+// Referentially stable fallback — a fresh `[]` per selector call re-renders forever (React #185).
+const EMPTY_EVENTS: readonly AgentEvent[] = [];
+
 export function StreamPanel() {
   const activeRunId = useMatStore((state) => state.activeRunId);
   const selectedWorkspaceId = useMatStore((state) => state.selectedWorkspaceId);
@@ -28,7 +31,7 @@ export function StreamPanel() {
   const [selectedRunId, setSelectedRunId] = useState<string>();
   const effectiveRunId = selectedRunId ?? activeRunId;
   const selectedRun = effectiveRunId ? runs[effectiveRunId] : undefined;
-  const events = useMatStore((state) => effectiveRunId ? state.events[effectiveRunId] ?? [] : []);
+  const events = useMatStore((state) => (effectiveRunId ? state.events[effectiveRunId] : undefined) ?? EMPTY_EVENTS);
   const [history, setHistory] = useState<RunSnapshot[]>([]);
   const [historyHasMore, setHistoryHasMore] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);

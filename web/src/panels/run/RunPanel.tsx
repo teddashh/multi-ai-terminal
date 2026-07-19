@@ -24,10 +24,14 @@ interface PatchDialogState {
   result?: ApplyPatchResponse;
 }
 
+// Selectors must return referentially stable values: a fresh `[]` per call
+// makes useSyncExternalStore re-render forever (React #185).
+const EMPTY_EVENTS: readonly AgentEvent[] = [];
+
 export function RunPanel() {
   const activeRunId = useMatStore((state) => state.activeRunId);
   const run = useMatStore((state) => activeRunId ? state.runs[activeRunId] : undefined);
-  const events = useMatStore((state) => activeRunId ? state.events[activeRunId] ?? [] : []);
+  const events = useMatStore((state) => (activeRunId ? state.events[activeRunId] : undefined) ?? EMPTY_EVENTS);
   const focusNode = useMatStore((state) => state.focusNode);
   const upsertRun = useMatStore((state) => state.upsertRun);
   const [now, setNow] = useState(Date.now());
