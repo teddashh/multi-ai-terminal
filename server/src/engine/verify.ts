@@ -98,13 +98,19 @@ export async function verifyCandidate(node: NodeRun, workspace: Workspace, runId
     managed.child.stderr?.on('data', (chunk: Buffer) => { output += chunk.toString('utf8'); });
     const outcome = await new Promise<{ code: number | null; error?: unknown }>((resolve) => {
       let settled = false;
+      let runtimeError: unknown;
       const finish = (value: { code: number | null; error?: unknown }): void => {
         if (settled) return;
         settled = true;
         resolve(value);
       };
-      managed.child.once('error', (error) => finish({ code: null, error }));
-      managed.child.once('close', (code) => finish({ code }));
+      managed.child.once('error', (error) => {
+        // A post-spawn 'error' (kill failure, spurious emitter noise) must not
+        // preempt the real exit code; only a spawn that never started ends here.
+        if (managed.child.pid === undefined) finish({ code: null, error });
+        else runtimeError = error;
+      });
+      managed.child.once('close', (code) => finish({ code, error: code === null ? runtimeError : undefined }));
     });
     const durationMs = Math.max(0, Date.now() - startedAt);
     await writeLog(logFile, output);

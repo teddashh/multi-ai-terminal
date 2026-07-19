@@ -101,7 +101,11 @@ export function sanitizedEnvironment(
 
 export function spawnManaged(options: SpawnProcessOptions): ManagedProcess {
   const windows = process.platform === 'win32';
-  const child = crossSpawn(options.command, options.args, {
+  // cross-spawn's Windows ENOENT heuristic treats any shell exit code 1 as
+  // command-not-found (parsed.file is never set when shell is true) and swallows
+  // the real exit event. Shell commands need no .cmd/PATHEXT shim, so bypass it.
+  const spawnImpl: typeof spawnChild = options.shell ? spawnChild : (crossSpawn as typeof spawnChild);
+  const child = spawnImpl(options.command, options.args, {
     cwd: options.cwd,
     detached: !windows,
     windowsHide: windows,

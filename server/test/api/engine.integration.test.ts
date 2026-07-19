@@ -13,7 +13,7 @@ import { configureWorkspaceStore, createWorkspace } from '../../src/store/worksp
 import { runSnapshot, workflow } from './helpers.js';
 
 const dirs: string[] = [];
-afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
+afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }))));
 
 const terminal = (run: RunSnapshot): boolean => ['done', 'failed', 'aborted'].includes(run.status);
 

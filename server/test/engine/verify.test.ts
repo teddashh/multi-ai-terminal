@@ -26,7 +26,7 @@ beforeEach(async () => {
   await mkdir(join(dataDir, 'artifacts'), { recursive: true });
   await writeFile(join(dataDir, 'candidate.patch'), 'diff --git a/a b/a\n', 'utf8');
 });
-afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
+afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }))));
 
 describe('candidate verification', () => {
   it('records passing checks and lifecycle evidence', async () => {

@@ -430,23 +430,11 @@ try {
   } catch (error) {
     cleanupFailure ??= error;
   }
-  if (dataDir) {
+  // Windows keeps transient locks on freshly used git/worktree dirs; retry removal.
+  for (const dir of [dataDir, workspaceDir, verifiedWorkspaceDir]) {
+    if (!dir) continue;
     try {
-      await rm(dataDir, { recursive: true, force: true });
-    } catch (error) {
-      cleanupFailure ??= error;
-    }
-  }
-  if (workspaceDir) {
-    try {
-      await rm(workspaceDir, { recursive: true, force: true });
-    } catch (error) {
-      cleanupFailure ??= error;
-    }
-  }
-  if (verifiedWorkspaceDir) {
-    try {
-      await rm(verifiedWorkspaceDir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     } catch (error) {
       cleanupFailure ??= error;
     }
