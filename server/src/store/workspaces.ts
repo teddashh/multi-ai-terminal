@@ -54,7 +54,7 @@ export async function createWorkspace(value: Omit<Workspace, 'id' | 'isGit'>): P
   return workspace;
 }
 
-export async function updateWorkspace(id: string, value: Partial<Pick<Workspace, 'name' | 'path' | 'defaultWorkflowId'>>): Promise<Workspace> {
+export async function updateWorkspace(id: string, value: Partial<Pick<Workspace, 'name' | 'path' | 'defaultWorkflowId' | 'verifyCommand' | 'verifyTimeoutSec'>>): Promise<Workspace> {
   let updated: Workspace | undefined;
   await mutate(async (workspaces) => {
     const index = workspaces.findIndex((workspace) => workspace.id === id);
@@ -68,6 +68,8 @@ export async function updateWorkspace(id: string, value: Partial<Pick<Workspace,
       isGit: await computeIsGit(nextPath),
     };
     if (value.defaultWorkflowId === undefined && Object.hasOwn(value, 'defaultWorkflowId')) delete candidate.defaultWorkflowId;
+    if (value.verifyCommand === undefined && Object.hasOwn(value, 'verifyCommand')) delete candidate.verifyCommand;
+    if (value.verifyTimeoutSec === undefined && Object.hasOwn(value, 'verifyTimeoutSec')) delete candidate.verifyTimeoutSec;
     updated = WorkspaceSchema.parse(candidate) as Workspace;
     const next = [...workspaces];
     next[index] = updated;

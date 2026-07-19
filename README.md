@@ -14,6 +14,12 @@ Successor to [multi-ai-chat-desktop](https://github.com/teddashh/multi-ai-chat-d
 - **Stage isolation** — optional git-worktree isolation per node; each attempt's work is captured as a binary patch you can inspect and apply from the UI.
 - **Stream panel** — every event from every agent, categorized **your messages / agent replies / tooling / thinking**, virtualized, filterable per node/role/search, with full replay of past runs from the durable event log.
 
+## Verification (evidence plane)
+
+Workspaces can define a verification command such as `npm test` and an optional timeout (600 seconds by default). Worktree-isolated candidates with a non-empty patch run that command after artifact capture; the normalized pass, fail, error, or skipped result and full log are persisted with the run. A gated stage can enable `requireVerified`, which retries failed checks when no candidate passed, subject to the existing retry budget.
+
+The UI and generated Markdown report distinguish generated, reviewed, advanced, and verified work. A degraded or unverified advance is labeled, never hidden. Open **Report** in the run panel or request `GET /api/runs/:id/report` for a PR- and retrospective-ready record of outcomes, handoffs, decisions, provider CLI versions, usage, patches, and verification evidence. The builtin **Pipeline: Implement → Test → Review** preset provides the shortest evidence-gated production line.
+
 ## Quickstart
 
 Requirements: Node.js ≥ 20, Git ≥ 2.32 recommended (older Git falls back to plain `git apply --check`), plus whichever agent CLIs you want: `claude`, `codex`, `grok`, `agy`.
@@ -25,9 +31,9 @@ npm start                      # serves web UI + API on http://127.0.0.1:7788
 # options: --port N --host H --data-dir DIR --token SECRET
 ```
 
-Open the UI, add a workspace (absolute path), pick a builtin workflow (Planning / Build / Review), drop agents onto stages, write the task, Start.
+Open the UI, add a workspace (absolute path), pick a builtin workflow (Planning / Build / Review / Pipeline), drop agents onto stages, write the task, Start.
 
-Dev mode: `npm run dev` (vite + API with hot reload). Tests: `npm test` (145 tests). Typecheck: `npm run typecheck`.
+Dev mode: `npm run dev` (vite + API with hot reload). Tests: `npm test`. Typecheck: `npm run typecheck`.
 
 ## Desktop app
 
@@ -58,7 +64,7 @@ Binds `127.0.0.1` by default. `--host 0.0.0.0` exposes the API/UI to your networ
 
 ## Data
 
-`~/.multi-ai-terminal/` (override with `--data-dir` / `MAT_DATA_DIR`): `workspaces.json`, `workflows/*.json`, `runs/<runId>/run.json` + `events.jsonl` + `raw/*.jsonl` (untouched CLI output per attempt) + `artifacts/*.patch`. Retention: last 100 runs per workspace, worktrees/branches pruned on delete.
+`~/.multi-ai-terminal/` (override with `--data-dir` / `MAT_DATA_DIR`): `workspaces.json`, `workflows/*.json`, `runs/<runId>/run.json` + `events.jsonl` + `raw/*.jsonl` (untouched CLI output per attempt) + `artifacts/*.patch` + `artifacts/*.verify.log`. Retention: last 100 runs per workspace, worktrees/branches pruned on delete.
 
 ## Docs
 

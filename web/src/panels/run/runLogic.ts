@@ -61,3 +61,14 @@ export function canRetryStage(run: RunSnapshot, stageId: string): boolean {
   const retries = Math.max(0, ...run.nodes.filter((candidate) => candidate.stageId === stageId).map((candidate) => candidate.attempt - 1));
   return retries < run.workflow.maxRetriesPerStage;
 }
+
+export function verificationSummary(nodes: readonly NodeRun[]): { passed: number; failed: number; skipped: number } {
+  let passed = 0; let failed = 0; let skipped = 0;
+  for (const node of nodes) {
+    if (node.verification?.status === 'passed') passed += 1;
+    else if (node.verification?.status === 'failed' || node.verification?.status === 'error') failed += 1;
+    // An unconfigured workspace means the feature is off, not that a check was skipped.
+    else if (node.verification?.status === 'skipped' && node.verification.reason !== 'no-verify-command') skipped += 1;
+  }
+  return { passed, failed, skipped };
+}

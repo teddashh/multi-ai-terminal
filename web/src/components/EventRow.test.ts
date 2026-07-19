@@ -1,6 +1,8 @@
 import type { AgentEvent } from '@mat/shared';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { mergeConsecutiveEvents } from './EventRow.js';
+import { EventRow, mergeConsecutiveEvents } from './EventRow.js';
 
 const event = (seq: number, overrides: Partial<AgentEvent> = {}): AgentEvent => ({ id: `e${seq}`, seq, runId: 'r', stageId: 's', nodeRunId: 's.x.0', attempt: 1, role: 'agent', kind: 'message', text: `${seq}`, ts: seq, ...overrides });
 describe('mergeConsecutiveEvents', () => {
@@ -10,5 +12,12 @@ describe('mergeConsecutiveEvents', () => {
   });
   it('does not mutate source events', () => {
     const source = [event(1, { text: 'a' }), event(2, { text: 'b' })]; mergeConsecutiveEvents(source); expect(source[0]?.text).toBe('a');
+  });
+  it('keeps verification failure text readable in the collapsed summary', () => {
+    const failure = event(3, {
+      role: 'system', kind: 'error', text: `Verification failed (exit 1): ${'x'.repeat(300)}`,
+      data: { detail: 'verify-result', verification: { status: 'failed', exitCode: 1 } },
+    });
+    expect(renderToStaticMarkup(createElement(EventRow, { event: failure }))).toContain('Verification failed (exit 1)');
   });
 });

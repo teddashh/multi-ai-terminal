@@ -18,6 +18,7 @@ import { z } from 'zod';
 import { listProviders } from '../adapters/registry.js';
 import { VERSION } from '../version.js';
 import * as runManager from '../engine/runManager.js';
+import { buildRunReport } from '../engine/report.js';
 import { readEventsAfter } from '../store/eventLog.js';
 import {
   deleteRun,
@@ -55,6 +56,7 @@ const EventsQuerySchema = z.object({
 
 export interface ApiRouteDependencies {
   providers(): ReturnType<typeof listProviders>;
+  report: typeof buildRunReport;
   workspaces: {
     list: typeof listWorkspaces; get: typeof getWorkspace; create: typeof createWorkspace;
     update: typeof updateWorkspace; delete: typeof deleteWorkspace;
@@ -64,7 +66,7 @@ export interface ApiRouteDependencies {
     delete: typeof deleteWorkflow; duplicate: typeof duplicateWorkflow;
   };
   runs: {
-    create(req: RunCreateRequest): Promise<RunSnapshot>;
+    create(req: RunCreateRequest, providerVersions?: Record<string, string>): Promise<RunSnapshot>;
     list: typeof listRuns; get: typeof getRun; delete: typeof deleteRun;
     events(runId: string, afterSeq: number, limit: number): ReturnType<typeof readEventsAfter>;
     patch: typeof readRunPatch;
@@ -77,6 +79,7 @@ export interface ApiRouteDependencies {
 
 const defaultDependencies: ApiRouteDependencies = {
   providers: listProviders,
+  report: buildRunReport,
   workspaces: { list: listWorkspaces, get: getWorkspace, create: createWorkspace, update: updateWorkspace, delete: deleteWorkspace },
   workflows: { list: listWorkflows, create: createWorkflow, update: updateWorkflow, delete: deleteWorkflow, duplicate: duplicateWorkflow },
   runs: {
@@ -107,7 +110,10 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
   app.get('/api/workspaces/:id', wrap(async (request) => dependencies.workspaces.get(parseId(request))));
   app.patch('/api/workspaces/:id', wrap(async (request) => {
     const body = WorkspacePatchRequestSchema.parse(request.body);
-    return dependencies.workspaces.update(parseId(request), body as unknown as Partial<Pick<Workspace, 'name' | 'path' | 'defaultWorkflowId'>>);
+    const update: Record<string, unknown> = { ...body };
+    if (body.verifyCommand === null) update.verifyCommand = undefined;
+    if (body.verifyTimeoutSec === null) update.verifyTimeoutSec = undefined;
+    return dependencies.workspaces.update(parseId(request), update as Partial<Pick<Workspace, 'name' | 'path' | 'defaultWorkflowId' | 'verifyCommand' | 'verifyTimeoutSec'>>);
   }));
   app.delete('/api/workspaces/:id', wrap(async (request, reply) => {
     await dependencies.workspaces.delete(parseId(request));
@@ -134,11 +140,19 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
   app.post('/api/runs', wrap(async (request, reply) => {
     const body = RunCreateRequestSchema.parse(request.body) as RunCreateRequest;
     const workflow = body.workflowOverride ?? (await dependencies.workflows.list()).find((candidate) => candidate.id === body.workflowId);
+    let versions: Record<string, string> | undefined;
     if (workflow) {
-      const unavailable = unavailableProviderBindings(workflow, await dependencies.providers());
+      const providers = await dependencies.providers();
+      const unavailable = unavailableProviderBindings(workflow, providers);
       if (unavailable.length > 0) throw apiError(400, 'PROVIDER_UNAVAILABLE', unavailable.join('\n'));
+      const used = new Set(workflow.stages.flatMap((stage) => stage.slots.map((slot) => slot.agent.provider)));
+      if (workflow.orchestrator.enabled) used.add(workflow.orchestrator.agent.provider);
+      versions = Object.fromEntries(providers.flatMap((provider) => used.has(provider.id) && provider.version ? [[provider.id, provider.version]] : []));
     }
-    return reply.code(201).send(await dependencies.runs.create(body));
+    const created = versions && Object.keys(versions).length > 0
+      ? await dependencies.runs.create(body, versions)
+      : await dependencies.runs.create(body);
+    return reply.code(201).send(created);
   }));
   app.get('/api/runs', wrap(async (request) => {
     const query = RunListQuerySchema.parse(request.query);
@@ -150,6 +164,12 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
     await dependencies.runs.get(runId);
     const query = EventsQuerySchema.parse(request.query);
     return dependencies.runs.events(runId, query.afterSeq, query.limit);
+  }));
+  app.get('/api/runs/:id/report', wrap(async (request, reply) => {
+    const run = await dependencies.runs.get(parseId(request));
+    const workspace = await dependencies.workspaces.get(run.workspaceId);
+    const events = await dependencies.runs.events(run.runId, 0, Number.MAX_SAFE_INTEGER);
+    return reply.type('text/markdown; charset=utf-8').send(dependencies.report(run, workspace, events));
   }));
   app.get('/api/runs/:id/patches/:nodeRunId', wrap(async (request, reply) => {
     const { id, nodeRunId } = NodeParamsSchema.parse(request.params);

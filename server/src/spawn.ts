@@ -11,6 +11,7 @@ export interface SpawnProcessOptions {
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
   onTimeout?: () => void;
+  shell?: boolean;
 }
 export interface ManagedProcess {
   child: ChildProcess;
@@ -106,6 +107,7 @@ export function spawnManaged(options: SpawnProcessOptions): ManagedProcess {
     windowsHide: windows,
     env: sanitizedEnvironment(options.env),
     stdio: [options.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+    shell: options.shell ?? false,
   });
 
   let escalationTimer: ReturnType<typeof setTimeout> | undefined;

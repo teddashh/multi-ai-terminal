@@ -69,7 +69,7 @@ describe.sequential('workflow store', () => {
     const dataDir = temporaryDir('mat-workflows-');
     configureWorkflowStore(dataDir);
     const builtins = await listWorkflows();
-    expect(builtins.filter((item) => item.builtin)).toHaveLength(3);
+    expect(builtins.filter((item) => item.builtin)).toHaveLength(4);
     await expect(updateWorkflow('planning', { name: 'Nope' })).rejects.toMatchObject({ code: 'CONFLICT' });
     await expect(deleteWorkflow('planning')).rejects.toMatchObject({ code: 'CONFLICT' });
 

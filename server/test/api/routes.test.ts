@@ -48,6 +48,16 @@ describe('workspace and workflow routes', () => {
     expect((await app.inject({ method: 'DELETE', url: `/api/workspaces/${id}` })).statusCode).toBe(204);
   });
 
+  it('sets and clears workspace verification settings with null', async () => {
+    const created = await app.inject({ method: 'POST', url: '/api/workspaces', payload: { name: 'Verified', path: tmpdir(), verifyCommand: 'npm test', verifyTimeoutSec: 30 } });
+    const id = created.json().id as string;
+    expect(created.json()).toMatchObject({ verifyCommand: 'npm test', verifyTimeoutSec: 30 });
+    const cleared = await app.inject({ method: 'PATCH', url: `/api/workspaces/${id}`, payload: { verifyCommand: null, verifyTimeoutSec: null } });
+    expect(cleared.statusCode).toBe(200);
+    expect(cleared.json().verifyCommand).toBeUndefined();
+    expect(cleared.json().verifyTimeoutSec).toBeUndefined();
+  });
+
   it('surfaces builtin mutation conflicts and duplicates workflows', async () => {
     dependencies.workflows.update = async () => { throw Object.assign(new Error('Builtin workflow is immutable: planning'), { code: 'CONFLICT' }); };
     const conflict = await app.inject({ method: 'PATCH', url: '/api/workflows/planning', payload: { name: 'Changed' } });
@@ -116,6 +126,28 @@ describe('run routes', () => {
     });
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: { code: 'PROVIDER_UNAVAILABLE', message: 'Reviewer · grok unavailable: not installed' } });
+  });
+
+  it('returns provider versions and snapshots bound versions at run creation', async () => {
+    dependencies.providers = async () => [{ id: 'mock', tier: 'rich', ok: true, version: 'mock/0', models: ['ok'], defaultModel: 'ok' }];
+    const create = vi.fn(dependencies.runs.create);
+    dependencies.runs.create = create;
+    const providers = await app.inject({ method: 'GET', url: '/api/providers' });
+    expect(providers.json()).toEqual([expect.objectContaining({ id: 'mock', version: 'mock/0' })]);
+    const override = workflow();
+    const response = await app.inject({ method: 'POST', url: '/api/runs', payload: { workspaceId: 'workspace-1', workflowId: 'custom', task: 'Build', workflowOverride: override } });
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({ providerVersions: { mock: 'mock/0' } });
+    expect(create).toHaveBeenCalledWith(expect.any(Object), { mock: 'mock/0' });
+  });
+
+  it('serves a Markdown run report', async () => {
+    const workspace = await app.inject({ method: 'POST', url: '/api/workspaces', payload: { name: 'Report repo', path: tmpdir() } });
+    dependencies.runs.get = async () => runSnapshot({ workspaceId: workspace.json().id });
+    const response = await app.inject({ method: 'GET', url: '/api/runs/run-1/report' });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('text/markdown');
+    expect(response.body).toContain('# Run report — Custom');
   });
 
   it('validates event cursors and forwards afterSeq paging', async () => {

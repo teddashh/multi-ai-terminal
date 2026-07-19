@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { Adapter, AdapterContentEvent, NodeOutcome, ResolvedNodeSpec, SpawnedNode } from './base.js';
 
 const scriptedEvents: AdapterContentEvent[] = [
@@ -9,13 +11,20 @@ const scriptedEvents: AdapterContentEvent[] = [
 
 export const mockAdapter: Adapter = {
   id: 'mock', tier: 'rich', models: ['ok', 'fail', 'slow:<ms>', 'noisy'], defaultModel: 'ok',
-  async available() { return { ok: true, version: 'builtin' }; },
+  async available() { return { ok: true, version: 'mock/0' }; },
   spawn(spec, io): SpawnedNode {
     const model = spec.binding.model ?? 'ok';
+    // MOCK_REPLY controls result text; MOCK_WRITE creates one deterministic candidate artifact.
     const markerIndex = spec.promptText.indexOf('MOCK_REPLY:');
     const echoReply = markerIndex >= 0
       ? spec.promptText.slice(markerIndex + 'MOCK_REPLY:'.length).trim()
       : undefined;
+    const writePath = /MOCK_WRITE:([^\s]+)/.exec(spec.promptText)?.[1];
+    if (writePath && !/^(?:[/\\]|[A-Za-z]:[/\\])/.test(writePath) && !writePath.split(/[\\/]/).includes('..')) {
+      const destination = join(spec.cwd, writePath);
+      mkdirSync(dirname(destination), { recursive: true });
+      writeFileSync(destination, `Multi-AI Terminal mock artifact: ${writePath}\n`, 'utf8');
+    }
     let killed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let resolveCompletion!: (outcome: NodeOutcome) => void;

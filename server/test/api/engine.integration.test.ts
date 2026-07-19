@@ -37,11 +37,11 @@ function planningMockWorkflow(model = 'slow:5'): WorkflowDef {
     orchestrator: { enabled: true, agent: binding, gateTimeoutSec: 5 },
     stages: [
       {
-        id: 'round-table', name: 'Round Table', isolation: 'none', join: 'all', timeoutSec: 5, stallSec: 2, gate: true,
+        id: 'round-table', name: 'Round Table', isolation: 'none', join: 'all', timeoutSec: 5, stallSec: 2, gate: true, requireVerified: false,
         slots: [{ id: 'r', label: 'Round', agent: binding, count: 2, promptTemplate: 'Plan {{task}} as {{slot_label}} #{{instance_index}}. {{retry_addendum}}' }],
       },
       {
-        id: 'final-review', name: 'Final Review', isolation: 'none', join: 'all', timeoutSec: 5, stallSec: 2, gate: true,
+        id: 'final-review', name: 'Final Review', isolation: 'none', join: 'all', timeoutSec: 5, stallSec: 2, gate: true, requireVerified: false,
         slots: [{ id: 'final', label: 'Final', agent: binding, count: 1, promptTemplate: 'Synthesize {{task}}\n{{prior_stage_digest}}\n{{orchestrator_context}}' }],
       },
     ],
@@ -83,6 +83,7 @@ describe('API lifecycle with the real run manager', () => {
         persisted = (await app.inject({ method: 'GET', url: `/api/runs/${runId}` })).json();
       }
       expect(persisted.status).toBe('done');
+      expect(persisted.providerVersions).toEqual({ mock: 'mock/0' });
       expect(persisted.workflow).toEqual(override);
       const events = (await app.inject({ method: 'GET', url: `/api/runs/${runId}/events?afterSeq=0&limit=1000` })).json();
       expect(events).toEqual(expect.arrayContaining([
@@ -232,6 +233,52 @@ describe('API lifecycle with the real run manager', () => {
       expect((await app.inject({ method: 'DELETE', url: `/api/runs/${created.runId}` })).statusCode).toBe(204);
       expect(existsSync(node.cwd)).toBe(false);
       expect(execFileSync('git', ['-C', workspaceDir, 'branch', '--list', `mat/${created.runId}/*`], { encoding: 'utf8' }).trim()).toBe('');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('enforces requireVerified retries, degrades at budget exhaustion, and stays inert for skipped checks', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'mat-required-verify-'));
+    const workspaceDir = mkdtempSync(join(tmpdir(), 'mat-required-repo-'));
+    const skippedDir = mkdtempSync(join(tmpdir(), 'mat-skipped-repo-'));
+    dirs.push(dataDir, workspaceDir, skippedDir);
+    initRepo(workspaceDir); initRepo(skippedDir);
+    const app = await buildServer({ port: 7788, host: '127.0.0.1', dataDir, token: undefined });
+    await app.ready();
+    try {
+      const failingWorkspace = (await app.inject({ method: 'POST', url: '/api/workspaces', payload: {
+        name: 'Failing', path: workspaceDir, verifyCommand: 'node -e "process.exit(1)"', verifyTimeoutSec: 10,
+      } })).json();
+      const skippedWorkspace = (await app.inject({ method: 'POST', url: '/api/workspaces', payload: { name: 'Skipped', path: skippedDir } })).json();
+      const required = workflow({
+        id: 'required-verification', maxRetriesPerStage: 1,
+        orchestrator: { enabled: true, agent: { provider: 'mock', model: 'ok', permission: 'safe' }, gateTimeoutSec: 5 },
+        stages: [{
+          ...workflow().stages[0]!, isolation: 'worktree', gate: true, requireVerified: true,
+          slots: [{ ...workflow().stages[0]!.slots[0]!, promptTemplate: '{{task}}' }],
+        }],
+      });
+      const task = 'MOCK_WRITE:evidence.txt\nMOCK_REPLY: ```json\n{"action":"advance","rationale":"looks ready"}\n```';
+      const failedCreated = (await app.inject({ method: 'POST', url: '/api/runs', payload: {
+        workspaceId: failingWorkspace.id, workflowId: required.id, task, workflowOverride: required,
+      } })).json() as RunSnapshot;
+      const failed = await waitForRun(app, failedCreated.runId, terminal);
+      expect(failed.nodes[0]).toMatchObject({ attempt: 2, verification: { status: 'failed', exitCode: 1 } });
+      expect(failed.gateDecisions[0]).toMatchObject({ action: 'retry', retryNodeRunIds: ['stage-1.slot-1.0'] });
+      expect(failed.gateDecisions[0]?.rationale).toContain('requireVerified');
+      expect(failed.gateDecisions[1]).toMatchObject({ action: 'advance', degraded: true });
+      const failedEvents = (await app.inject({ method: 'GET', url: `/api/runs/${failed.runId}/events?limit=1000` })).json();
+      expect(failedEvents).toEqual(expect.arrayContaining([expect.objectContaining({ data: expect.objectContaining({ detail: 'gate-degraded' }) })]));
+
+      const skippedCreated = (await app.inject({ method: 'POST', url: '/api/runs', payload: {
+        workspaceId: skippedWorkspace.id, workflowId: required.id, task, workflowOverride: required,
+      } })).json() as RunSnapshot;
+      const skipped = await waitForRun(app, skippedCreated.runId, terminal);
+      expect(skipped.nodes[0]).toMatchObject({ attempt: 1, verification: { status: 'skipped', reason: 'no-verify-command' } });
+      expect(skipped.gateDecisions).toHaveLength(1);
+      expect(skipped.gateDecisions[0]).toMatchObject({ action: 'advance' });
+      expect(skipped.gateDecisions[0]?.degraded).not.toBe(true);
     } finally {
       await app.close();
     }

@@ -7,6 +7,8 @@ export interface Workspace {
   id: string; name: string; path: string;
   isGit: boolean;
   defaultWorkflowId?: string;
+  verifyCommand?: string;
+  verifyTimeoutSec?: number;
   lastRun?: { runId: string; workflowName: string; status: RunStatus; at: number };
 }
 export interface RunCreateRequest {
@@ -26,6 +28,8 @@ export type WsServerMsg =
 export const WorkspaceSchema = z.object({
   id: z.string().min(1), name: z.string().min(1), path: z.string().min(1), isGit: z.boolean(),
   defaultWorkflowId: z.string().optional(),
+  verifyCommand: z.string().optional(),
+  verifyTimeoutSec: z.number().int().positive().optional(),
   lastRun: z.object({ runId: z.string(), workflowName: z.string(), status: RunStatusSchema, at: z.number().int().nonnegative() }).strict().optional(),
 }).strict();
 export const RunCreateRequestSchema = z.object({
@@ -40,7 +44,14 @@ export const WsServerMsgSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('workspaces') }).strict(),
 ]);
 
-export const WorkspaceCreateRequestSchema = z.object({ name: z.string().min(1), path: z.string().min(1), defaultWorkflowId: z.string().optional() }).strict();
-export const WorkspacePatchRequestSchema = WorkspaceCreateRequestSchema.partial();
+export const WorkspaceCreateRequestSchema = z.object({
+  name: z.string().min(1), path: z.string().min(1), defaultWorkflowId: z.string().optional(),
+  verifyCommand: z.string().optional(), verifyTimeoutSec: z.number().int().positive().optional(),
+}).strict();
+// JSON null is the explicit clearing operation for optional verification settings.
+export const WorkspacePatchRequestSchema = z.object({
+  name: z.string().min(1).optional(), path: z.string().min(1).optional(), defaultWorkflowId: z.string().optional(),
+  verifyCommand: z.string().nullable().optional(), verifyTimeoutSec: z.number().int().positive().nullable().optional(),
+}).strict();
 export const WorkflowCreateRequestSchema = WorkflowDefSchema.omit({ builtin: true });
 export const WorkflowPatchRequestSchema = WorkflowCreateRequestSchema.partial();

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { apiClient } from '../../api/client.js';
 import { useMatStore } from '../../app/store.js';
 import { AgentChip, Collapsible, ModalDialog, PROVIDER_COLORS, mergeConsecutiveEvents } from '../../components/index.js';
-import { canRetryStage, decisionDisplay, elapsedForNode, formatElapsed, nodeDisplayStatus, type NodeDisplayStatus } from './runLogic.js';
+import { canRetryStage, decisionDisplay, elapsedForNode, formatElapsed, nodeDisplayStatus, verificationSummary, type NodeDisplayStatus } from './runLogic.js';
 
 const STATUS_STYLE: Record<NodeDisplayStatus, string> = {
   queued: 'bg-zinc-700 text-zinc-200',
@@ -40,6 +40,7 @@ export function RunPanel() {
   const [retryAddendum, setRetryAddendum] = useState('');
   const [patchDialog, setPatchDialog] = useState<PatchDialogState>();
   const [actionError, setActionError] = useState<string>();
+  const [report, setReport] = useState<{ loading: boolean; content?: string; error?: string }>();
 
   useEffect(() => {
     if (!run?.nodes.some((node) => node.startedAt !== undefined && node.endedAt === undefined)) return;
@@ -52,6 +53,15 @@ export function RunPanel() {
     for (const event of mergeConsecutiveEvents(events)) if (event.nodeRunId) result.set(event.nodeRunId, event);
     return result;
   }, [events]);
+  const seedByNode = useMemo(() => {
+    const result = new Map<string, AgentEvent>();
+    if (!run) return result;
+    const attempts = new Map(run.nodes.map((node) => [node.nodeRunId, node.attempt]));
+    for (const event of events) {
+      if (event.role === 'user' && event.nodeRunId && attempts.get(event.nodeRunId) === event.attempt && !result.has(event.nodeRunId)) result.set(event.nodeRunId, event);
+    }
+    return result;
+  }, [events, run]);
 
   if (!run) return <section className="h-full overflow-auto p-3" aria-label="Run panel">
     <PanelHeading />
@@ -90,11 +100,23 @@ export function RunPanel() {
       upsertRun(updated); setRetryStage(undefined); setRetryAddendum('');
     } catch (error) { setActionError(errorMessage(error)); }
   };
+  const openReport = () => {
+    setReport({ loading: true });
+    void apiClient.getReport(run.runId)
+      .then((content) => setReport({ loading: false, content }))
+      .catch((error) => setReport({ loading: false, error: errorMessage(error) }));
+  };
+  const downloadReport = () => {
+    if (!report?.content) return;
+    const url = URL.createObjectURL(new Blob([report.content], { type: 'text/markdown;charset=utf-8' }));
+    const link = document.createElement('a'); link.href = url; link.download = `mat-run-${run.runId}.md`; link.click(); URL.revokeObjectURL(url);
+  };
 
   const card = (node: NodeRun) => <NodeCard
     key={node.nodeRunId}
     node={node}
     latestEvent={latestByNode.get(node.nodeRunId)}
+    {...(seedByNode.get(node.nodeRunId)?.text ? { seedPrompt: seedByNode.get(node.nodeRunId)!.text } : {})}
     now={now}
     confirmingKill={killConfirmation === node.nodeRunId}
     onRequestKill={() => setKillConfirmation(node.nodeRunId)}
@@ -105,7 +127,7 @@ export function RunPanel() {
   />;
 
   return <section className="h-full overflow-auto p-3" aria-label="Run panel">
-    <PanelHeading />
+    <PanelHeading onReport={openReport} />
     <p className="mb-3 line-clamp-3 text-sm text-ink" title={run.task}>{run.task}</p>
     {actionError && <p role="alert" className="mb-3 rounded border border-red-900 bg-red-950/40 p-2 text-xs text-red-200">{actionError}</p>}
     {orchestrator && <div className="mb-4" data-testid="orchestrator-group">
@@ -135,16 +157,22 @@ export function RunPanel() {
     <ModalDialog open={retryStage !== undefined} title={retryStage ? `Retry ${retryStage.name}` : 'Retry stage'} onClose={() => setRetryStage(undefined)} footer={<button type="button" onClick={() => void submitRetry()} className="rounded bg-violet-700 px-3 py-1.5 text-sm text-white hover:bg-violet-600">Retry stage</button>}>
       <label className="block text-xs text-muted">Optional prompt addendum<textarea value={retryAddendum} onChange={(event) => setRetryAddendum(event.target.value)} rows={4} placeholder="What should the stage do differently?" className="mt-2 w-full resize-y rounded border border-border bg-zinc-950 p-2 text-sm text-ink outline-none focus:border-violet-500" /></label>
     </ModalDialog>
+    <ModalDialog open={report !== undefined} title={`Run report · ${run.runId}`} onClose={() => setReport(undefined)} footer={report?.content ? <div className="flex justify-end gap-2"><button type="button" onClick={() => void navigator.clipboard.writeText(report.content ?? '')} className="rounded-none border border-zinc-700 px-3 py-1.5 text-xs text-zinc-200 hover:border-emerald-600">Copy</button><button type="button" onClick={downloadReport} className="rounded-none bg-emerald-700 px-3 py-1.5 text-xs text-white hover:bg-emerald-600">Download .md</button></div> : undefined}>
+      {report?.loading && <p className="text-xs text-zinc-400">Loading report…</p>}
+      {report?.error && <p role="alert" className="text-xs text-red-300">{report.error}</p>}
+      {report?.content && <pre className="max-h-[65vh] overflow-auto whitespace-pre-wrap text-xs text-zinc-200">{report.content}</pre>}
+    </ModalDialog>
   </section>;
 }
 
-function PanelHeading() {
-  return <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Run</h2>;
+function PanelHeading({ onReport }: { onReport?: () => void }) {
+  return <div className="mb-3 flex items-center justify-between"><h2 className="text-xs font-semibold uppercase tracking-wider text-muted">Run</h2>{onReport && <button type="button" onClick={onReport} className="rounded-none border border-zinc-700 px-2 py-1 text-[11px] text-zinc-200 hover:border-emerald-600 hover:text-emerald-200">Report</button>}</div>;
 }
 
 interface NodeCardProps {
   node: NodeRun;
   latestEvent: AgentEvent | undefined;
+  seedPrompt?: string;
   now: number;
   confirmingKill: boolean;
   onRequestKill(): void;
@@ -154,7 +182,7 @@ interface NodeCardProps {
   onFocus(): void;
 }
 
-export function NodeCard({ node, latestEvent, now, confirmingKill, onRequestKill, onCancelKill, onKill, onPatch, onFocus }: NodeCardProps) {
+export function NodeCard({ node, latestEvent, seedPrompt, now, confirmingKill, onRequestKill, onCancelKill, onKill, onPatch, onFocus }: NodeCardProps) {
   const displayStatus = nodeDisplayStatus(node, latestEvent);
   const elapsed = elapsedForNode(node, now);
   const canKill = ['queued', 'running', 'stalled'].includes(node.status);
@@ -168,6 +196,9 @@ export function NodeCard({ node, latestEvent, now, confirmingKill, onRequestKill
       {node.attempt > 1 && <span className="rounded bg-violet-950 px-1.5 py-0.5 text-violet-200">attempt {node.attempt}</span>}
       <UsageSummary node={node} />
     </div>
+    <VerificationBadge node={node} />
+    {node.handoff && <p className="mb-2 text-[10px] text-zinc-400">← {node.handoff.priorNodeRunIds.length} upstream node(s){node.handoff.orchestratorContext ? ' + orchestrator context' : ''}{node.handoff.retryAddendum ? ' + retry note' : ''}</p>}
+    {seedPrompt && <Collapsible className="mb-2 text-[10px]" summary={<span className="text-sky-300">Seed prompt</span>}><pre className="max-h-48 overflow-auto whitespace-pre-wrap text-[10px] text-zinc-300">{seedPrompt}</pre></Collapsible>}
     {(['failed', 'killed'].includes(node.status) && node.error)
       ? <p className="mb-2 line-clamp-3 break-words text-xs text-red-300" title={node.error}>{node.error}</p>
       : <p className="mb-2 line-clamp-2 text-xs text-zinc-300" title={latestEvent?.text}>{latestEvent?.text || (node.status === 'queued' ? 'Waiting to start' : 'Waiting for events…')}</p>}
@@ -183,6 +214,16 @@ export function NodeCard({ node, latestEvent, now, confirmingKill, onRequestKill
   </article>;
 }
 
+function VerificationBadge({ node }: { node: NodeRun }) {
+  const verification = node.verification;
+  if (!verification || (verification.status === 'skipped' && verification.reason === 'no-verify-command')) return null;
+  if (verification.status === 'passed') return <span className="mb-2 inline-flex rounded-none bg-emerald-950 px-1.5 py-0.5 text-[10px] text-emerald-300">✓ verified</span>;
+  if (verification.status === 'failed' || verification.status === 'error') {
+    return <span title={verification.reason ?? (verification.exitCode === undefined ? 'checks failed' : `exit ${String(verification.exitCode)}`)} className="mb-2 inline-flex rounded-none bg-red-950 px-1.5 py-0.5 text-[10px] text-red-300">✗ checks failed</span>;
+  }
+  return <span title={verification.reason} className="mb-2 inline-flex rounded-none bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-300">– unverified</span>;
+}
+
 function UsageSummary({ node }: { node: NodeRun }) {
   if (!node.usage) return null;
   const tokens = (node.usage.inputTokens ?? 0) + (node.usage.outputTokens ?? 0);
@@ -192,8 +233,10 @@ function UsageSummary({ node }: { node: NodeRun }) {
 export function DecisionCard({ decision, run }: { decision: GateDecision; run: RunSnapshot }) {
   const display = decisionDisplay(decision);
   const labels = new Map(run.nodes.map((node) => [node.nodeRunId, node.label]));
+  const summary = verificationSummary(run.nodes.filter((node) => node.stageId === decision.stageId));
   return <article className={`mt-2 rounded-md border bg-emerald-950/20 p-2.5 ${display.borderClass}`} data-degraded={display.degraded ? 'true' : 'false'}>
     <header className="mb-1 flex items-center justify-between gap-2"><span className={`text-xs font-semibold uppercase ${display.actionClass}`}>{display.label}</span><span className="text-[10px] text-muted">gate {decision.gateAttempt}</span></header>
+    {summary.passed + summary.failed + summary.skipped > 0 && <span className="mb-1 inline-flex rounded-none border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-300">{summary.passed} passed / {summary.failed} failed / {summary.skipped} skipped</span>}
     <p className="text-xs leading-relaxed text-emerald-50/90">{decision.rationale}</p>
     {decision.retryNodeRunIds && decision.retryNodeRunIds.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{decision.retryNodeRunIds.map((id) => <span key={id} className="rounded bg-amber-950 px-1.5 py-0.5 text-[10px] text-amber-200">retry: {labels.get(id) ?? id}</span>)}</div>}
     {decision.promptAddendum && <p className="mt-2 border-l border-amber-600 pl-2 text-[11px] text-amber-100">{decision.promptAddendum}</p>}

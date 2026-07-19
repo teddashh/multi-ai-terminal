@@ -10,7 +10,7 @@ import { emitRetryBoundary, killActiveNode, markNodeKilled, registerNodeContext,
 
 const dirs: string[] = [];
 const oldDataDir = process.env.MAT_DATA_DIR;
-const stage: Stage = { id: 's', name: 'Stage', slots: [], isolation: 'none', join: 'all', timeoutSec: 10, stallSec: 10, gate: false };
+const stage: Stage = { id: 's', name: 'Stage', slots: [], isolation: 'none', join: 'all', timeoutSec: 10, stallSec: 10, gate: false, requireVerified: false };
 const makeNode = (): NodeRun => ({ nodeRunId: 's.slot.0', stageId: 's', slotId: 'slot', instanceIndex: 0, agent: { provider: 'mock', permission: 'safe' }, label: 'Slot · mock', status: 'queued', attempt: 1, cwd: '/' });
 
 function setup(adapter: Adapter, persist?: () => Promise<void>): { node: NodeRun; events: () => AgentEvent[]; persisted: { count: number } } {
@@ -228,10 +228,12 @@ describe('node runner lifecycle', () => {
   });
 
   it('uses one retry reset helper for attempt state, sessions, and tool counts', () => {
-    const node = { ...makeNode(), status: 'done' as const, sessionRef: 'stale', resultText: 'old', pid: 123, startedAt: 1, endedAt: 2 };
+    const node = { ...makeNode(), status: 'done' as const, sessionRef: 'stale', resultText: 'old', pid: 123, startedAt: 1, endedAt: 2, verification: { status: 'passed' as const }, handoff: { priorNodeRunIds: ['old'], orchestratorContext: true, retryAddendum: true } };
     resetNodeForRetry(node);
     expect(node).toMatchObject({ attempt: 2, status: 'queued' });
     expect(node.sessionRef).toBeUndefined();
     expect(node.resultText).toBeUndefined();
+    expect(node.verification).toBeUndefined();
+    expect(node.handoff).toBeUndefined();
   });
 });

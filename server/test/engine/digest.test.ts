@@ -38,6 +38,20 @@ describe('fan-in digest', () => {
     expect(buildDigest([candidate])).toContain('tool-calls: 0');
   });
 
+  it.each([
+    [{ status: 'passed', command: 'npm test', durationMs: 1500 }, 'verification: passed (npm test, 1.5s)'],
+    [{ status: 'failed', exitCode: 1, durationMs: 200, outputTail: 'assertion failed' }, 'verification: failed (exit 1, 0.2s)'],
+    [{ status: 'error', reason: 'timeout', outputTail: 'hung' }, 'verification: error (timeout)'],
+    [{ status: 'skipped', reason: 'no-changes' }, 'verification: skipped (no-changes)'],
+  ] as const)('includes normalized verification evidence for %s', (verification, expected) => {
+    const candidate = { ...node('verified'), verification } as NodeRun;
+    const digest = buildDigest([candidate]);
+    expect(digest).toContain(expected);
+    if (verification.status === 'failed' || verification.status === 'error') expect(digest).toContain('verification-output:');
+  });
+
+  it('marks absent verification as n/a', () => expect(buildDigest([node('plain')])).toContain('verification: n/a'));
+
   it('assembles patch headers and paths under the 30k cap', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mat-digest-')); dirs.push(dir);
     const first = join(dir, 'one.patch');

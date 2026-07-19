@@ -19,7 +19,7 @@
         { "id": "grok", "label": "Grok", "agent": { "provider": "grok", "model": "grok-4.5", "permission": "safe" }, "count": 1, "promptTemplate": "Review {{task}} in {{workspace_name}} at {{workspace_path}} independently. Focus on correctness and risks. Retry guidance: {{retry_addendum}}" },
         { "id": "agy", "label": "Agy", "agent": { "provider": "agy", "model": "Gemini 3.1 Pro (High)", "permission": "safe" }, "count": 1, "promptTemplate": "Review {{task}} in {{workspace_name}} at {{workspace_path}} independently. Focus on correctness and risks. Retry guidance: {{retry_addendum}}" }
       ],
-      "isolation": "none", "join": "all", "timeoutSec": 1800, "stallSec": 240, "gate": false
+      "isolation": "none", "join": "all", "timeoutSec": 1800, "stallSec": 240, "gate": false, "requireVerified": false
     },
     {
       "id": "synthesize",
@@ -27,7 +27,7 @@
       "slots": [
         { "id": "synthesizer", "label": "Synthesizer", "agent": { "provider": "claude", "model": "sonnet", "permission": "safe" }, "count": 1, "promptTemplate": "Synthesize a single verdict for {{task}} from these independent reviews:\n\n{{prior_stage_digest}}\n\nCall out agreements, disagreements, and required fixes." }
       ],
-      "isolation": "none", "join": "all", "timeoutSec": 1800, "stallSec": 240, "gate": false
+      "isolation": "none", "join": "all", "timeoutSec": 1800, "stallSec": 240, "gate": false, "requireVerified": false
     }
   ],
   "maxParallel": 4,

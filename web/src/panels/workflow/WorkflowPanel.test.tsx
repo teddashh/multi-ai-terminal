@@ -49,7 +49,7 @@ const workflow: WorkflowDef = {
   orchestrator: { enabled: true, gateTimeoutSec: 300, agent: { provider: 'codex', model: 'gpt-test', permission: 'auto' } },
   stages: [{
     id: 'round-table', name: 'Round Table', isolation: 'none', join: 'all', timeoutSec: 1_800,
-    stallSec: 240, gate: true,
+    stallSec: 240, gate: true, requireVerified: false,
     slots: [{
       id: 'r1', label: 'R1', count: 1,
       agent: { provider: 'codex', model: 'gpt-test', effort: 'high', permission: 'safe' },

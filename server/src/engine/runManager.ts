@@ -157,7 +157,7 @@ function startExecution(run: RunSnapshot, startIndex = 0): void {
   void execution.catch(() => undefined);
 }
 
-export async function createRun(req: RunCreateRequest): Promise<RunSnapshot> {
+export async function createRun(req: RunCreateRequest, providerVersions?: Record<string, string>): Promise<RunSnapshot> {
   const workspace = await getWorkspace(req.workspaceId);
   const workflow = await resolvedWorkflow(req);
   const run: RunSnapshot = {
@@ -168,6 +168,7 @@ export async function createRun(req: RunCreateRequest): Promise<RunSnapshot> {
     status: 'created',
     nodes: buildNodes(workflow, workspace.path),
     gateDecisions: [],
+    ...(providerVersions && Object.keys(providerVersions).length > 0 ? { providerVersions: structuredClone(providerVersions) } : {}),
     createdAt: Date.now(),
   };
   return withRunMutation(run.runId, async () => {

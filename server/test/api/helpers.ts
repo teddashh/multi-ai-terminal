@@ -27,6 +27,7 @@ export const workflow = (overrides: Partial<WorkflowDef> = {}): WorkflowDef => (
     timeoutSec: 60,
     stallSec: 30,
     gate: true,
+    requireVerified: false,
   }],
   maxParallel: 1,
   maxRetriesPerStage: 2,
@@ -76,6 +77,7 @@ export function fakeApiDependencies(run = runSnapshot()): ApiRouteDependencies {
   const workflows = [workflow()];
   return {
     providers: async () => [],
+    report: (snapshot) => `# Run report — ${snapshot.workflow.name}\n`,
     workspaces: {
       list: async () => workspaces,
       get: async (id) => {
@@ -91,7 +93,10 @@ export function fakeApiDependencies(run = runSnapshot()): ApiRouteDependencies {
       update: async (id, value) => {
         const index = workspaces.findIndex((workspace) => workspace.id === id);
         if (index < 0) throw Object.assign(new Error(`Workspace not found: ${id}`), { code: 'NOT_FOUND' });
-        workspaces[index] = { ...workspaces[index]!, ...value };
+        const next = { ...workspaces[index]!, ...value };
+        if (Object.hasOwn(value, 'verifyCommand') && value.verifyCommand === undefined) delete next.verifyCommand;
+        if (Object.hasOwn(value, 'verifyTimeoutSec') && value.verifyTimeoutSec === undefined) delete next.verifyTimeoutSec;
+        workspaces[index] = next;
         return workspaces[index]!;
       },
       delete: async (id) => {
@@ -108,13 +113,14 @@ export function fakeApiDependencies(run = runSnapshot()): ApiRouteDependencies {
       duplicate: async (id) => ({ ...workflows.find((item) => item.id === id)!, id: `${id}-copy`, name: 'Custom Copy' }),
     },
     runs: {
-      create: async (request: RunCreateRequest) => {
+      create: async (request: RunCreateRequest, providerVersions?: Record<string, string>) => {
         currentRun = runSnapshot({
           workspaceId: request.workspaceId,
           task: request.task,
           workflow: request.workflowOverride ?? workflow({ id: request.workflowId }),
           status: 'created',
           endedAt: undefined,
+          ...(providerVersions ? { providerVersions } : {}),
         } as Partial<RunSnapshot>);
         return currentRun;
       },

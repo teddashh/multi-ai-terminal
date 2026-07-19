@@ -16,8 +16,8 @@ export class ApiClient {
   getProviders(): Promise<ProviderInfo[]> { return this.request('/api/providers'); }
   getWorkspaces(): Promise<Workspace[]> { return this.request('/api/workspaces'); }
   getWorkspace(id: string): Promise<Workspace> { return this.request(`/api/workspaces/${encodeURIComponent(id)}`); }
-  createWorkspace(value: { name: string; path: string; defaultWorkflowId?: string }): Promise<Workspace> { return this.request('/api/workspaces', { method: 'POST', body: value }); }
-  updateWorkspace(id: string, value: Partial<Pick<Workspace, 'name'|'path'|'defaultWorkflowId'>>): Promise<Workspace> { return this.request(`/api/workspaces/${encodeURIComponent(id)}`, { method: 'PATCH', body: value }); }
+  createWorkspace(value: { name: string; path: string; defaultWorkflowId?: string; verifyCommand?: string; verifyTimeoutSec?: number }): Promise<Workspace> { return this.request('/api/workspaces', { method: 'POST', body: value }); }
+  updateWorkspace(id: string, value: Partial<Pick<Workspace, 'name'|'path'|'defaultWorkflowId'>> & { verifyCommand?: string | null; verifyTimeoutSec?: number | null }): Promise<Workspace> { return this.request(`/api/workspaces/${encodeURIComponent(id)}`, { method: 'PATCH', body: value }); }
   deleteWorkspace(id: string): Promise<void> { return this.request(`/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
   getWorkflows(): Promise<WorkflowDef[]> { return this.request('/api/workflows'); }
   createWorkflow(value: WorkflowDef): Promise<WorkflowDef> { return this.request('/api/workflows', { method: 'POST', body: value }); }
@@ -28,6 +28,7 @@ export class ApiClient {
   getRuns(query: { workspaceId?: string; limit?: number; before?: number } = {}): Promise<RunSnapshot[]> { return this.request(`/api/runs${queryString(query)}`); }
   getRun(id: string): Promise<RunSnapshot> { return this.request(`/api/runs/${encodeURIComponent(id)}`); }
   getEvents(id: string, afterSeq = 0, limit = 1000): Promise<AgentEvent[]> { return this.request(`/api/runs/${encodeURIComponent(id)}/events${queryString({ afterSeq, limit })}`); }
+  getReport(id: string): Promise<string> { return this.request(`/api/runs/${encodeURIComponent(id)}/report`, { response: 'text' }); }
   getPatch(id: string, nodeRunId: string): Promise<string> { return this.request(`/api/runs/${encodeURIComponent(id)}/patches/${encodeURIComponent(nodeRunId)}`, { response: 'text' }); }
   abortRun(id: string): Promise<RunSnapshot> { return this.request(`/api/runs/${encodeURIComponent(id)}/abort`, { method: 'POST' }); }
   killNode(id: string, nodeRunId: string): Promise<RunSnapshot> { return this.request(`/api/runs/${encodeURIComponent(id)}/nodes/${encodeURIComponent(nodeRunId)}/kill`, { method: 'POST' }); }

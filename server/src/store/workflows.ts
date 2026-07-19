@@ -6,6 +6,7 @@ import { z } from 'zod';
 import planningJson from '../../../shared/src/presets/planning.json' with { type: 'json' };
 import buildJson from '../../../shared/src/presets/build.json' with { type: 'json' };
 import reviewJson from '../../../shared/src/presets/review.json' with { type: 'json' };
+import pipelineJson from '../../../shared/src/presets/pipeline.json' with { type: 'json' };
 import { resolveDataDir } from './dataDir.js';
 
 export class WorkflowStoreError extends Error {
@@ -15,7 +16,7 @@ export class WorkflowStoreError extends Error {
   }
 }
 
-const builtinWorkflows = [planningJson, buildJson, reviewJson].map((value) =>
+const builtinWorkflows = [planningJson, buildJson, reviewJson, pipelineJson].map((value) =>
   WorkflowDefSchema.parse({ ...value, builtin: true }) as WorkflowDef,
 );
 const builtinIds = new Set(builtinWorkflows.map((workflow) => workflow.id));

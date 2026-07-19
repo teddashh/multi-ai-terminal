@@ -14,8 +14,11 @@ export function WorkspacePanel({ api = apiClient }: WorkspacePanelProps) {
   const setWorkspaces = useMatStore((state) => state.setWorkspaces);
   const [now, setNow] = useState(Date.now());
   const [addOpen, setAddOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string>();
   const [name, setName] = useState('');
   const [path, setPath] = useState('');
+  const [verifyCommand, setVerifyCommand] = useState('');
+  const [verifyTimeout, setVerifyTimeout] = useState('');
   const [formError, setFormError] = useState<string>();
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string>();
@@ -30,9 +33,21 @@ export function WorkspacePanel({ api = apiClient }: WorkspacePanelProps) {
     .filter((run) => ACTIVE_RUN_STATUSES.has(run.status))
     .map((run) => run.workspaceId)), [runs]);
 
-  const closeAdd = () => {
+  const closeDialog = () => {
     if (saving) return;
-    setAddOpen(false); setFormError(undefined);
+    setAddOpen(false); setEditingId(undefined); setFormError(undefined);
+  };
+
+  const openAdd = () => {
+    setName(''); setPath(''); setVerifyCommand(''); setVerifyTimeout(''); setEditingId(undefined); setAddOpen(true); setFormError(undefined);
+  };
+
+  const openEdit = (id: string) => {
+    const workspace = workspaces.find((candidate) => candidate.id === id);
+    if (!workspace) return;
+    setName(workspace.name); setPath(workspace.path); setVerifyCommand(workspace.verifyCommand ?? '');
+    setVerifyTimeout(workspace.verifyTimeoutSec === undefined ? '' : String(workspace.verifyTimeoutSec));
+    setEditingId(id); setAddOpen(false); setFormError(undefined);
   };
 
   const submitWorkspace = async (event: FormEvent) => {
@@ -40,12 +55,27 @@ export function WorkspacePanel({ api = apiClient }: WorkspacePanelProps) {
     const cleanName = name.trim(); const cleanPath = path.trim();
     if (!cleanName) { setFormError('Name is required.'); return; }
     if (!isAbsolutePath(cleanPath)) { setFormError('Path must be absolute.'); return; }
+    const timeout = verifyTimeout.trim() === '' ? undefined : Number(verifyTimeout);
+    if (timeout !== undefined && (!Number.isInteger(timeout) || timeout <= 0)) { setFormError('Verify timeout must be a positive whole number.'); return; }
     setSaving(true); setFormError(undefined);
     try {
-      const workspace = await api.createWorkspace({ name: cleanName, path: cleanPath });
-      setWorkspaces([...workspaces, workspace]);
-      select(workspace.id);
-      setName(''); setPath(''); setAddOpen(false);
+      if (editingId) {
+        const workspace = await api.updateWorkspace(editingId, {
+          name: cleanName,
+          verifyCommand: verifyCommand.trim() || null,
+          verifyTimeoutSec: timeout ?? null,
+        });
+        setWorkspaces(workspaces.map((candidate) => candidate.id === editingId ? workspace : candidate));
+      } else {
+        const workspace = await api.createWorkspace({
+          name: cleanName, path: cleanPath,
+          ...(verifyCommand.trim() ? { verifyCommand: verifyCommand.trim() } : {}),
+          ...(timeout === undefined ? {} : { verifyTimeoutSec: timeout }),
+        });
+        setWorkspaces([...workspaces, workspace]);
+        select(workspace.id);
+      }
+      setName(''); setPath(''); setVerifyCommand(''); setVerifyTimeout(''); setAddOpen(false); setEditingId(undefined);
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Could not add workspace.');
     } finally { setSaving(false); }
@@ -67,7 +97,7 @@ export function WorkspacePanel({ api = apiClient }: WorkspacePanelProps) {
   return <section aria-labelledby="workspace-heading" className="flex h-full min-h-0 flex-col">
     <header className="flex items-center justify-between border-b border-border px-3 py-3">
       <h2 id="workspace-heading" className="text-xs font-semibold uppercase tracking-wider text-muted">Workspaces</h2>
-      <button type="button" onClick={() => setAddOpen(true)} className="rounded border border-border px-2 py-1 text-xs text-ink hover:border-accent" aria-label="Add workspace">+ Add</button>
+      <button type="button" onClick={openAdd} className="rounded border border-border px-2 py-1 text-xs text-ink hover:border-accent" aria-label="Add workspace">+ Add</button>
     </header>
     <div className="min-h-0 flex-1 space-y-2 overflow-auto p-3">
       {workspaces.map((workspace) => {
@@ -83,7 +113,8 @@ export function WorkspacePanel({ api = apiClient }: WorkspacePanelProps) {
             <span className="mt-1 block truncate text-xs text-muted" title={workspace.path}>{shortPath(workspace.path)}</span>
             {workspace.lastRun && <span className="mt-1 block truncate text-[11px] text-muted">{lastRunBadge(workspace.lastRun, now)}</span>}
           </button>
-          <div className="border-t border-border/70 px-2 py-1.5 text-right">
+          <div className="flex items-center justify-end gap-3 border-t border-border/70 px-2 py-1.5 text-right">
+            <button type="button" className="text-[11px] text-muted hover:text-ink" onClick={() => openEdit(workspace.id)}>Edit</button>
             {confirmDelete === workspace.id
               ? <span className="inline-flex items-center gap-2 text-[11px]"><span className="text-muted">Delete?</span><button type="button" className="text-red-300 hover:text-red-200" onClick={() => void deleteWorkspace(workspace.id)}>Yes</button><button type="button" className="text-muted hover:text-ink" onClick={() => setConfirmDelete(undefined)}>No</button></span>
               : <button type="button" className="text-[11px] text-muted hover:text-red-300" onClick={() => { setConfirmDelete(workspace.id); setDeleteError(undefined); }}>Delete</button>}
@@ -94,10 +125,12 @@ export function WorkspacePanel({ api = apiClient }: WorkspacePanelProps) {
       {deleteError && <p role="alert" className="text-xs text-red-300">{deleteError}</p>}
     </div>
 
-    <ModalDialog open={addOpen} title="Add workspace" onClose={closeAdd} footer={<div className="flex justify-end gap-2"><button type="button" onClick={closeAdd} className="rounded px-3 py-1.5 text-sm text-muted hover:bg-zinc-800">Cancel</button><button type="submit" form="add-workspace-form" disabled={saving} className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-zinc-950 disabled:opacity-50">{saving ? 'Adding…' : 'Add workspace'}</button></div>}>
-      <form id="add-workspace-form" aria-label="Add workspace" onSubmit={(event) => void submitWorkspace(event)} className="space-y-4">
+    <ModalDialog open={addOpen || editingId !== undefined} title={editingId ? 'Edit workspace' : 'Add workspace'} onClose={closeDialog} footer={<div className="flex justify-end gap-2"><button type="button" onClick={closeDialog} className="rounded px-3 py-1.5 text-sm text-muted hover:bg-zinc-800">Cancel</button><button type="submit" form="workspace-form" disabled={saving} className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-zinc-950 disabled:opacity-50">{saving ? 'Saving…' : editingId ? 'Save' : 'Add workspace'}</button></div>}>
+      <form id="workspace-form" aria-label={editingId ? 'Edit workspace' : 'Add workspace'} onSubmit={(event) => void submitWorkspace(event)} className="space-y-4">
         <label className="block text-sm"><span className="mb-1 block text-muted">Name</span><input autoFocus required value={name} onChange={(event) => setName(event.target.value)} className="w-full rounded border border-border bg-zinc-950 px-3 py-2 text-ink outline-none focus:border-accent" /></label>
-        <label className="block text-sm"><span className="mb-1 block text-muted">Absolute path</span><input required value={path} onChange={(event) => setPath(event.target.value)} placeholder="/home/ted/projects/example" className="w-full rounded border border-border bg-zinc-950 px-3 py-2 text-ink outline-none focus:border-accent" /></label>
+        <label className="block text-sm"><span className="mb-1 block text-muted">Absolute path</span><input required disabled={editingId !== undefined} value={path} onChange={(event) => setPath(event.target.value)} placeholder="/home/ted/projects/example" className="w-full rounded border border-border bg-zinc-950 px-3 py-2 text-ink outline-none focus:border-accent disabled:opacity-60" /></label>
+        <label className="block text-sm"><span className="mb-1 block text-muted">Verify command</span><input value={verifyCommand} onChange={(event) => setVerifyCommand(event.target.value)} placeholder="npm test" className="w-full rounded border border-border bg-zinc-950 px-3 py-2 font-mono text-ink outline-none focus:border-accent" /></label>
+        <label className="block text-sm"><span className="mb-1 block text-muted">Verify timeout (seconds)</span><input type="number" min={1} step={1} value={verifyTimeout} onChange={(event) => setVerifyTimeout(event.target.value)} placeholder="600" className="w-full rounded border border-border bg-zinc-950 px-3 py-2 text-ink outline-none focus:border-accent" /></label>
         {formError && <p role="alert" className="rounded border border-red-900 bg-red-950/40 px-3 py-2 text-sm text-red-300">{formError}</p>}
       </form>
     </ModalDialog>

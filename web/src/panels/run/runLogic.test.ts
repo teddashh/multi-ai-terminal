@@ -1,6 +1,6 @@
 import type { AgentEvent, GateDecision, NodeRun, RunSnapshot } from '@mat/shared';
 import { describe, expect, it } from 'vitest';
-import { canRetryStage, decisionDisplay, formatElapsed, nodeDisplayStatus } from './runLogic.js';
+import { canRetryStage, decisionDisplay, formatElapsed, nodeDisplayStatus, verificationSummary } from './runLogic.js';
 
 const node: NodeRun = {
   nodeRunId: 's1.r1.0', stageId: 's1', slotId: 'r1', instanceIndex: 0,
@@ -15,7 +15,7 @@ function run(overrides: Partial<RunSnapshot> = {}): RunSnapshot {
     workflow: {
       schemaVersion: 1, id: 'wf', name: 'Workflow', description: '', maxParallel: 2, maxRetriesPerStage: 2,
       orchestrator: { enabled: false, agent: { provider: 'mock', permission: 'safe' }, gateTimeoutSec: 30 },
-      stages: [{ id: 's1', name: 'One', slots: [], isolation: 'none', join: 'all', timeoutSec: 60, stallSec: 30, gate: true }],
+      stages: [{ id: 's1', name: 'One', slots: [], isolation: 'none', join: 'all', timeoutSec: 60, stallSec: 30, gate: true, requireVerified: false }],
     },
     nodes: [node], gateDecisions: [], ...overrides,
   };
@@ -47,5 +47,16 @@ describe('run panel logic', () => {
     expect(canRetryStage({ ...gated, status: 'done', gateDecisions: [decision] }, 's1')).toBe(true);
     expect(canRetryStage({ ...gated, gateDecisions: [decision, { ...decision, gateAttempt: 2 }, { ...decision, gateAttempt: 3 }] }, 's1')).toBe(false);
     expect(canRetryStage(run({ nodes: [{ ...node, attempt: 3 }] }), 's1')).toBe(false);
+  });
+
+  it('summarizes normalized verification states', () => {
+    expect(verificationSummary([
+      { ...node, verification: { status: 'passed' } },
+      { ...node, nodeRunId: 'failed', verification: { status: 'failed' } },
+      { ...node, nodeRunId: 'error', verification: { status: 'error', reason: 'timeout' } },
+      { ...node, nodeRunId: 'skipped', verification: { status: 'skipped', reason: 'no-changes' } },
+      { ...node, nodeRunId: 'unconfigured', verification: { status: 'skipped', reason: 'no-verify-command' } },
+      { ...node, nodeRunId: 'absent' },
+    ])).toEqual({ passed: 1, failed: 2, skipped: 1 });
   });
 });

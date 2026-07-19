@@ -31,6 +31,7 @@ export function buildGatePrompt(run: RunSnapshot, stage: Stage, digest: string, 
     `Evaluate stage "${stage.name}" (${stage.id}).`,
     priorContext ? `Prior orchestrator context:\n${priorContext}` : '',
     `Stage results:\n${digest}`,
+    "Verification results are deterministic evidence from the workspace's configured check command. Never claim a candidate works when its verification failed; prefer retrying failed-verification candidates with a corrective promptAddendum.",
     '',
     reask
       ? 'Your previous response was invalid. Reply with ONLY one fenced json block.'

@@ -11,7 +11,7 @@ import { WorkspacePanel } from './WorkspacePanel.js';
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const apiMocks = vi.hoisted(() => ({
-  createWorkspace: vi.fn(), deleteWorkspace: vi.fn(),
+  createWorkspace: vi.fn(), updateWorkspace: vi.fn(), deleteWorkspace: vi.fn(),
 }));
 
 vi.mock('../../api/client.js', () => ({ apiClient: apiMocks }));
@@ -34,14 +34,14 @@ function renderPanel(element: ReactElement): void {
 
 const workspaces: Workspace[] = [
   {
-    id: 'w1', name: 'Castle', path: '/home/ted/projects/castle', isGit: true,
+    id: 'w1', name: 'Castle', path: '/home/ted/projects/castle', isGit: true, verifyCommand: 'npm test', verifyTimeoutSec: 90,
     lastRun: { runId: 'r1', workflowName: 'Planning', status: 'done', at: Date.now() - 2 * 60 * 60_000 },
   },
   { id: 'w2', name: 'Notes', path: '/srv/notes', isGit: false },
 ];
 
 beforeEach(() => {
-  apiMocks.createWorkspace.mockReset(); apiMocks.deleteWorkspace.mockReset();
+  apiMocks.createWorkspace.mockReset(); apiMocks.updateWorkspace.mockReset(); apiMocks.deleteWorkspace.mockReset();
   matStore.setState({ workspaces, selectedWorkspaceId: 'w1', runs: {
     live: { runId: 'live', workspaceId: 'w1', status: 'running' } as RunSnapshot,
   } });
@@ -76,5 +76,17 @@ describe('WorkspacePanel', () => {
     await act(async () => { fireEvent.submit(screen.getByRole('form', { name: 'Add workspace' })); });
 
     expect((await screen.findByRole('alert')).textContent).toContain('Path does not exist');
+  });
+
+  it('edits and clears verification settings with null', async () => {
+    apiMocks.updateWorkspace.mockResolvedValueOnce({ ...workspaces[0], name: 'Castle Updated', verifyCommand: undefined, verifyTimeoutSec: undefined });
+    renderPanel(<WorkspacePanel />);
+    act(() => fireEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0]!));
+    expect((screen.getByLabelText('Verify command') as HTMLInputElement).value).toBe('npm test');
+    act(() => fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Castle Updated' } }));
+    act(() => fireEvent.change(screen.getByLabelText('Verify command'), { target: { value: '' } }));
+    act(() => fireEvent.change(screen.getByLabelText('Verify timeout (seconds)'), { target: { value: '' } }));
+    await act(async () => { fireEvent.submit(screen.getByRole('form', { name: 'Edit workspace' })); });
+    expect(apiMocks.updateWorkspace).toHaveBeenCalledWith('w1', { name: 'Castle Updated', verifyCommand: null, verifyTimeoutSec: null });
   });
 });

@@ -14,6 +14,12 @@
 - **階段隔離** — 每個節點可選 git worktree 隔離;每次嘗試的改動會擷取成二進位 patch,可在 UI 中檢視並套用。
 - **訊息流面板** — 所有 agent 的所有事件,分為**你的訊息 / agent 回覆 / 工具操作 / 思考過程**四類,虛擬化捲動、可按節點/角色/搜尋過濾,並可從持久事件日誌完整回放過去的執行。
 
+## 驗證（證據層）
+
+工作區可設定驗證指令（例如 `npm test`）與選用的逾時秒數（預設 600 秒）。使用 worktree 隔離且產生非空 patch 的候選項，會在擷取成品後執行該指令；正規化的通過、失敗、錯誤或略過結果，以及完整日誌，都會隨執行紀錄持久保存。把關階段可啟用 `requireVerified`；當沒有候選項通過、但有檢查失敗時，會在既有重試預算內重試失敗節點。
+
+UI 與產生的 Markdown 報告會區分「已產生、已審查、已前進、已驗證」。降級或未驗證的前進會明確標示，絕不隱藏。可在執行面板開啟 **Report**，或呼叫 `GET /api/runs/:id/report`，取得適合 PR 與回顧使用的結果、交接、決策、供應商 CLI 版本、用量、patch 與驗證證據。內建的 **Pipeline: Implement → Test → Review** 預設是最短的證據把關生產線。
+
 ## 快速開始
 
 需求:Node.js ≥ 20、建議 Git ≥ 2.32(較舊的 Git 會退回純 `git apply --check`),以及你想用的 agent CLI:`claude`、`codex`、`grok`、`agy`。
@@ -25,9 +31,9 @@ npm start                      # 在 http://127.0.0.1:7788 提供網頁 UI + API
 # 選項:--port N --host H --data-dir DIR --token SECRET
 ```
 
-打開 UI,新增工作區(絕對路徑),挑一個內建工作流(Planning / Build / Review),把 agent 拖到階段上,寫下任務,按 Start。
+打開 UI,新增工作區(絕對路徑),挑一個內建工作流(Planning / Build / Review / Pipeline),把 agent 拖到階段上,寫下任務,按 Start。
 
-開發模式:`npm run dev`(vite + API 熱重載)。測試:`npm test`(145 個測試)。型別檢查:`npm run typecheck`。
+開發模式:`npm run dev`(vite + API 熱重載)。測試:`npm test`。型別檢查:`npm run typecheck`。
 
 ## 桌面版
 
@@ -58,7 +64,7 @@ npm start                      # 在 http://127.0.0.1:7788 提供網頁 UI + API
 
 ## 資料
 
-`~/.multi-ai-terminal/`(可用 `--data-dir` / `MAT_DATA_DIR` 覆蓋):`workspaces.json`、`workflows/*.json`、`runs/<runId>/run.json` + `events.jsonl` + `raw/*.jsonl`(每次嘗試未經處理的 CLI 輸出)+ `artifacts/*.patch`。保留策略:每個工作區最近 100 次執行,刪除時一併清理 worktree 與分支。
+`~/.multi-ai-terminal/`(可用 `--data-dir` / `MAT_DATA_DIR` 覆蓋):`workspaces.json`、`workflows/*.json`、`runs/<runId>/run.json` + `events.jsonl` + `raw/*.jsonl`(每次嘗試未經處理的 CLI 輸出)+ `artifacts/*.patch` + `artifacts/*.verify.log`。保留策略:每個工作區最近 100 次執行,刪除時一併清理 worktree 與分支。
 
 ## 文件
 

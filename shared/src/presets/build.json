@@ -16,7 +16,7 @@
       "slots": [
         { "id": "builder", "label": "Builder", "agent": { "provider": "codex", "model": "gpt-5.6-sol", "effort": "high", "permission": "auto" }, "count": 2, "promptTemplate": "Implement {{task}} in {{workspace_name}} ({{workspace_path}}) in your isolated worktree. Instance {{instance_index}}. Prior context: {{orchestrator_context}}. Retry guidance: {{retry_addendum}}" }
       ],
-      "isolation": "worktree", "join": "all", "timeoutSec": 1800, "stallSec": 240, "gate": true
+      "isolation": "worktree", "join": "all", "timeoutSec": 1800, "stallSec": 240, "gate": true, "requireVerified": false
     },
     {
       "id": "review",
@@ -25,7 +25,7 @@
         { "id": "grok-review", "label": "Grok Reviewer", "agent": { "provider": "grok", "model": "grok-4.5", "permission": "safe" }, "count": 1, "promptTemplate": "Review the implementation patches for {{task}}.\nArtifact paths:\n{{artifact_paths}}\n\nPatches:\n{{patches}}\n\nCandidate digest:\n{{prior_stage_digest}}\nRetry guidance: {{retry_addendum}}" },
         { "id": "claude-review", "label": "Claude Reviewer", "agent": { "provider": "claude", "model": "sonnet", "permission": "safe" }, "count": 1, "promptTemplate": "Review the implementation patches for {{task}}.\nArtifact paths:\n{{artifact_paths}}\n\nPatches:\n{{patches}}\n\nCandidate digest:\n{{prior_stage_digest}}\nRetry guidance: {{retry_addendum}}" }
       ],
-      "isolation": "none", "join": "all", "timeoutSec": 1800, "stallSec": 240, "gate": true
+      "isolation": "none", "join": "all", "timeoutSec": 1800, "stallSec": 240, "gate": true, "requireVerified": false
     }
   ],
   "maxParallel": 4,

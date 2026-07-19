@@ -112,6 +112,8 @@ export function resetNodeForRetry(node: NodeRun): void {
   delete node.baseCommit;
   delete node.exitCode;
   delete node.sessionRef;
+  delete node.verification;
+  delete node.handoff;
   resetToolCount(node);
 }
 

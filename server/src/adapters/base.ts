@@ -159,8 +159,14 @@ export class ContentCoalescer {
   }
 }
 
+const VERSION_CACHE_TTL_MS = 10 * 60 * 1000;
+const versionCache = new Map<string, { expiresAt: number; value: Promise<{ ok: boolean; version?: string; detail?: string }> }>();
+
 export function probeVersion(command: string): Promise<{ ok: boolean; version?: string; detail?: string }> {
-  return new Promise((resolve) => {
+  const now = Date.now();
+  const cached = versionCache.get(command);
+  if (cached && cached.expiresAt > now) return cached.value;
+  const value = new Promise<{ ok: boolean; version?: string; detail?: string }>((resolve) => {
     let settled = false;
     let stdout = '';
     let stderr = '';
@@ -187,9 +193,11 @@ export function probeVersion(command: string): Promise<{ ok: boolean; version?: 
     child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
     child.once('error', (error) => finish({ ok: false, detail: humanizeError(error) }));
     child.once('close', (code) => {
-      const output = (stdout.trim() || stderr.trim());
+      const output = (stdout.trim() || stderr.trim()).split(/\r?\n/, 1)[0]?.trim().slice(0, 120) ?? '';
       if (code === 0) finish({ ok: true, ...(output ? { version: output } : {}) });
       else finish({ ok: false, detail: output || `version probe exited ${String(code)}` });
     });
   });
+  versionCache.set(command, { expiresAt: now + VERSION_CACHE_TTL_MS, value });
+  return value;
 }

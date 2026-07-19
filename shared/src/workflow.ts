@@ -23,6 +23,7 @@ export interface Stage {
   timeoutSec: number;
   stallSec: number;
   gate: boolean;
+  requireVerified: boolean;
 }
 export interface OrchestratorConfig {
   enabled: boolean;
@@ -65,6 +66,7 @@ export const StageSchema = z.object({
   timeoutSec: z.number().int().positive().default(1800),
   stallSec: z.number().int().positive().default(240),
   gate: z.boolean().default(true),
+  requireVerified: z.boolean().default(false),
 }).strict().superRefine((stage, ctx) => {
   const count = stage.slots.reduce((sum, slot) => sum + slot.count, 0);
   if (count > 12) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'stage fan-out must not exceed 12', path: ['slots'] });
@@ -87,7 +89,7 @@ export const WorkflowDefSchema = z.object({
 }).strict();
 
 export const DEFAULT_AGENT_BINDING: AgentBinding = { provider: 'claude', model: 'sonnet', permission: 'auto' };
-export const DEFAULT_STAGE = { isolation: 'none', join: 'all', timeoutSec: 1800, stallSec: 240, gate: true } as const;
+export const DEFAULT_STAGE = { isolation: 'none', join: 'all', timeoutSec: 1800, stallSec: 240, gate: true, requireVerified: false } as const;
 export const DEFAULT_ORCHESTRATOR: OrchestratorConfig = { enabled: true, agent: DEFAULT_AGENT_BINDING, gateTimeoutSec: 300 };
 export const applyAgentBindingDefaults = (value: unknown): AgentBinding => AgentBindingSchema.parse(value) as AgentBinding;
 export const applyStageDefaults = (value: unknown): Stage => StageSchema.parse(value) as Stage;

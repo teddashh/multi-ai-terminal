@@ -137,6 +137,11 @@ describe('run manager and stage state machine', () => {
     const finalPrompt = events.find((event) => event.role === 'user' && event.stageId === 'final');
     expect(finalPrompt?.text).toContain('RESULT: TASK=Build it');
     expect(finalPrompt?.text).toContain('carry this');
+    expect(run.nodes.find((node) => node.stageId === 'final')?.handoff).toEqual({
+      priorNodeRunIds: ['round.candidate.0', 'round.candidate.1', 'round.candidate.2'],
+      orchestratorContext: true,
+      retryAddendum: false,
+    });
     for (const node of run.nodes.filter((candidate) => candidate.stageId !== null)) {
       const attemptEvents = events.filter((event) => event.nodeRunId === node.nodeRunId && event.attempt === 1);
       expect(attemptEvents.slice(0, 3).map((event) => [event.role, event.data?.status])).toEqual([['user', undefined], ['system', 'spawned'], ['system', 'running']]);

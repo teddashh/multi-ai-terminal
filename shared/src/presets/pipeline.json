@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "pipeline",
+  "name": "Pipeline: Implement → Test → Review",
+  "description": "Shortest production line: one implementer, one test writer, one reviewer, with verification and gates between handoffs.",
+  "builtin": true,
+  "orchestrator": {
+    "enabled": true,
+    "agent": { "provider": "claude", "model": "sonnet", "permission": "auto" },
+    "gateTimeoutSec": 300
+  },
+  "stages": [
+    {
+      "id": "implement",
+      "name": "Implement",
+      "slots": [
+        { "id": "implementer", "label": "Implementer", "agent": { "provider": "claude", "model": "sonnet", "permission": "auto" }, "count": 1, "promptTemplate": "Implement {{task}} in {{workspace_name}} ({{workspace_path}}) in your isolated worktree. Prior context: {{orchestrator_context}}. Retry guidance: {{retry_addendum}}" }
+      ],
+      "isolation": "worktree", "join": "all", "timeoutSec": 1800, "stallSec": 240, "gate": true, "requireVerified": true
+    },
+    {
+      "id": "test",
+      "name": "Test",
+      "slots": [
+        { "id": "tester", "label": "Tester", "agent": { "provider": "codex", "model": "gpt-5.6-sol", "effort": "high", "permission": "auto" }, "count": 1, "promptTemplate": "You receive the implementation for {{task}} as patches:\n{{patches}}\n\nArtifact paths:\n{{artifact_paths}}\n\nCandidate digest:\n{{prior_stage_digest}}\nApply or extend it with meaningful tests for the change in your isolated worktree and make the suite pass. Prior context: {{orchestrator_context}}. Retry guidance: {{retry_addendum}}" }
+      ],
+      "isolation": "worktree", "join": "all", "timeoutSec": 1800, "stallSec": 240, "gate": true, "requireVerified": true
+    },
+    {
+      "id": "review",
+      "name": "Review",
+      "slots": [
+        { "id": "reviewer", "label": "Reviewer", "agent": { "provider": "claude", "model": "sonnet", "permission": "safe" }, "count": 1, "promptTemplate": "Review the combined patches for {{task}}:\n{{patches}}\n\nCandidate digest:\n{{prior_stage_digest}}\nGive a verdict and concrete findings. State explicitly whether the handoff between implementer and tester lost or distorted anything. Prior context: {{orchestrator_context}}. Retry guidance: {{retry_addendum}}" }
+      ],
+      "isolation": "none", "join": "all", "timeoutSec": 1800, "stallSec": 240, "gate": true, "requireVerified": false
+    }
+  ],
+  "maxParallel": 4,
+  "maxRetriesPerStage": 2
+}

@@ -58,6 +58,7 @@ export async function evaluateGate(run: RunSnapshot, stage: Stage, digest: strin
       timeoutSec: Math.max(0.001, remainingMs / 1000),
       stallSec: Math.max(1, Math.min(stage.stallSec, Math.ceil(remainingMs / 1000))),
       gate: false,
+      requireVerified: false,
     };
     let timer: ReturnType<typeof setTimeout> | undefined;
     const execution = runNode(node, gateStage, prompt);

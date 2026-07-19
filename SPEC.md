@@ -456,3 +456,13 @@ Four-column CSS grid (from the design mock), draggable dividers, dark theme defa
 - `engine/runManager`: `createRun(req: RunCreateRequest): Promise<RunSnapshot>`, `abortRun(runId)`, `killNode(runId, nodeRunId)`, `retryStage(runId, stageId, req)`, `applyPatch(runId, nodeRunId)`, `sweepOnBoot()` — the complete surface routes.ts consumes.
 - Adapter contract exactly §4.0; nodeRunner is the only event stamper; store.runs persists RunSnapshot atomically.
 - Wave-1 workers MUST NOT edit shared/src/**, web/src/components/**, web/src/app/store.ts, package.json, or another worker's files. Contract gaps → report back; fixed centrally between waves.
+
+## v1.2 — Evidence plane (2026-07-19)
+
+Workspaces may configure `verifyCommand` and `verifyTimeoutSec` (effective engine default: 600 seconds). After a worktree-isolated Git candidate captures a non-empty patch, the engine runs the command in that candidate worktree and persists a strict normalized result (`passed | failed | error | skipped`), bounded output tail, and full atomic log artifact. No command, no changes, and non-completed nodes are explicit skipped states; stages without actual verification remain compatible.
+
+Stages add `requireVerified`, default false. At a gated stage, an orchestrator `advance` is replaced with a targeted retry exactly when at least one candidate verification failed or errored and no candidate passed. The existing retry-budget clamp remains authoritative, so the predicate is fail-open at exhaustion; that advance is persisted and emitted as degraded. Generated, reviewed, advanced, and verified are separate states, and degraded or unverified advancement remains honestly labeled in the run UI and report.
+
+Each node snapshot records its handoff inputs: prior node IDs and whether orchestrator context or a retry addendum entered its seed prompt. Run creation snapshots the detected CLI versions of providers actually bound by the workflow. `GET /api/runs/:id/report` deterministically renders Markdown containing run metadata, provider versions, aggregate usage, candidate/diff/verification evidence, handoffs, chronological gate decisions, failed check logs, and terminal result excerpts. The Pipeline preset implements the shortest Implement → Test → Review production line with evidence gates between worktree stages.
+
+Explicitly deferred: human approval/pause nodes, pre-tool policy hooks, and live adapter contract tests. These require separate trust and lifecycle contracts and are not implicit in verification evidence.

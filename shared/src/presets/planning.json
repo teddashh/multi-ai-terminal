@@ -18,7 +18,7 @@
         { "id": "r2", "label": "R2", "agent": { "provider": "claude", "model": "sonnet", "permission": "safe" }, "count": 1, "promptTemplate": "Create an independent implementation plan for {{task}} in {{workspace_name}} at {{workspace_path}}. Stage: {{stage_name}}; candidate: {{slot_label}} #{{instance_index}}. Consider prior context: {{orchestrator_context}}. Retry guidance: {{retry_addendum}}" },
         { "id": "r3", "label": "R3", "agent": { "provider": "grok", "model": "grok-4.5", "permission": "safe" }, "count": 1, "promptTemplate": "Create an independent implementation plan for {{task}} in {{workspace_name}} at {{workspace_path}}. Stage: {{stage_name}}; candidate: {{slot_label}} #{{instance_index}}. Consider prior context: {{orchestrator_context}}. Retry guidance: {{retry_addendum}}" }
       ],
-      "isolation": "none", "join": "all", "timeoutSec": 1800, "stallSec": 240, "gate": true
+      "isolation": "none", "join": "all", "timeoutSec": 1800, "stallSec": 240, "gate": true, "requireVerified": false
     },
     {
       "id": "final-review",
@@ -26,7 +26,7 @@
       "slots": [
         { "id": "final", "label": "Final Reviewer", "agent": { "provider": "claude", "model": "opus", "permission": "safe" }, "count": 1, "promptTemplate": "Produce the final implementation plan for {{task}}. Reconcile these candidate results:\n\n{{prior_stage_digest}}\n\nOrchestrator context: {{orchestrator_context}}. Retry guidance: {{retry_addendum}}" }
       ],
-      "isolation": "none", "join": "all", "timeoutSec": 1800, "stallSec": 240, "gate": true
+      "isolation": "none", "join": "all", "timeoutSec": 1800, "stallSec": 240, "gate": true, "requireVerified": false
     }
   ],
   "maxParallel": 4,

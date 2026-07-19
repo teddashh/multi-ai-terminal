@@ -14,7 +14,7 @@ const provider: ProviderInfo = {
 
 const stage = (counts = [1]): Stage => ({
   id: 'plan', name: 'Plan', isolation: 'none', join: 'all', timeoutSec: 1_800,
-  stallSec: 240, gate: true,
+  stallSec: 240, gate: true, requireVerified: false,
   slots: counts.map((count, index) => ({
     id: `slot-${index + 1}`, label: `Slot ${index + 1}`, count,
     agent: { provider: 'codex', model: 'base', permission: 'safe' },

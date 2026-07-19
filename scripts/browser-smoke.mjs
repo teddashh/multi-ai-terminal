@@ -15,6 +15,7 @@ let browser;
 let child;
 let dataDir;
 let workspaceDir;
+let verifiedWorkspaceDir;
 
 const overallDeadline = setTimeout(() => {
   console.error('[smoke:browser] FAIL: smoke test exceeded the 120-second hard deadline.');
@@ -29,6 +30,9 @@ const overallDeadline = setTimeout(() => {
   }
   if (workspaceDir) {
     void rm(workspaceDir, { recursive: true, force: true });
+  }
+  if (verifiedWorkspaceDir) {
+    void rm(verifiedWorkspaceDir, { recursive: true, force: true });
   }
   process.exit(1);
 }, 120_000);
@@ -178,6 +182,17 @@ async function stopServer(server) {
   }
 }
 
+async function runCommand(command, args, cwd) {
+  await new Promise((resolveCommand, rejectCommand) => {
+    const process = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    let output = '';
+    process.stdout.on('data', (chunk) => { output += chunk.toString(); });
+    process.stderr.on('data', (chunk) => { output += chunk.toString(); });
+    process.once('error', rejectCommand);
+    process.once('close', (code) => code === 0 ? resolveCommand() : rejectCommand(new Error(`${command} ${args.join(' ')} exited ${code}: ${output}`)));
+  });
+}
+
 let page;
 let port;
 let browserPath;
@@ -192,6 +207,7 @@ try {
   port = await getFreePort();
   dataDir = await mkdtemp(path.join(os.tmpdir(), 'mat-smoke-'));
   workspaceDir = await mkdtemp(path.join(os.tmpdir(), 'mat-smoke-workspace-'));
+  verifiedWorkspaceDir = await mkdtemp(path.join(os.tmpdir(), 'mat-smoke-verified-'));
 
   child = spawn(process.execPath, [
     'server/dist/index.js',
@@ -339,6 +355,54 @@ try {
     if (snapshot.status !== 'done') throw new Error(`Run ${run.runId} did not finish within 30 seconds (status=${snapshot.status}).`);
     await page.waitForFunction(() => [...document.querySelectorAll('span')].some((element) => element.textContent?.trim() === 'done'), null, { timeout: 5_000 });
   });
+
+  await phase('verified run and report', async () => {
+    await runCommand('git', ['init', '-q'], verifiedWorkspaceDir);
+    await runCommand('git', ['config', 'user.email', 'mat-smoke@example.test'], verifiedWorkspaceDir);
+    await runCommand('git', ['config', 'user.name', 'MAT Smoke'], verifiedWorkspaceDir);
+    await runCommand('git', ['commit', '--allow-empty', '-qm', 'base'], verifiedWorkspaceDir);
+    const workspace = await api('/api/workspaces', { method: 'POST', body: JSON.stringify({
+      name: 'Verified Smoke', path: verifiedWorkspaceDir, verifyCommand: 'node -e "process.exit(0)"',
+    }) });
+    await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent?.includes('Verified Smoke')), null, { timeout: 10_000 });
+    await page.evaluate(() => {
+      const button = [...document.querySelectorAll('button')].find((candidate) => candidate.textContent?.includes('Verified Smoke'));
+      button?.click();
+    });
+    const workflows = await api('/api/workflows');
+    const source = workflows[0];
+    if (!source) throw new Error('No workflow was available for the verified smoke run.');
+    const workflowOverride = {
+      ...source,
+      id: 'verified-smoke',
+      name: 'Verified Smoke',
+      orchestrator: { ...source.orchestrator, enabled: false },
+      stages: [{
+        ...source.stages[0], id: 'verify-stage', name: 'Verify stage', isolation: 'worktree', gate: false, requireVerified: false,
+        slots: [{
+          id: 'writer', label: 'Writer', agent: { provider: 'mock', model: 'ok', permission: 'auto' }, count: 1,
+          promptTemplate: 'MOCK_WRITE:mat-smoke.txt\nMOCK_REPLY: verified smoke complete',
+        }],
+      }],
+    };
+    delete workflowOverride.builtin;
+    const verifiedRun = await api('/api/runs', { method: 'POST', body: JSON.stringify({
+      workspaceId: workspace.id, workflowId: source.id, task: 'Create verified smoke evidence', workflowOverride,
+    }) });
+    const deadline = Date.now() + 30_000;
+    let snapshot = verifiedRun;
+    while (Date.now() < deadline && snapshot.status !== 'done') {
+      await delay(250);
+      snapshot = await api(`/api/runs/${encodeURIComponent(verifiedRun.runId)}`);
+    }
+    if (snapshot.status !== 'done') throw new Error(`Verified run ${verifiedRun.runId} did not finish (status=${snapshot.status}).`);
+    await page.getByText('✓ verified', { exact: true }).waitFor({ timeout: 10_000 });
+    await page.getByRole('button', { name: 'Report', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByText('## Outcome', { exact: false }).waitFor({ timeout: 10_000 });
+    if (!(await dialog.textContent())?.includes('verified')) throw new Error('Run report did not contain verified evidence.');
+    if (pageErrors.length > 0) throw new Error(`Captured ${pageErrors.length} page error${pageErrors.length === 1 ? '' : 's'}.`);
+  });
 } catch (error) {
   failure = error;
   if (page) {
@@ -376,6 +440,13 @@ try {
   if (workspaceDir) {
     try {
       await rm(workspaceDir, { recursive: true, force: true });
+    } catch (error) {
+      cleanupFailure ??= error;
+    }
+  }
+  if (verifiedWorkspaceDir) {
+    try {
+      await rm(verifiedWorkspaceDir, { recursive: true, force: true });
     } catch (error) {
       cleanupFailure ??= error;
     }

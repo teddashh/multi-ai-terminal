@@ -17,22 +17,23 @@ const workflow: RunSnapshot['workflow'] = {
   schemaVersion: 1, id: 'wf', name: 'Planning', description: '', maxParallel: 2, maxRetriesPerStage: 2,
   orchestrator: { enabled: true, agent: { provider: 'claude', permission: 'safe' }, gateTimeoutSec: 30 },
   stages: [
-    { id: 'round', name: 'Round Table', slots: [], isolation: 'none', join: 'all', timeoutSec: 60, stallSec: 30, gate: true },
-    { id: 'final', name: 'Final Review', slots: [], isolation: 'none', join: 'all', timeoutSec: 60, stallSec: 30, gate: true },
+    { id: 'round', name: 'Round Table', slots: [], isolation: 'none', join: 'all', timeoutSec: 60, stallSec: 30, gate: true, requireVerified: false },
+    { id: 'final', name: 'Final Review', slots: [], isolation: 'none', join: 'all', timeoutSec: 60, stallSec: 30, gate: true, requireVerified: false },
   ],
 };
 const run: RunSnapshot = {
   runId: 'r1', workspaceId: 'w1', workflow, task: 'Build a plan', status: 'running', currentStageId: 'final', createdAt: 1,
   nodes: [
-    { nodeRunId: 'round.r1.0', stageId: 'round', slotId: 'r1', instanceIndex: 0, agent: { provider: 'codex', permission: 'safe' }, label: 'R1 · codex', status: 'done', attempt: 2, cwd: 'test-workspace', startedAt: 1000, endedAt: 66_000, usage: { inputTokens: 10, outputTokens: 20, costUsd: 0.01 }, patchFile: 'r1.patch' },
+    { nodeRunId: 'round.r1.0', stageId: 'round', slotId: 'r1', instanceIndex: 0, agent: { provider: 'codex', permission: 'safe' }, label: 'R1 · codex', status: 'done', attempt: 2, cwd: 'test-workspace', startedAt: 1000, endedAt: 66_000, usage: { inputTokens: 10, outputTokens: 20, costUsd: 0.01 }, patchFile: 'r1.patch', verification: { status: 'passed', command: 'npm test' }, handoff: { priorNodeRunIds: ['prior.a.0'], orchestratorContext: true, retryAddendum: true } },
     { nodeRunId: 'orchestrator', stageId: null, slotId: 'orchestrator', instanceIndex: 0, agent: { provider: 'claude', permission: 'safe' }, label: 'Orchestrator · claude', status: 'done', attempt: 1, cwd: 'test-workspace' },
     { nodeRunId: 'final.f1.0', stageId: 'final', slotId: 'f1', instanceIndex: 0, agent: { provider: 'grok', permission: 'safe' }, label: 'Final · grok', status: 'running', attempt: 1, cwd: 'test-workspace', startedAt: Date.now() },
   ],
   gateDecisions: [{ stageId: 'round', gateAttempt: 1, action: 'advance', rationale: 'The candidates agree.', contextForNext: 'Prefer the safe design.', degraded: true, ts: 100 }],
 };
 const events: AgentEvent[] = [
-  { id: 'e1', seq: 1, runId: 'r1', stageId: 'final', nodeRunId: 'final.f1.0', attempt: 1, role: 'thinking', kind: 'thinking', text: 'checking ', ts: 10 },
-  { id: 'e2', seq: 2, runId: 'r1', stageId: 'final', nodeRunId: 'final.f1.0', attempt: 1, role: 'thinking', kind: 'thinking', text: 'details', ts: 11 },
+  { id: 'e0', seq: 1, runId: 'r1', stageId: 'round', nodeRunId: 'round.r1.0', attempt: 2, role: 'user', kind: 'message', text: 'seed evidence prompt', ts: 9 },
+  { id: 'e1', seq: 2, runId: 'r1', stageId: 'final', nodeRunId: 'final.f1.0', attempt: 1, role: 'thinking', kind: 'thinking', text: 'checking ', ts: 10 },
+  { id: 'e2', seq: 3, runId: 'r1', stageId: 'final', nodeRunId: 'final.f1.0', attempt: 1, role: 'thinking', kind: 'thinking', text: 'details', ts: 11 },
 ];
 
 const mounted: Array<{ container: HTMLDivElement; root: Root }> = [];
@@ -57,5 +58,9 @@ describe('RunPanel smoke', () => {
     expect(screen.getByText(/30 tok/)).toBeTruthy();
     expect(screen.getByText('advance · degraded')).toBeTruthy();
     expect(screen.getByText('The candidates agree.')).toBeTruthy();
+    expect(screen.getByText('✓ verified')).toBeTruthy();
+    expect(screen.getByText(/1 upstream node/)).toBeTruthy();
+    expect(screen.getByText('Seed prompt')).toBeTruthy();
+    expect(screen.getByText('1 passed / 0 failed / 0 skipped')).toBeTruthy();
   });
 });

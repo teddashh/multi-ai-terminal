@@ -31,7 +31,7 @@ function formatUsage(node: NodeRun): string {
   return values.join(' ') || 'n/a';
 }
 
-function patchStat(path: string | undefined): string {
+export function patchStat(path: string | undefined): string {
   if (!path || !existsSync(path)) return 'n/a';
   const patch = readFileSync(path, 'utf8');
   let files = 0;
@@ -43,6 +43,21 @@ function patchStat(path: string | undefined): string {
     else if (line.startsWith('-') && !line.startsWith('---')) deletions += 1;
   }
   return `${files} files, +${additions}/-${deletions}`;
+}
+
+function formatVerification(node: NodeRun): string[] {
+  const verification = node.verification;
+  if (!verification) return ['verification: n/a'];
+  const seconds = verification.durationMs === undefined ? undefined : `${(verification.durationMs / 1000).toFixed(1)}s`;
+  let summary: string;
+  if (verification.status === 'passed') summary = `passed (${verification.command ?? 'unknown command'}${seconds ? `, ${seconds}` : ''})`;
+  else if (verification.status === 'failed') summary = `failed (exit ${String(verification.exitCode)}${seconds ? `, ${seconds}` : ''})`;
+  else if (verification.status === 'error') summary = `error (${verification.reason ?? 'unknown'})`;
+  else summary = `skipped (${verification.reason ?? 'unknown'})`;
+  const evidence = (verification.status === 'failed' || verification.status === 'error') && verification.outputTail
+    ? [`verification-output: ${verification.outputTail.slice(0, 400)}`]
+    : [];
+  return [`verification: ${summary}`, ...evidence];
 }
 
 function lastError(node: NodeRun): string {
@@ -58,13 +73,16 @@ export function buildDigest(nodes: NodeRun[]): string {
     const model = node.agent.model ? `/${node.agent.model}` : '';
     const duration = node.startedAt === undefined ? 'n/a' : `${Math.max(0, (node.endedAt ?? Date.now()) - node.startedAt)}ms`;
     const toolCount = node.agent.provider === 'grok' ? 'n/a' : String(toolCounts.get(node) ?? 0);
+    const verification = formatVerification(node);
+    const evidenceBudget = verification.slice(1).reduce((sum, line) => sum + line.length + 1, 0);
     return [
       `## ${node.label} [${node.nodeRunId}]`,
       `provider/model: ${node.agent.provider}${model}`,
       `status: ${node.status}; attempt: ${node.attempt}; duration: ${duration}`,
       `usage: ${formatUsage(node)}; tool-calls: ${toolCount}; diffstat: ${patchStat(node.patchFile)}; last-error: ${lastError(node)}`,
+      ...verification,
       'result:',
-      truncateTail(node.resultText ?? '', budget),
+      truncateTail(node.resultText ?? '', Math.max(100, budget - evidenceBudget)),
     ].join('\n');
   }).join('\n\n');
 }

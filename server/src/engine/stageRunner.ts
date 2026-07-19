@@ -8,6 +8,7 @@ import { renderTemplate } from '../orchestrator/prompts.js';
 import { assembleArtifacts, buildDigest } from './digest.js';
 import { emitRetryBoundary, killActiveNode, registerNodeContext, resetNodeForRetry, runNode } from './nodeRunner.js';
 import { collectPatch, createWorktree, isGitRepository, isWorkspaceDirty, runDirectory } from './worktree.js';
+import { verifyCandidate } from './verify.js';
 
 interface StageControl {
   stageId: string;
@@ -69,6 +70,11 @@ function promptFor(run: RunSnapshot, stage: Stage, node: NodeRun, workspace: Wor
   const priorNodes = previousStageNodes(run, stage);
   const artifacts = assembleArtifacts(priorNodes);
   const orchestratorContext = [...run.gateDecisions].reverse().find((decision) => decision.contextForNext)?.contextForNext ?? '';
+  node.handoff = {
+    priorNodeRunIds: priorNodes.map((priorNode) => priorNode.nodeRunId),
+    orchestratorContext: orchestratorContext !== '',
+    retryAddendum: retryAddendum !== '',
+  };
   return renderTemplate(slot.promptTemplate, {
     task: run.task,
     workspace_name: workspace.name,
@@ -110,6 +116,8 @@ async function executeNodes(run: RunSnapshot, stage: Stage, nodes: NodeRun[], wo
         const patchPath = join(runDirectory(run.runId), 'artifacts', `${node.nodeRunId}.a${node.attempt}.patch`);
         await collectPatch(node.cwd, node.baseCommit, patchPath);
         node.patchFile = patchPath;
+        const verification = await verifyCandidate(node, workspace, run.runId);
+        if (verification) node.verification = verification;
       },
     });
   }
@@ -207,6 +215,16 @@ export async function runStage(run: RunSnapshot, stage: Stage): Promise<void> {
           ...(manual.promptAddendum !== undefined ? { promptAddendum: manual.promptAddendum } : {}),
           rationale: 'Stage retry requested by the user.',
           ts: Date.now(),
+        };
+      }
+      const failedVerificationNodes = nodes.filter((node) => node.verification?.status === 'failed' || node.verification?.status === 'error');
+      if (stage.requireVerified && decision.action === 'advance' && failedVerificationNodes.length > 0
+        && !nodes.some((node) => node.verification?.status === 'passed')) {
+        decision = {
+          ...decision,
+          action: 'retry',
+          retryNodeRunIds: failedVerificationNodes.map((node) => node.nodeRunId),
+          rationale: `${decision.rationale} [engine] requireVerified: no candidate passed verification; retrying failing candidates.`,
         };
       }
       if (decision.action === 'retry' && decision.gateAttempt >= maxEvaluations) {
