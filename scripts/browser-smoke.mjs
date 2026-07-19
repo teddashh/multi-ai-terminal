@@ -14,9 +14,10 @@ const webEntry = resolve(root, 'web/dist/index.html');
 let browser;
 let child;
 let dataDir;
+let workspaceDir;
 
 const overallDeadline = setTimeout(() => {
-  console.error('[smoke:browser] FAIL: smoke test exceeded the 60-second hard deadline.');
+  console.error('[smoke:browser] FAIL: smoke test exceeded the 120-second hard deadline.');
   try {
     child?.kill('SIGKILL');
   } catch {
@@ -26,11 +27,25 @@ const overallDeadline = setTimeout(() => {
   if (dataDir) {
     void rm(dataDir, { recursive: true, force: true });
   }
+  if (workspaceDir) {
+    void rm(workspaceDir, { recursive: true, force: true });
+  }
   process.exit(1);
-}, 60_000);
+}, 120_000);
 overallDeadline.unref();
 
 const delay = (milliseconds) => new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
+
+async function phase(name, operation) {
+  try {
+    const result = await operation();
+    console.log(`[smoke:browser] PASS: ${name}`);
+    return result;
+  } catch (error) {
+    console.error(`[smoke:browser] FAIL: ${name}: ${error instanceof Error ? error.message : String(error)}`);
+    throw error;
+  }
+}
 
 async function isFile(filePath) {
   try {
@@ -176,6 +191,7 @@ try {
   await assertBuildExists();
   port = await getFreePort();
   dataDir = await mkdtemp(path.join(os.tmpdir(), 'mat-smoke-'));
+  workspaceDir = await mkdtemp(path.join(os.tmpdir(), 'mat-smoke-workspace-'));
 
   child = spawn(process.execPath, [
     'server/dist/index.js',
@@ -197,11 +213,11 @@ try {
   });
 
   const baseUrl = `http://127.0.0.1:${port}`;
-  await waitForHealth(`${baseUrl}/api/health`, () => serverOutput);
+  await phase('server startup', () => waitForHealth(`${baseUrl}/api/health`, () => serverOutput));
   browserPath = await resolveBrowserExecutable();
 
   browser = await chromium.launch({ executablePath: browserPath, headless: true });
-  page = await browser.newPage();
+  page = await browser.newPage({ viewport: { width: 1400, height: 800 } });
   page.on('pageerror', (error) => {
     pageErrors.push(error.stack ?? String(error));
   });
@@ -209,37 +225,120 @@ try {
     consoleMessages.push(`[${message.type()}] ${message.text()}`);
   });
 
-  await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
-
-  const mountDeadline = Date.now() + 15_000;
-  let mounted = false;
-  while (Date.now() < mountDeadline) {
-    rootState = await page.evaluate(() => {
-      const rootElement = document.getElementById('root');
-      return {
-        childElementCount: rootElement?.childElementCount ?? 0,
-        innerText: rootElement?.innerText ?? '',
-      };
-    });
-
-    if (rootState.childElementCount >= 1 && rootState.innerText.includes('WORKSPACES')) {
-      mounted = true;
-      break;
+  await phase('React mount', async () => {
+    await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+    const mountDeadline = Date.now() + 15_000;
+    let mounted = false;
+    while (Date.now() < mountDeadline) {
+      rootState = await page.evaluate(() => {
+        const rootElement = document.getElementById('root');
+        return {
+          childElementCount: rootElement?.childElementCount ?? 0,
+          innerText: rootElement?.innerText ?? '',
+        };
+      });
+      if (rootState.childElementCount >= 1 && rootState.innerText.includes('WORKSPACES')) { mounted = true; break; }
+      await delay(250);
     }
-    await delay(250);
-  }
+    const diagnosticMarkers = ['Startup error', 'Startup rejection', 'did not mount'];
+    const startupDiagnostic = diagnosticMarkers.find((marker) => rootState.innerText.includes(marker));
+    if (pageErrors.length > 0) throw new Error(`Captured ${pageErrors.length} page error${pageErrors.length === 1 ? '' : 's'}.`);
+    if (startupDiagnostic) throw new Error(`The boot-diagnostics card reported: ${startupDiagnostic}`);
+    if (!mounted) throw new Error('The React app did not render the WORKSPACES heading within 15 seconds.');
+  });
 
-  const diagnosticMarkers = ['Startup error', 'Startup rejection', 'did not mount'];
-  const startupDiagnostic = diagnosticMarkers.find((marker) => rootState.innerText.includes(marker));
-  if (pageErrors.length > 0) {
-    throw new Error(`Captured ${pageErrors.length} page error${pageErrors.length === 1 ? '' : 's'}.`);
-  }
-  if (startupDiagnostic) {
-    throw new Error(`The boot-diagnostics card reported: ${startupDiagnostic}`);
-  }
-  if (!mounted) {
-    throw new Error('The React app did not render the WORKSPACES heading within 15 seconds.');
-  }
+  const api = async (apiPath, init) => {
+    const response = await fetch(`${baseUrl}${apiPath}`, init ? { ...init, headers: { 'content-type': 'application/json', ...(init.headers ?? {}) } } : undefined);
+    if (!response.ok) throw new Error(`${apiPath} returned ${response.status}: ${await response.text()}`);
+    return response.status === 204 ? undefined : response.json();
+  };
+
+  const run = await phase('live run setup', async () => {
+    const workspace = await api('/api/workspaces', { method: 'POST', body: JSON.stringify({ name: 'Smoke', path: workspaceDir }) });
+    const workflows = await api('/api/workflows');
+    const workflow = workflows[0];
+    if (!workflow) throw new Error('No workflow was available for the smoke run.');
+    await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent?.includes('Smoke')), null, { timeout: 10_000 });
+    await page.evaluate(() => {
+      const button = [...document.querySelectorAll('button')].find((candidate) => candidate.textContent?.includes('Smoke'));
+      button?.click();
+    });
+    await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent?.trim() === 'Start'), null, { timeout: 10_000 });
+
+    const longReply = (index) => `Candidate ${index}: ${'The quick brown fox streams a detailed response while the terminal keeps the live output pinned. '.repeat(38)}`;
+    const slot = (index) => ({
+      id: `smoke-${index}`,
+      label: `Smoke ${index + 1}`,
+      agent: { provider: 'mock', model: `slow:${700 + index * 100}`, permission: 'auto' },
+      count: 1,
+      promptTemplate: `MOCK_REPLY: ${longReply(index)}`,
+    });
+    const workflowOverride = {
+      ...workflow,
+      orchestrator: { ...workflow.orchestrator, enabled: false },
+      stages: [{
+        ...workflow.stages[0], id: 'smoke-stage', name: 'Smoke stage', gate: false, isolation: 'none', join: 'all', timeoutSec: 300, stallSec: 240,
+        slots: Array.from({ length: 6 }, (_, index) => slot(index)),
+      }],
+    };
+    delete workflowOverride.builtin;
+    return api('/api/runs', {
+      method: 'POST',
+      body: JSON.stringify({ workspaceId: workspace.id, workflowId: workflow.id, task: 'Browser smoke follow-mode run', workflowOverride }),
+    });
+  });
+
+  await phase('live switching and panel sizing', async () => {
+    await page.waitForSelector('[data-testid="stream-scroll-region"]', { timeout: 10_000 });
+    const dimensions = await page.$eval('[data-testid="stream-scroll-region"]', (element) => ({ clientHeight: element.clientHeight, windowHeight: window.innerHeight }));
+    if (dimensions.clientHeight <= 0 || dimensions.clientHeight >= dimensions.windowHeight) {
+      throw new Error(`Invalid stream viewport height ${dimensions.clientHeight}px for a ${dimensions.windowHeight}px window.`);
+    }
+  });
+
+  await phase('follow while rows grow', async () => {
+    const samples = [];
+    for (let index = 0; index < 16; index += 1) {
+      samples.push(await page.$eval('[data-testid="stream-scroll-region"]', (element) => element.scrollHeight - element.scrollTop - element.clientHeight));
+      await delay(250);
+    }
+    const nearBottom = samples.filter((gap) => gap <= 96).length;
+    if (nearBottom / samples.length < 0.7) throw new Error(`Only ${nearBottom}/${samples.length} samples stayed within 96px of live output; gaps=${samples.map(Math.round).join(',')}`);
+  });
+
+  await phase('manual reading and jump to live', async () => {
+    await page.waitForFunction(() => {
+      const element = document.querySelector('[data-testid="stream-scroll-region"]');
+      return element && element.scrollHeight > element.clientHeight * 1.5;
+    }, null, { timeout: 10_000 });
+    const placed = await page.$eval('[data-testid="stream-scroll-region"]', (element) => {
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true }));
+      element.scrollTop = Math.max(0, (element.scrollHeight - element.clientHeight) * 0.35);
+      element.dispatchEvent(new Event('scroll', { bubbles: true }));
+      return element.scrollTop;
+    });
+    await delay(2_000);
+    const after = await page.$eval('[data-testid="stream-scroll-region"]', (element) => element.scrollTop);
+    if (Math.abs(after - placed) > 150) throw new Error(`Manual scroll position moved ${Math.round(after - placed)}px (from ${Math.round(placed)} to ${Math.round(after)}).`);
+    const jump = page.getByRole('button', { name: 'Jump to live' });
+    if (!await jump.isVisible()) throw new Error('Jump to live was not visible after scrolling upstream.');
+    await jump.click();
+    await page.waitForFunction(() => {
+      const element = document.querySelector('[data-testid="stream-scroll-region"]');
+      return element && element.scrollHeight - element.scrollTop - element.clientHeight < 96;
+    }, null, { timeout: 1_000 });
+  });
+
+  await phase('run completion', async () => {
+    const deadline = Date.now() + 30_000;
+    let snapshot = run;
+    while (Date.now() < deadline && snapshot.status !== 'done') {
+      await delay(250);
+      snapshot = await api(`/api/runs/${encodeURIComponent(run.runId)}`);
+    }
+    if (snapshot.status !== 'done') throw new Error(`Run ${run.runId} did not finish within 30 seconds (status=${snapshot.status}).`);
+    await page.waitForFunction(() => [...document.querySelectorAll('span')].some((element) => element.textContent?.trim() === 'done'), null, { timeout: 5_000 });
+  });
 } catch (error) {
   failure = error;
   if (page) {
@@ -270,6 +369,13 @@ try {
   if (dataDir) {
     try {
       await rm(dataDir, { recursive: true, force: true });
+    } catch (error) {
+      cleanupFailure ??= error;
+    }
+  }
+  if (workspaceDir) {
+    try {
+      await rm(workspaceDir, { recursive: true, force: true });
     } catch (error) {
       cleanupFailure ??= error;
     }

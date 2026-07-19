@@ -68,6 +68,7 @@ beforeEach(() => {
   matStore.setState({
     workflows: [workflow], providers, workspaces: [workspace], selectedWorkspaceId: 'w1',
     ephemeralWorkflowEdits: {}, runs: {}, activeRunId: undefined,
+    runsLoading: false,
   });
 });
 
@@ -108,5 +109,23 @@ describe('WorkflowPanel', () => {
     expect(matStore.getState().ephemeralWorkflowEdits.planning?.stages[0]!.slots[1]).toMatchObject({
       agent: { provider: 'codex', model: 'gpt-test', permission: 'auto' }, count: 1,
     });
+  });
+
+  it('blocks starting when a bound provider is unavailable', async () => {
+    matStore.setState({
+      ephemeralWorkflowEdits: {
+        planning: {
+          ...workflow,
+          stages: [{ ...workflow.stages[0]!, slots: [{ ...workflow.stages[0]!.slots[0]!, label: 'Reviewer', agent: { provider: 'grok', model: 'grok-test', permission: 'safe' } }] }],
+        },
+      },
+    });
+    renderPanel(<WorkflowPanel />);
+    await screen.findByRole('heading', { name: 'Round Table' });
+    act(() => fireEvent.change(screen.getByLabelText('Task'), { target: { value: 'Ship it' } }));
+    const start = screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement;
+    expect(start.disabled).toBe(true);
+    expect(screen.getByText('Reviewer · grok unavailable: binary missing')).toBeTruthy();
+    expect(apiMocks.createRun).not.toHaveBeenCalled();
   });
 });

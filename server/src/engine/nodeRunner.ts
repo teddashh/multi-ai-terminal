@@ -4,6 +4,7 @@ import type { AdapterContentEvent, NodeRun, RunStatus, Stage, Usage } from '@mat
 import { getAdapter } from '../adapters/registry.js';
 import type { NodeOutcome, ResolvedNodeSpec, SpawnedNode } from '../adapters/base.js';
 import type { Adapter } from '../adapters/base.js';
+import { humanizeError } from '../adapters/base.js';
 import { appendEvent } from '../store/eventLog.js';
 import { runDirectory } from './worktree.js';
 import { recordToolUse, resetToolCount } from './digest.js';
@@ -106,6 +107,7 @@ export function resetNodeForRetry(node: NodeRun): void {
   delete node.startedAt;
   delete node.endedAt;
   delete node.resultText;
+  delete node.error;
   delete node.patchFile;
   delete node.baseCommit;
   delete node.exitCode;
@@ -175,12 +177,13 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
       await persistSafely(node, context);
       return;
     }
-    const detail = error instanceof Error ? error.message : String(error);
+    const detail = humanizeError(error);
     node.status = 'failed';
     node.startedAt ??= Date.now();
     node.endedAt = Date.now();
     node.exitCode = null;
     node.resultText = detail;
+    node.error = detail;
     lifecycle(node, context, 'error', `Preparation failed: ${detail}`, { status: 'failed', exitCode: null });
     await persistSafely(node, context);
     return;
@@ -241,12 +244,13 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
       },
     });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
+    const detail = humanizeError(error);
     node.status = 'failed';
     node.startedAt = Date.now();
     node.endedAt = Date.now();
     node.exitCode = null;
     node.resultText = detail;
+    node.error = detail;
     lifecycle(node, context, 'error', detail, { status: 'failed', exitCode: null });
     await persistSafely(node, context);
     return;
@@ -294,7 +298,9 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
   if (outcome.sessionRef !== undefined) node.sessionRef = outcome.sessionRef;
   const usage = mergeUsage(node.usage, outcome.usage);
   if (usage !== undefined) node.usage = usage;
-  node.resultText = outcome.resultText ?? outcome.error ?? '';
+  const outcomeError = outcome.error === undefined ? undefined : humanizeError(outcome.error, node.agent.provider);
+  node.resultText = outcome.resultText ?? outcomeError ?? '';
+  if (outcomeError !== undefined) node.error = outcomeError; else delete node.error;
 
   if (killedReason === 'user' || killedReason === 'user-retry' || killedReason === 'abort' || killedReason === 'gate-timeout') {
     node.status = 'killed';
@@ -304,12 +310,15 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
     }
   } else if (killedReason === 'timeout') {
     node.status = 'failed';
-    lifecycle(node, context, 'error', 'Node attempt timed out', { status: 'failed', exitCode: outcome.exitCode, detail: 'timeout' });
+    node.error = 'Node attempt timed out';
+    lifecycle(node, context, 'error', node.error, { status: 'failed', exitCode: outcome.exitCode, detail: 'timeout' });
   } else if (outcome.exitCode === 0 && !outcome.error) {
     node.status = 'done';
+    delete node.error;
   } else {
     node.status = 'failed';
-    lifecycle(node, context, 'error', outcome.error ?? `Node exited with code ${String(outcome.exitCode)}`, { status: 'failed', exitCode: outcome.exitCode });
+    node.error = outcomeError ?? `Node exited with code ${String(outcome.exitCode)}`;
+    lifecycle(node, context, 'error', node.error, { status: 'failed', exitCode: outcome.exitCode });
   }
   lifecycle(node, context, 'result', node.resultText ?? '', {
     exitCode: outcome.exitCode,

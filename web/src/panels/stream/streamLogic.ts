@@ -42,12 +42,24 @@ export interface FeedItem {
   key: string;
   events: AgentEvent[];
   toolCallId?: string;
+  duplicateCount?: number;
 }
 
 export function groupToolEvents(events: readonly AgentEvent[]): FeedItem[] {
   const items: FeedItem[] = [];
   const toolUses = new Map<string, number>();
+  const duplicateUsers = new Map<string, { index: number; nodeRunIds: Set<string> }>();
   for (const event of events) {
+    if (event.role === 'user' && event.nodeRunId) {
+      const duplicateKey = `${event.attempt}\0${event.text}`;
+      const prior = duplicateUsers.get(duplicateKey);
+      if (prior && !prior.nodeRunIds.has(event.nodeRunId)) {
+        prior.nodeRunIds.add(event.nodeRunId);
+        items[prior.index]!.duplicateCount = prior.nodeRunIds.size;
+        continue;
+      }
+      if (!prior) duplicateUsers.set(duplicateKey, { index: items.length, nodeRunIds: new Set([event.nodeRunId]) });
+    }
     const matchKey = toolMatchKey(event);
     if (event.kind === 'tool_result' && matchKey) {
       const useIndex = toolUses.get(matchKey);
@@ -64,14 +76,17 @@ export function groupToolEvents(events: readonly AgentEvent[]): FeedItem[] {
 }
 
 export interface FollowState { following: boolean }
-export type FollowAction = { type: 'scroll'; atBottom: boolean } | { type: 'jump-to-live' } | { type: 'new-items' };
+export type FollowAction = { type: 'scroll'; gap: number; deltaY: number; intentActive: boolean } | { type: 'jump-to-live' } | { type: 'new-items' };
 
 export function reduceFollowState(state: FollowState, action: FollowAction): FollowState {
   if (action.type === 'jump-to-live') return { following: true };
-  if (action.type === 'scroll') return { following: action.atBottom };
+  if (action.type === 'scroll') {
+    if (action.gap < 96) return { following: true };
+    if (action.intentActive && action.deltaY < -1) return { following: false };
+  }
   return state;
 }
 
-export function isScrolledToBottom(scrollTop: number, clientHeight: number, scrollHeight: number, threshold = 32): boolean {
+export function isScrolledToBottom(scrollTop: number, clientHeight: number, scrollHeight: number, threshold = 96): boolean {
   return scrollHeight - (scrollTop + clientHeight) <= threshold;
 }

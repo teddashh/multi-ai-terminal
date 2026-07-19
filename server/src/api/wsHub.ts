@@ -34,7 +34,7 @@ export function registerWsHub(app: FastifyInstance, eventLog: EventLog, options:
       for (const client of clients) if (client.subscriptions.has(event.runId)) send(client, { type: 'event', event });
     },
     broadcastRun(run) {
-      for (const client of clients) if (client.subscriptions.has(run.runId)) send(client, { type: 'run', run });
+      for (const client of clients) send(client, { type: 'run', run });
     },
     close() {
       if (closed) return;

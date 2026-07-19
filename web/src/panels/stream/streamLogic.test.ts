@@ -38,19 +38,33 @@ describe('stream pipeline', () => {
     ], { nodeRunIds: [], roles: ['agent'], focusedNodeRunId: 's1.a.0' });
     expect(result.map((item) => item.id)).toEqual(['e1']);
   });
+
+  it('collapses identical user seed prompts across nodes but not other roles or attempts', () => {
+    const grouped = groupToolEvents([
+      event(1, { role: 'user', text: 'same task', nodeRunId: 's1.a.0' }),
+      event(2, { role: 'user', text: 'same task', nodeRunId: 's1.b.0' }),
+      event(3, { role: 'agent', text: 'same task', nodeRunId: 's1.c.0' }),
+      event(4, { role: 'user', text: 'same task', nodeRunId: 's1.d.0', attempt: 2 }),
+    ]);
+    expect(grouped).toHaveLength(3);
+    expect(grouped[0]).toMatchObject({ duplicateCount: 2, events: [expect.objectContaining({ id: 'e1' })] });
+    expect(grouped[1]?.duplicateCount).toBeUndefined();
+    expect(grouped[2]?.duplicateCount).toBeUndefined();
+  });
 });
 
 describe('follow state', () => {
-  it('pauses away from the bottom, remains paused for new items, and resumes explicitly', () => {
-    expect(reduceFollowState({ following: true }, { type: 'scroll', atBottom: false })).toEqual({ following: false });
+  it('pauses only for intent-backed upward scrolling and resumes near the bottom or explicitly', () => {
+    expect(reduceFollowState({ following: true }, { type: 'scroll', gap: 200, deltaY: -10, intentActive: false })).toEqual({ following: true });
+    expect(reduceFollowState({ following: true }, { type: 'scroll', gap: 200, deltaY: -10, intentActive: true })).toEqual({ following: false });
+    expect(reduceFollowState({ following: true }, { type: 'scroll', gap: 200, deltaY: 10, intentActive: true })).toEqual({ following: true });
     expect(reduceFollowState({ following: false }, { type: 'new-items' })).toEqual({ following: false });
     expect(reduceFollowState({ following: false }, { type: 'jump-to-live' })).toEqual({ following: true });
-    expect(reduceFollowState({ following: false }, { type: 'scroll', atBottom: true })).toEqual({ following: true });
+    expect(reduceFollowState({ following: false }, { type: 'scroll', gap: 95, deltaY: 10, intentActive: false })).toEqual({ following: true });
   });
 
-  it('uses a small bottom threshold', () => {
-    expect(isScrolledToBottom(460, 500, 990)).toBe(true);
-    expect(isScrolledToBottom(400, 500, 990)).toBe(false);
+  it('uses the 96px near-bottom threshold', () => {
+    expect(isScrolledToBottom(394, 500, 990)).toBe(true);
+    expect(isScrolledToBottom(393, 500, 990)).toBe(false);
   });
 });
-

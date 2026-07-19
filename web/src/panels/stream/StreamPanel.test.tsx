@@ -7,9 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('zustand', () => ({ useStore: (store: { getState(): unknown }, selector: (state: never) => unknown) => selector(store.getState() as never) }));
 vi.mock('@tanstack/react-virtual', () => ({
-  useVirtualizer: ({ count, estimateSize }: { count: number; estimateSize(): number }) => ({
-    getTotalSize: () => count * estimateSize(),
-    getVirtualItems: () => Array.from({ length: count }, (_, index) => ({ index, key: index, start: index * estimateSize() })),
+  useVirtualizer: ({ count, estimateSize }: { count: number; estimateSize(index: number): number }) => ({
+    getTotalSize: () => Array.from({ length: count }, (_, index) => estimateSize(index)).reduce((sum, size) => sum + size, 0),
+    getVirtualItems: () => Array.from({ length: count }, (_, index) => ({ index, key: index, start: Array.from({ length: index }, (_, prior) => estimateSize(prior)).reduce((sum, size) => sum + size, 0) })),
     measureElement: () => undefined,
     scrollToIndex: () => undefined,
   }),

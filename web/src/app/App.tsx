@@ -5,12 +5,11 @@ import { RunPanel } from '../panels/run/RunPanel.js';
 import { StreamPanel } from '../panels/stream/StreamPanel.js';
 import { WorkflowPanel } from '../panels/workflow/WorkflowPanel.js';
 import { WorkspacePanel } from '../panels/workspace/WorkspacePanel.js';
-import { matStore, useMatStore } from './store.js';
+import { ACTIVE_RUN_STATUSES, matStore, useMatStore } from './store.js';
 
 const WIDTHS_KEY = 'mat-panel-widths-v1';
 const DEFAULT_WIDTHS = [210, 320, 390] as const;
 const MIN_WIDTHS = [160, 240, 260] as const;
-const ACTIVE_STATUSES = new Set(['created', 'running', 'gating']);
 
 function loadWidths(): number[] {
   try {
@@ -59,7 +58,7 @@ export function App() {
       if (!live) return;
       const current = matStore.getState();
       for (const run of runs) current.upsertRun(run);
-      const active = runs.find((run) => ACTIVE_STATUSES.has(run.status));
+      const active = runs.find((run) => ACTIVE_RUN_STATUSES.has(run.status));
       if (active) ws.current?.subscribe(active.runId);
       current.setActiveRunId(active?.runId);
       current.setRunsLoading(false);
@@ -93,7 +92,7 @@ export function App() {
   const resizeWithKeyboard = (divider: number, delta: number) => setWidths((current) => resizeWidths(current, divider, delta));
 
   const abort = async () => {
-    if (!activeRun || !ACTIVE_STATUSES.has(activeRun.status)) return;
+    if (!activeRun || !ACTIVE_RUN_STATUSES.has(activeRun.status)) return;
     setAborting(true); setBootError(undefined);
     try { matStore.getState().upsertRun(await apiClient.abortRun(activeRun.runId)); }
     catch (error) { setBootError(error instanceof Error ? error.message : 'Could not abort the run.'); }
@@ -106,16 +105,16 @@ export function App() {
       <h1 className="shrink-0 text-sm font-semibold tracking-wide">Multi-AI Terminal</h1>
       <span className="truncate text-xs text-muted">{selectedWorkspace?.name ?? 'No workspace selected'}</span>
       <div className="ml-auto flex shrink-0 items-center gap-2">
-        {activeRun && <span className={`rounded-full border px-2 py-1 text-[11px] ${ACTIVE_STATUSES.has(activeRun.status) ? 'border-sky-800 bg-sky-950/40 text-sky-300' : 'border-border text-muted'}`}><span className={ACTIVE_STATUSES.has(activeRun.status) ? 'mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-sky-400' : ''} />{activeRun.status}</span>}
-        {activeRun && ACTIVE_STATUSES.has(activeRun.status) && <button type="button" disabled={aborting} onClick={() => void abort()} className="rounded border border-red-900 px-2 py-1 text-xs text-red-300 hover:bg-red-950 disabled:opacity-50">{aborting ? 'Aborting…' : 'Abort'}</button>}
+        {activeRun && <span className={`rounded-full border px-2 py-1 text-[11px] ${ACTIVE_RUN_STATUSES.has(activeRun.status) ? 'border-sky-800 bg-sky-950/40 text-sky-300' : 'border-border text-muted'}`}><span className={ACTIVE_RUN_STATUSES.has(activeRun.status) ? 'mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-sky-400' : ''} />{activeRun.status}</span>}
+        {activeRun && ACTIVE_RUN_STATUSES.has(activeRun.status) && <button type="button" disabled={aborting} onClick={() => void abort()} className="rounded border border-red-900 px-2 py-1 text-xs text-red-300 hover:bg-red-950 disabled:opacity-50">{aborting ? 'Aborting…' : 'Abort'}</button>}
       </div>
     </header>
     {bootError && <div role="alert" className="fixed left-1/2 top-12 z-50 -translate-x-1/2 rounded border border-red-900 bg-red-950 px-3 py-2 text-xs text-red-200">{bootError}</div>}
     <div className="grid min-h-0 min-w-0 overflow-hidden" style={{ gridTemplateColumns: columns }}>
-      <div className="min-w-0 border-r border-border bg-panel"><WorkspacePanel /></div><Divider value={widths[0]!} onPointerDown={(event) => resize(0, event)} onDelta={(delta) => resizeWithKeyboard(0, delta)} />
-      <div className="min-w-0 border-r border-border bg-panel"><WorkflowPanel /></div><Divider value={widths[1]!} onPointerDown={(event) => resize(1, event)} onDelta={(delta) => resizeWithKeyboard(1, delta)} />
-      <div className="min-w-0 border-r border-border bg-panel"><RunPanel /></div><Divider value={widths[2]!} onPointerDown={(event) => resize(2, event)} onDelta={(delta) => resizeWithKeyboard(2, delta)} />
-      <div className="min-w-0 bg-panel"><StreamPanel /></div>
+      <div className="min-h-0 min-w-0 overflow-hidden border-r border-border bg-panel"><WorkspacePanel /></div><Divider value={widths[0]!} onPointerDown={(event) => resize(0, event)} onDelta={(delta) => resizeWithKeyboard(0, delta)} />
+      <div className="min-h-0 min-w-0 overflow-hidden border-r border-border bg-panel"><WorkflowPanel /></div><Divider value={widths[1]!} onPointerDown={(event) => resize(1, event)} onDelta={(delta) => resizeWithKeyboard(1, delta)} />
+      <div className="min-h-0 min-w-0 overflow-hidden border-r border-border bg-panel"><RunPanel /></div><Divider value={widths[2]!} onPointerDown={(event) => resize(2, event)} onDelta={(delta) => resizeWithKeyboard(2, delta)} />
+      <div className="min-h-0 min-w-0 overflow-hidden bg-panel"><StreamPanel /></div>
     </div>
   </main>;
 }

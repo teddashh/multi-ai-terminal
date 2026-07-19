@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { apiClient, type ApiClient } from '../../api/client.js';
-import { useMatStore } from '../../app/store.js';
+import { ACTIVE_RUN_STATUSES, useMatStore } from '../../app/store.js';
 import { ModalDialog } from '../../components/ModalDialog.js';
 import { isAbsolutePath, lastRunBadge, shortPath } from './logic.js';
-
-const ACTIVE_STATUSES = new Set(['created', 'running', 'gating']);
 
 export interface WorkspacePanelProps { api?: ApiClient }
 
@@ -29,7 +27,7 @@ export function WorkspacePanel({ api = apiClient }: WorkspacePanelProps) {
   }, []);
 
   const liveWorkspaceIds = useMemo(() => new Set(Object.values(runs)
-    .filter((run) => ACTIVE_STATUSES.has(run.status))
+    .filter((run) => ACTIVE_RUN_STATUSES.has(run.status))
     .map((run) => run.workspaceId)), [runs]);
 
   const closeAdd = () => {

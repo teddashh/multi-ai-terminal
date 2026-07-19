@@ -9,6 +9,7 @@ import {
   type RetryStageRequest,
   type RunCreateRequest,
   type RunSnapshot,
+  type ProviderInfo,
   type WorkflowDef,
   type Workspace,
 } from '@mat/shared';
@@ -132,6 +133,11 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
 
   app.post('/api/runs', wrap(async (request, reply) => {
     const body = RunCreateRequestSchema.parse(request.body) as RunCreateRequest;
+    const workflow = body.workflowOverride ?? (await dependencies.workflows.list()).find((candidate) => candidate.id === body.workflowId);
+    if (workflow) {
+      const unavailable = unavailableProviderBindings(workflow, await dependencies.providers());
+      if (unavailable.length > 0) throw apiError(400, 'PROVIDER_UNAVAILABLE', unavailable.join('\n'));
+    }
     return reply.code(201).send(await dependencies.runs.create(body));
   }));
   app.get('/api/runs', wrap(async (request) => {
@@ -184,6 +190,18 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
 
 function parseId(request: FastifyRequest): string {
   return IdParamsSchema.parse(request.params).id;
+}
+
+function unavailableProviderBindings(workflow: WorkflowDef, providers: readonly ProviderInfo[]): string[] {
+  const byId = new Map(providers.map((provider) => [provider.id, provider]));
+  const bindings = workflow.stages.flatMap((stage) => stage.slots.map((slot) => ({ label: slot.label, provider: slot.agent.provider })));
+  if (workflow.orchestrator.enabled) bindings.push({ label: 'Orchestrator', provider: workflow.orchestrator.agent.provider });
+  return bindings.flatMap(({ label, provider }) => {
+    const availability = byId.get(provider);
+    return availability?.ok === false
+      ? [`${label} · ${provider} unavailable: ${availability.detail || 'not detected'}`]
+      : [];
+  });
 }
 
 function validateRetryStage(run: RunSnapshot, stageId: string): void {

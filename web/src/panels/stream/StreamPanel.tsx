@@ -1,10 +1,10 @@
 import type { AgentEvent, EventRole, RunSnapshot } from '@mat/shared';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { apiClient } from '../../api/client.js';
-import { matStore, useMatStore } from '../../app/store.js';
+import { ACTIVE_RUN_STATUSES, matStore, useMatStore } from '../../app/store.js';
 import { EventRow } from '../../components/EventRow.js';
-import { filterStreamEvents, groupToolEvents, isScrolledToBottom, reduceFollowState, type FeedItem } from './streamLogic.js';
+import { filterStreamEvents, groupToolEvents, reduceFollowState, type FeedItem } from './streamLogic.js';
 
 const ROLE_LABELS: Record<EventRole, string> = { user: 'your', agent: 'agent', tool: 'tool', thinking: 'thinking', system: 'status', decision: 'decision' };
 const ROLE_STYLE: Record<EventRole, string> = {
@@ -39,6 +39,50 @@ export function StreamPanel() {
   const [error, setError] = useState<string>();
   const [search, setSearch] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const followRef = useRef(filters.follow);
+  const lastScrollTopRef = useRef(0);
+  const intentUntilRef = useRef(0);
+  const previousActiveRunIdRef = useRef(activeRunId);
+  const pendingReplayScrollRef = useRef<string>();
+  const pendingPinsRef = useRef<{ frames: number[]; timers: number[] }>({ frames: [], timers: [] });
+
+  const clearPendingPins = useCallback(() => {
+    for (const frame of pendingPinsRef.current.frames) cancelAnimationFrame(frame);
+    for (const timer of pendingPinsRef.current.timers) window.clearTimeout(timer);
+    pendingPinsRef.current = { frames: [], timers: [] };
+  }, []);
+  const scrollToBottomNow = useCallback(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    element.scrollTop = element.scrollHeight;
+    lastScrollTopRef.current = element.scrollTop;
+  }, []);
+  const forceScrollToBottom = useCallback(() => {
+    clearPendingPins();
+    scrollToBottomNow();
+    const frames: number[] = [];
+    frames.push(requestAnimationFrame(scrollToBottomNow));
+    frames.push(requestAnimationFrame(() => { frames.push(requestAnimationFrame(scrollToBottomNow)); }));
+    pendingPinsRef.current = {
+      frames,
+      timers: [window.setTimeout(scrollToBottomNow, 50), window.setTimeout(scrollToBottomNow, 150)],
+    };
+  }, [clearPendingPins, scrollToBottomNow]);
+  const updateFollow = useCallback((following: boolean) => {
+    if (followRef.current === following) return;
+    followRef.current = following;
+    setFollow(following);
+  }, [setFollow]);
+
+  useEffect(() => { followRef.current = filters.follow; }, [filters.follow]);
+  useEffect(() => clearPendingPins, [clearPendingPins]);
+  useEffect(() => {
+    const previous = previousActiveRunIdRef.current;
+    previousActiveRunIdRef.current = activeRunId;
+    if (!activeRunId || activeRunId === previous) return;
+    setSelectedRunId(undefined);
+    updateFollow(true);
+  }, [activeRunId, updateFollow]);
 
   const refreshHistory = async (append = false) => {
     if (historyLoading) return;
@@ -56,9 +100,9 @@ export function StreamPanel() {
   useEffect(() => { void refreshHistory(false); }, [selectedWorkspaceId]);
 
   const selectRun = async (runId: string) => {
-    setSelectedRunId(runId); setError(undefined); focusNode(undefined); setNodeFilter([]);
-    if (runId === activeRunId) { setFollow(true); return; }
-    setFollow(false); setReplayLoading(true);
+    setSelectedRunId(runId === activeRunId ? undefined : runId); setError(undefined); focusNode(undefined); setNodeFilter([]);
+    if (runId === activeRunId) { updateFollow(true); return; }
+    clearPendingPins(); updateFollow(false); pendingReplayScrollRef.current = runId; setReplayLoading(true);
     try {
       let run = matStore.getState().runs[runId];
       if (!run) { run = await apiClient.getRun(runId); upsertRun(run); }
@@ -77,29 +121,53 @@ export function StreamPanel() {
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 78,
+    estimateSize: (index = 0) => 56 + Math.min(600, Math.floor((items[index]?.events.reduce((length, event) => length + event.text.length, 0) ?? 0) / 6)),
     overscan: 8,
     getItemKey: (index) => items[index]?.key ?? index,
     initialRect: { width: 420, height: 600 },
   });
+  const totalSize = virtualizer.getTotalSize();
+  const previousGrowthRef = useRef({ runId: effectiveRunId, itemCount: 0, totalSize: 0 });
 
   useLayoutEffect(() => {
-    if (!filters.follow || items.length === 0) return;
-    virtualizer.scrollToIndex(items.length - 1, { align: 'end' });
-  }, [filters.follow, items.length, effectiveRunId, virtualizer]);
+    const previous = previousGrowthRef.current;
+    const switched = previous.runId !== effectiveRunId;
+    const grew = !switched && (items.length > previous.itemCount || totalSize > previous.totalSize);
+    previousGrowthRef.current = { runId: effectiveRunId, itemCount: items.length, totalSize };
+    if (effectiveRunId !== activeRunId || items.length === 0) return;
+    if (switched) { updateFollow(true); forceScrollToBottom(); }
+    else if (grew && followRef.current) forceScrollToBottom();
+  }, [activeRunId, effectiveRunId, forceScrollToBottom, items.length, totalSize, updateFollow]);
+
+  useLayoutEffect(() => {
+    if (replayLoading || effectiveRunId === activeRunId || pendingReplayScrollRef.current !== effectiveRunId || items.length === 0) return;
+    pendingReplayScrollRef.current = undefined;
+    forceScrollToBottom();
+  }, [activeRunId, effectiveRunId, forceScrollToBottom, items.length, replayLoading]);
 
   const onScroll = () => {
     const element = scrollRef.current;
-    if (!element || effectiveRunId !== activeRunId) return;
-    const next = reduceFollowState({ following: filters.follow }, { type: 'scroll', atBottom: isScrolledToBottom(element.scrollTop, element.clientHeight, element.scrollHeight) });
-    if (next.following !== filters.follow) setFollow(next.following);
+    if (!element) return;
+    const deltaY = element.scrollTop - lastScrollTopRef.current;
+    lastScrollTopRef.current = element.scrollTop;
+    if (effectiveRunId !== activeRunId) return;
+    const gap = element.scrollHeight - element.scrollTop - element.clientHeight;
+    const next = reduceFollowState({ following: followRef.current }, { type: 'scroll', gap, deltaY, intentActive: performance.now() < intentUntilRef.current });
+    if (next.following !== followRef.current) {
+      if (!next.following) clearPendingPins();
+      updateFollow(next.following);
+    }
   };
+  const markUserScrollIntent = () => { intentUntilRef.current = performance.now() + 1500; };
   const jumpToLive = () => {
-    setFollow(reduceFollowState({ following: filters.follow }, { type: 'jump-to-live' }).following);
-    if (items.length > 0) virtualizer.scrollToIndex(items.length - 1, { align: 'end' });
+    updateFollow(reduceFollowState({ following: followRef.current }, { type: 'jump-to-live' }).following);
+    forceScrollToBottom();
   };
 
-  const availableRuns = uniqueRuns([...(activeRunId && runs[activeRunId] ? [runs[activeRunId]!] : []), ...history]);
+  const availableRuns = uniqueRuns([
+    ...Object.values(runs).filter((run) => run.workspaceId === selectedWorkspaceId).sort((a, b) => b.createdAt - a.createdAt),
+    ...history,
+  ]);
   const toggleNode = (nodeRunId: string) => {
     const selected = filters.nodeRunIds;
     setNodeFilter(selected.includes(nodeRunId) ? selected.filter((id) => id !== nodeRunId) : [...selected, nodeRunId]);
@@ -112,7 +180,7 @@ export function StreamPanel() {
         <label className="sr-only" htmlFor="stream-run-selector">Select run</label>
         <select id="stream-run-selector" value={effectiveRunId ?? ''} onChange={(event) => { if (event.target.value) void selectRun(event.target.value); }} className="max-w-48 rounded border border-border bg-zinc-950 px-2 py-1 text-xs text-ink">
           {!effectiveRunId && <option value="">No runs</option>}
-          {availableRuns.map((run) => <option key={run.runId} value={run.runId}>{run.runId === activeRunId ? 'Live · ' : ''}{run.workflow.name} · {run.status} · {formatRunDate(run.createdAt)}</option>)}
+          {availableRuns.map((run) => <option key={run.runId} value={run.runId}>{ACTIVE_RUN_STATUSES.has(run.status) ? 'Live · ' : ''}{run.workflow.name} · {run.status} · {formatRunDate(run.createdAt)}</option>)}
         </select>
         {historyHasMore && <button type="button" disabled={historyLoading} onClick={() => void refreshHistory(true)} className="rounded border border-border px-2 py-1 text-[10px] text-muted disabled:opacity-50">{historyLoading ? 'Loading…' : 'More runs'}</button>}
       </div>
@@ -130,9 +198,9 @@ export function StreamPanel() {
     {!effectiveRunId ? <div className="p-4 text-xs text-muted">No run yet. Use the run box to start a workflow.</div>
       : replayLoading ? <div className="animate-pulse p-4 text-xs text-muted">Loading replay…</div>
       : events.length === 0 ? <div className="flex items-center gap-2 p-4 text-xs text-muted"><span className="h-2 w-2 animate-pulse rounded-full bg-sky-400" />Waiting for events…</div>
-      : <div ref={scrollRef} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-auto" data-testid="stream-scroll-region">
+      : <div ref={scrollRef} onScroll={onScroll} onWheel={markUserScrollIntent} onPointerDown={markUserScrollIntent} className="relative min-h-0 flex-1 overflow-auto overscroll-contain" data-testid="stream-scroll-region">
         {(events[0]?.seq ?? 1) > 1 && <div role="status" className="border-b border-amber-900/60 bg-amber-950/30 px-4 py-2 text-xs text-amber-200">Older events trimmed from memory — showing from seq {events[0]!.seq}</div>}
-        <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+        <div className="relative w-full" style={{ height: totalSize }}>
           {virtualizer.getVirtualItems().map((virtualItem) => {
             const item = items[virtualItem.index];
             if (!item) return null;
@@ -146,7 +214,7 @@ export function StreamPanel() {
 }
 
 function FeedItemRow({ item }: { item: FeedItem }) {
-  if (item.events.length === 1) return <EventRow event={item.events[0]!} />;
+  if (item.events.length === 1) return <EventRow event={item.events[0]!} {...(item.duplicateCount ? { duplicateCount: item.duplicateCount } : {})} />;
   return <div className="my-1 overflow-hidden rounded border border-amber-700/60 bg-amber-950/10" data-tool-call-id={item.toolCallId} aria-label={`Tool call ${item.toolCallId ?? ''}`}>
     {item.events.map((event) => <EventRow key={event.id} event={event} />)}
   </div>;

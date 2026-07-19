@@ -1,6 +1,7 @@
 import { spawnManaged } from '../spawn.js';
 import {
   createLineBuffer,
+  humanizeError,
   parseJsonObject,
   probeVersion,
   stringifyToolValue,
@@ -129,8 +130,10 @@ export function spawnCodex(spec: ResolvedNodeSpec, io: Parameters<Adapter['spawn
       return;
     }
     if (type === 'turn.failed' || type === 'error') {
-      reportedError = stringField(record, 'message')
-        ?? (record.error === undefined ? `${type}` : stringifyToolValue(record.error));
+      reportedError = humanizeError(
+        stringField(record, 'message') ?? (record.error === undefined ? `${type}` : record.error),
+        'codex',
+      );
     }
   };
 
@@ -149,7 +152,7 @@ export function spawnCodex(spec: ResolvedNodeSpec, io: Parameters<Adapter['spawn
     child.once('close', (code, signal) => {
       stdout.end();
       stderr.end();
-      const error = spawnError ?? reportedError ?? (code ? `Codex exited ${code}` : undefined);
+      const error = spawnError ? humanizeError(spawnError, 'codex') : (reportedError ?? (code ? humanizeError(`Codex exited ${code}`, 'codex') : undefined));
       resolve({
         exitCode: code,
         ...(signal ? { signal } : {}),

@@ -168,7 +168,9 @@ export function NodeCard({ node, latestEvent, now, confirmingKill, onRequestKill
       {node.attempt > 1 && <span className="rounded bg-violet-950 px-1.5 py-0.5 text-violet-200">attempt {node.attempt}</span>}
       <UsageSummary node={node} />
     </div>
-    <p className="mb-2 truncate text-xs text-zinc-300" title={latestEvent?.text}>{latestEvent?.text || (node.status === 'queued' ? 'Waiting to start' : 'Waiting for events…')}</p>
+    {(['failed', 'killed'].includes(node.status) && node.error)
+      ? <p className="mb-2 line-clamp-3 break-words text-xs text-red-300" title={node.error}>{node.error}</p>
+      : <p className="mb-2 line-clamp-2 text-xs text-zinc-300" title={latestEvent?.text}>{latestEvent?.text || (node.status === 'queued' ? 'Waiting to start' : 'Waiting for events…')}</p>}
     {confirmingKill ? <div className="flex items-center gap-1.5 rounded border border-red-900/70 bg-red-950/30 p-1.5 text-[11px]">
       <span className="mr-auto text-red-200">Kill this node?</span>
       <button type="button" onClick={onKill} className="rounded bg-red-700 px-2 py-1 text-white">Confirm</button>

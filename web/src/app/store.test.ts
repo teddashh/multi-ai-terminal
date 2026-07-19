@@ -16,6 +16,19 @@ describe('MAT store', () => {
     expect(store.getState().events.r1).toEqual([event(1)]);
   });
 
+  it('auto-follows a new active run for the selected workspace after the prior run is terminal', () => {
+    const store = createMatStore({} as any);
+    const terminal = { runId: 'old', workspaceId: 'w1', workflow: {} as RunSnapshot['workflow'], task: 'old', status: 'done', nodes: [], gateDecisions: [], createdAt: 1 } as RunSnapshot;
+    const live = { ...terminal, runId: 'new', task: 'new', status: 'created' as const, createdAt: 2 };
+    store.setState({ selectedWorkspaceId: 'w1', activeRunId: terminal.runId, runs: { [terminal.runId]: terminal } });
+    store.getState().applyWsMsg({ type: 'run', run: live });
+    expect(store.getState().activeRunId).toBe('new');
+
+    store.setState({ selectedWorkspaceId: 'w2', activeRunId: undefined });
+    store.getState().applyWsMsg({ type: 'run', run: { ...live, runId: 'other' } });
+    expect(store.getState().activeRunId).toBeUndefined();
+  });
+
   it('toggles roles and limits event storage to the ring size', () => {
     const store = createMatStore({} as any);
     store.getState().toggleRole('thinking'); expect(store.getState().filters.roles).not.toContain('thinking');

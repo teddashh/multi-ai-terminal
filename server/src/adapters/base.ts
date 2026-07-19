@@ -21,6 +21,45 @@ export interface Adapter {
 }
 export type { AdapterContentEvent } from '@mat/shared';
 
+interface ExtractedError {
+  message?: string;
+  status?: string;
+  type?: string;
+}
+
+function extractError(value: unknown, depth: number, result: ExtractedError): void {
+  if (depth > 3 || value === null || value === undefined || result.message) return;
+  if (value instanceof Error) { extractError(value.message, depth + 1, result); return; }
+  if (typeof value === 'string') {
+    const message = value.trim();
+    if (!message) return;
+    try {
+      const parsed: unknown = JSON.parse(message);
+      if (parsed !== message) { extractError(parsed, depth, result); return; }
+    } catch { /* Plain error text is already the best available message. */ }
+    result.message = message;
+    return;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') { result.message = String(value); return; }
+  if (typeof value !== 'object' || Array.isArray(value)) return;
+  const record = value as Record<string, unknown>;
+  if (result.status === undefined && (typeof record.status === 'string' || typeof record.status === 'number')) result.status = String(record.status);
+  if (result.type === undefined && typeof record.type === 'string' && record.type !== 'error') result.type = record.type;
+  for (const key of ['error', 'message', 'reason'] as const) extractError(record[key], depth + 1, result);
+}
+
+export function humanizeError(value: unknown, provider?: string): string {
+  const extracted: ExtractedError = {};
+  extractError(value, 0, extracted);
+  const original = typeof value === 'string' ? value : (value instanceof Error ? value.message : String(value));
+  const message = extracted.message ?? original;
+  const spawn = /spawn (\S+) ENOENT/.exec(message);
+  if (spawn?.[1]) return `\`${spawn[1]}\` CLI not found on PATH — install it or remove this agent from the workflow.`;
+  if (provider !== 'codex' || message.startsWith('codex: ')) return message;
+  const detail = [extracted.status, extracted.type].filter(Boolean).join(' ');
+  return `codex: ${detail ? `${detail} — ` : ''}${message}`;
+}
+
 /** Converts arbitrary stream chunks into complete lines and preserves a final partial line on end. */
 export class IncrementalLineBuffer {
   #pending = '';
@@ -140,13 +179,13 @@ export function probeVersion(command: string): Promise<{ ok: boolean; version?: 
         onTimeout: () => finish({ ok: false, detail: 'version probe timed out after 5s' }),
       });
     } catch (error) {
-      finish({ ok: false, detail: (error as Error).message });
+      finish({ ok: false, detail: humanizeError(error) });
       return;
     }
     const child: ChildProcess = managed.child;
     child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); });
     child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
-    child.once('error', (error) => finish({ ok: false, detail: error.message }));
+    child.once('error', (error) => finish({ ok: false, detail: humanizeError(error) }));
     child.once('close', (code) => {
       const output = (stdout.trim() || stderr.trim());
       if (code === 0) finish({ ok: true, ...(output ? { version: output } : {}) });

@@ -11,7 +11,7 @@ import {
 import type { AgentBinding, ProviderInfo, Slot, Stage, WorkflowDef } from '@mat/shared';
 import { useEffect, useRef, useState } from 'react';
 import { apiClient, type ApiClient } from '../../api/client.js';
-import { useMatStore } from '../../app/store.js';
+import { ACTIVE_RUN_STATUSES, useMatStore } from '../../app/store.js';
 import { AgentChip } from '../../components/AgentChip.js';
 import {
   appendSlotWithProviderDefaults,
@@ -22,8 +22,6 @@ import {
   stageAgentCount,
   validateSlotCount,
 } from './logic.js';
-
-const ACTIVE_STATUSES = new Set(['created', 'running', 'gating']);
 
 export interface WorkflowPanelProps { api?: ApiClient }
 
@@ -63,8 +61,10 @@ export function WorkflowPanel({ api = apiClient }: WorkflowPanelProps) {
 
   const baseWorkflow = workflows.find((workflow) => workflow.id === workflowId);
   const workflow = baseWorkflow ? (edits[baseWorkflow.id] ?? baseWorkflow) : undefined;
-  const activeRun = Object.values(runs).find((run) => run.workspaceId === selectedWorkspaceId && ACTIVE_STATUSES.has(run.status));
+  const activeRun = Object.values(runs).find((run) => run.workspaceId === selectedWorkspaceId && ACTIVE_RUN_STATUSES.has(run.status));
   const invalidStage = workflow?.stages.find((stage) => stage.slots.length === 0 || stageAgentCount(stage) > MAX_STAGE_AGENTS);
+  const unavailableBindings = workflow ? unavailableProviderBindings(workflow, providers) : [];
+  const providerPreflightError = unavailableBindings.length > 0 ? unavailableBindings.join('\n') : undefined;
 
   useEffect(() => {
     if (!workflow) return;
@@ -123,6 +123,7 @@ export function WorkflowPanel({ api = apiClient }: WorkflowPanelProps) {
 
   const startRun = async () => {
     if (!selectedWorkspaceId || !baseWorkflow || !task.trim() || activeRun || invalidStage || runsLoading) return;
+    if (providerPreflightError) { setActionError(providerPreflightError); return; }
     setActionPending(true); setActionError(undefined);
     try {
       const run = await api.createRun(createRunRequest(selectedWorkspaceId, baseWorkflow, task, edits));
@@ -162,7 +163,8 @@ export function WorkflowPanel({ api = apiClient }: WorkflowPanelProps) {
           </div>
           {activeRun && <p className="mt-2 text-xs text-amber-300">A {activeRun.status} run already exists in this workspace.</p>}
           {invalidStage && <p className="mt-2 text-xs text-red-300">{invalidStage.name} must contain 1–12 agents.</p>}
-          <button type="button" onClick={() => void startRun()} disabled={!task.trim() || !!activeRun || !!invalidStage || actionPending || runsLoading} className="mt-3 w-full rounded bg-accent px-3 py-2 text-sm font-semibold text-zinc-950 disabled:cursor-not-allowed disabled:opacity-40">{actionPending || runsLoading ? 'Working…' : 'Start'}</button>
+          {providerPreflightError && <p className="mt-2 whitespace-pre-line text-xs text-red-300">{providerPreflightError}</p>}
+          <button type="button" onClick={() => void startRun()} disabled={!task.trim() || !!activeRun || !!invalidStage || !!providerPreflightError || actionPending || runsLoading} className="mt-3 w-full rounded bg-accent px-3 py-2 text-sm font-semibold text-zinc-950 disabled:cursor-not-allowed disabled:opacity-40">{actionPending || runsLoading ? 'Working…' : 'Start'}</button>
         </section>
 
         <section aria-labelledby="agent-palette-heading" className="mt-4 rounded border border-border bg-zinc-950/60 p-3">
@@ -245,4 +247,16 @@ function PaletteAgent({ provider }: { provider: ProviderInfo }) {
 
 function bindingSummary(binding: AgentBinding): string {
   return [binding.provider, binding.model, binding.effort, binding.permission].filter(Boolean).join(' · ');
+}
+
+export function unavailableProviderBindings(workflow: WorkflowDef, providers: readonly ProviderInfo[]): string[] {
+  const byId = new Map(providers.map((provider) => [provider.id, provider]));
+  const bindings = workflow.stages.flatMap((stage) => stage.slots.map((slot) => ({ label: slot.label, provider: slot.agent.provider })));
+  if (workflow.orchestrator.enabled) bindings.push({ label: 'Orchestrator', provider: workflow.orchestrator.agent.provider });
+  return bindings.flatMap(({ label, provider }) => {
+    const availability = byId.get(provider);
+    return availability?.ok === false
+      ? [`${label} · ${provider} unavailable: ${availability.detail || 'not detected'}`]
+      : [];
+  });
 }

@@ -125,4 +125,13 @@ describe('WebSocket hub', () => {
     ]));
     socket.close();
   });
+
+  it('broadcasts new run snapshots before clients know to subscribe', async () => {
+    const { app } = await createApp();
+    const socket = await app.injectWS('/ws');
+    const received = nextMessage(socket);
+    await saveRun(runSnapshot({ runId: 'brand-new' }));
+    await expect(received).resolves.toMatchObject({ type: 'run', run: { runId: 'brand-new' } });
+    socket.close();
+  });
 });

@@ -105,6 +105,19 @@ describe('run routes', () => {
     }
   });
 
+  it('rejects a run when a bound provider is unavailable', async () => {
+    dependencies.providers = async () => [{ id: 'grok', tier: 'rich', ok: false, detail: 'not installed', models: ['grok'], defaultModel: 'grok' }];
+    const override = workflow({
+      stages: [{ ...workflow().stages[0]!, slots: [{ ...workflow().stages[0]!.slots[0]!, label: 'Reviewer', agent: { provider: 'grok', permission: 'safe' } }] }],
+    });
+    const response = await app.inject({
+      method: 'POST', url: '/api/runs',
+      payload: { workspaceId: 'workspace-1', workflowId: 'custom', task: 'Build it', workflowOverride: override },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: { code: 'PROVIDER_UNAVAILABLE', message: 'Reviewer · grok unavailable: not installed' } });
+  });
+
   it('validates event cursors and forwards afterSeq paging', async () => {
     const events = vi.fn(dependencies.runs.events);
     dependencies.runs.events = events;

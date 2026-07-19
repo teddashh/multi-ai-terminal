@@ -147,6 +147,7 @@ describe('node runner lifecycle', () => {
     let setupResult = setup(adapterFrom(() => { throw new Error('spawn exploded'); }));
     await runNode(setupResult.node, stage, 'prompt');
     expect(setupResult.node.status).toBe('failed');
+    expect(setupResult.node.error).toBe('spawn exploded');
     expect(setupResult.events()).toContainEqual(expect.objectContaining({
       role: 'system', kind: 'error', text: 'spawn exploded', data: expect.objectContaining({ status: 'failed' }),
     }));
@@ -158,6 +159,7 @@ describe('node runner lifecycle', () => {
     })));
     await runNode(setupResult.node, stage, 'prompt');
     expect(setupResult.node.status).toBe('failed');
+    expect(setupResult.node.error).toBe('provider failed');
     expect(setupResult.events()).toContainEqual(expect.objectContaining({
       role: 'system', kind: 'error', text: 'provider failed', data: expect.objectContaining({ status: 'failed', exitCode: 7 }),
     }));
