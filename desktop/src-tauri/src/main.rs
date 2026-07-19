@@ -295,7 +295,9 @@ fn main() {
             )
             .title("Multi-AI Terminal").inner_size(1440.0, 900.0)
             .min_inner_size(1024.0, 640.0).build()?;
-            let resources = app.path().resource_dir()?;
+            // Windows resource_dir often carries the \\?\ extended-length prefix;
+            // Node cannot load a main module from such a path (lstat 'C:' EISDIR).
+            let resources = dunce::simplified(&app.path().resource_dir()?).to_path_buf();
             let process = Arc::clone(&setup_process);
             thread::spawn(move || start_server(window, resources, process));
             Ok(())
