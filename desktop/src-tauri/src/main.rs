@@ -4,11 +4,12 @@ use std::{
     collections::VecDeque,
     env,
     ffi::{OsStr, OsString},
-    io::{BufRead, BufReader, Read},
+    fs::OpenOptions,
+    io::{BufRead, BufReader, Read, Write},
     net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream},
     path::PathBuf,
     process::{Child, Command, Stdio},
-    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex, MutexGuard},
+    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex, MutexGuard, OnceLock},
     thread,
     time::{Duration, Instant},
 };
@@ -44,6 +45,34 @@ impl ServerProcess {
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+static LOG_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+fn home_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    { env::var_os("USERPROFILE").map(PathBuf::from) }
+    #[cfg(not(windows))]
+    { env::var_os("HOME").map(PathBuf::from) }
+}
+
+/// Mirrors every diagnostic line to ~/.multi-ai-terminal/desktop.log so
+/// failures are inspectable on Windows, where a windows_subsystem build
+/// has no visible stderr. The log is reset once per app session.
+fn log_line(message: &str) {
+    eprintln!("{message}");
+    let path = LOG_PATH.get_or_init(|| home_dir().map(|home| {
+        let dir = home.join(".multi-ai-terminal");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("desktop.log");
+        let _ = std::fs::write(&file, "");
+        file
+    }));
+    if let Some(path) = path {
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+            let _ = writeln!(file, "{message}");
+        }
+    }
 }
 
 fn node_binary() -> OsString {
@@ -100,10 +129,11 @@ fn free_port() -> Result<u16, String> {
 }
 
 fn show_error(window: &tauri::WebviewWindow, message: &str) {
+    log_line(&format!("[desktop] startup error: {message}"));
     let encoded = serde_json::to_string(message)
         .unwrap_or_else(|_| "\"Unknown startup error\"".into());
     if let Err(error) = window.eval(&format!("window.__matShowError?.({encoded});")) {
-        eprintln!("[desktop] Could not render startup error: {error}\n{message}");
+        log_line(&format!("[desktop] Could not render startup error: {error}"));
     }
 }
 
@@ -115,7 +145,7 @@ fn forward_output<R: Read + Send + 'static>(
     thread::spawn(move || for result in BufReader::new(reader).lines() {
         match result {
             Ok(line) => {
-                eprintln!("[server {stream}] {line}");
+                log_line(&format!("[server {stream}] {line}"));
                 if let Some(history) = &recent_stderr {
                     let mut history = lock(history);
                     if history.len() == STDERR_HISTORY { history.pop_front(); }
@@ -123,7 +153,7 @@ fn forward_output<R: Read + Send + 'static>(
                 }
             }
             Err(error) => {
-                eprintln!("[desktop] Failed reading server {stream}: {error}");
+                log_line(&format!("[desktop] Failed reading server {stream}: {error}"));
                 break;
             }
         }
@@ -140,7 +170,7 @@ fn start_server(window: tauri::WebviewWindow, resources: PathBuf, process: Arc<S
         Ok(version) => version,
         Err(message) => { show_error(&window, &message); return; }
     };
-    eprintln!("[desktop] Using Node.js {version} at {}", node.to_string_lossy());
+    log_line(&format!("[desktop] Using Node.js {version} at {}", node.to_string_lossy()));
     let port = match free_port() {
         Ok(port) => port,
         Err(message) => { show_error(&window, &message); return; }
@@ -188,7 +218,7 @@ fn start_server(window: tauri::WebviewWindow, resources: PathBuf, process: Arc<S
     if let Some(stderr) = stderr {
         forward_output(stderr, "stderr", Some(Arc::clone(&recent_stderr)));
     }
-    eprintln!("[desktop] Started server process {pid} on 127.0.0.1:{port}");
+    log_line(&format!("[desktop] Started server process {pid} on 127.0.0.1:{port}, entry {}", entry.display()));
 
     let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     let deadline = Instant::now() + STARTUP_TIMEOUT;
@@ -202,7 +232,9 @@ fn start_server(window: tauri::WebviewWindow, resources: PathBuf, process: Arc<S
                     return;
                 }
             };
+            log_line(&format!("[desktop] server ready, navigating to http://127.0.0.1:{port}/"));
             if let Err(error) = window.navigate(url) {
+                log_line(&format!("[desktop] navigate failed ({error}), trying location.replace"));
                 let fallback = format!("window.location.replace('http://127.0.0.1:{port}/');");
                 if let Err(fallback_error) = window.eval(&fallback) {
                     show_error(&window, &format!(
@@ -298,6 +330,11 @@ fn main() {
             // Windows resource_dir often carries the \\?\ extended-length prefix;
             // Node cannot load a main module from such a path (lstat 'C:' EISDIR).
             let resources = dunce::simplified(&app.path().resource_dir()?).to_path_buf();
+            log_line(&format!(
+                "[desktop] Multi-AI Terminal v{} starting, resources at {}",
+                env!("CARGO_PKG_VERSION"), resources.display()
+            ));
+            if env::var_os("MAT_DEVTOOLS").is_some() { window.open_devtools(); }
             let process = Arc::clone(&setup_process);
             thread::spawn(move || start_server(window, resources, process));
             Ok(())

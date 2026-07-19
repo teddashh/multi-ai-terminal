@@ -1,5 +1,30 @@
 <!doctype html>
 <html lang="en" class="dark">
-  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Multi-AI Terminal</title></head>
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Multi-AI Terminal</title>
+  <script>
+    // Boot diagnostics: if the app fails before React mounts, surface the
+    // failure in-page instead of leaving a blank dark window.
+    (function () {
+      function show(message) {
+        var root = document.getElementById('root');
+        if (!root || root.childElementCount > 0) return;
+        var pre = document.createElement('pre');
+        pre.style.cssText = 'color:#f87171;background:#18181b;padding:24px;margin:0;white-space:pre-wrap;font:12px/1.5 ui-monospace,monospace;';
+        pre.textContent = message + '\n\n' + navigator.userAgent;
+        root.appendChild(pre);
+      }
+      window.addEventListener('error', function (event) {
+        show('Startup error: ' + (event.error && event.error.stack ? event.error.stack : event.message));
+      });
+      window.addEventListener('unhandledrejection', function (event) {
+        var reason = event.reason;
+        show('Startup rejection: ' + (reason && reason.stack ? reason.stack : String(reason)));
+      });
+      setTimeout(function () {
+        show('UI did not mount within 6 seconds — the script bundle failed to load or crashed without an error event.');
+      }, 6000);
+    })();
+  </script>
+  </head>
   <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
 </html>
