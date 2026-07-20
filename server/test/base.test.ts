@@ -1,5 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { clearProviderSpawnSlots, humanizeError, IncrementalLineBuffer, providerSpawnSlot } from '../src/adapters/base.js';
+import { clearProviderSpawnSlots, detectAuthFailure, humanizeError, IncrementalLineBuffer, providerSpawnSlot } from '../src/adapters/base.js';
+
+describe('detectAuthFailure', () => {
+  it('detects revoked Codex refresh tokens', () => {
+    expect(detectAuthFailure('codex', 'Your refresh token was already used. Please log out and sign in again.')).toBe('codex sign-in expired.\nFix: codex logout && codex login');
+  });
+
+  it('preserves the most useful Grok CLI instruction line', () => {
+    const text = 'Not signed in. To authenticate without a browser, run:\n  grok login --device-code\n\nAlternatively, set the XAI_API_KEY environment variable or run `grok login` on a machine with a browser.';
+    expect(detectAuthFailure('grok', text)).toBe('grok is not signed in.\nFix: grok login   (browser) · grok login --device-code (headless) · or set XAI_API_KEY\ngrok login --device-code');
+  });
+
+  it('uses expired wording for a bare 401', () => {
+    expect(detectAuthFailure('claude', 'request failed: 401 Unauthorized')).toBe('claude sign-in expired.\nFix: claude   (then /login inside the session)');
+  });
+
+  it('ignores non-auth output and the mock provider', () => {
+    expect(detectAuthFailure('codex', 'request timed out')).toBeUndefined();
+    expect(detectAuthFailure('mock', 'Not signed in')).toBeUndefined();
+  });
+});
 
 describe('IncrementalLineBuffer', () => {
   it('handles partial lines and flushes the tail', () => {

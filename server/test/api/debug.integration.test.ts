@@ -11,7 +11,7 @@ import { configureDataDir } from '../../src/store/dataDir.js';
 import { fakeApiDependencies, runSnapshot } from './helpers.js';
 
 const dirs: string[] = [];
-afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
+afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 3 }))));
 
 describe('debug API', () => {
   it('exports bundle format v1 with run, event, diagnostics, report, raw, and artifacts', async () => {
@@ -46,7 +46,7 @@ describe('debug API', () => {
         'raw/stage-1.slot-1.0.a1.jsonl', 'artifacts/stage-1.slot-1.0.a1.patch', 'artifacts/stage-1.slot-1.0.a1.verify.log',
       ]));
       const manifest = JSON.parse(zip.readAsText('manifest.json'));
-      expect(manifest).toMatchObject({ bundleVersion: 1, appVersion: '0.1.8', runId: 'run-1', workspace: { name: 'Debug repo', verifyCommand: 'npm test' }, providerVersions: { mock: 'mock/0' }, missing: [] });
+      expect(manifest).toMatchObject({ bundleVersion: 1, appVersion: '0.1.9', runId: 'run-1', workspace: { name: 'Debug repo', verifyCommand: 'npm test' }, providerVersions: { mock: 'mock/0' }, missing: [] });
       expect(Object.keys(manifest).some((key) => key.toLowerCase().includes('env'))).toBe(false);
     } finally { await app.close(); }
   });

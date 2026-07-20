@@ -29,6 +29,19 @@ describe('MAT store', () => {
     expect(store.getState().activeRunId).toBeUndefined();
   });
 
+  it('refreshes providers once when a run reaches a terminal status', async () => {
+    const providers = [{ id: 'codex', tier: 'rich', ok: true, installable: true, models: [], defaultModel: '', authAlert: { message: 'sign in', at: 1, runId: 'r1' } }];
+    const getProviders = vi.fn().mockResolvedValue(providers);
+    const store = createMatStore({ getProviders } as any);
+    const running = { runId: 'r1', workspaceId: 'w1', workflow: {} as RunSnapshot['workflow'], task: 'x', status: 'running', nodes: [], gateDecisions: [], createdAt: 1 } as RunSnapshot;
+    store.getState().applyWsMsg({ type: 'run', run: running });
+    store.getState().applyWsMsg({ type: 'run', run: { ...running, status: 'failed', endedAt: 2 } });
+    await vi.waitFor(() => expect(store.getState().providers).toEqual(providers));
+    expect(getProviders).toHaveBeenCalledOnce();
+    store.getState().applyWsMsg({ type: 'run', run: { ...running, status: 'failed', endedAt: 2 } });
+    expect(getProviders).toHaveBeenCalledOnce();
+  });
+
   it('toggles roles and limits event storage to the ring size', () => {
     const store = createMatStore({} as any);
     store.getState().toggleRole('thinking'); expect(store.getState().filters.roles).not.toContain('thinking');

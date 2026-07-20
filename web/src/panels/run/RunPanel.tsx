@@ -238,8 +238,10 @@ export function NodeCard({ node, latestEvent, seedPrompt, now, confirmingKill, o
     <VerificationBadge node={node} />
     {node.handoff && <p className="mb-2 text-[10px] text-zinc-400">← {node.handoff.priorNodeRunIds.length} upstream node(s){node.handoff.orchestratorContext ? ' + orchestrator context' : ''}{node.handoff.retryAddendum ? ' + retry note' : ''}</p>}
     {seedPrompt && <Collapsible className="mb-2 text-[10px]" summary={<span className="text-sky-300">Seed prompt</span>}><pre className="max-h-48 overflow-auto whitespace-pre-wrap text-[10px] text-zinc-300">{seedPrompt}</pre></Collapsible>}
-    {(['failed', 'killed'].includes(node.status) && node.error)
-      ? <p className="mb-2 line-clamp-3 break-words text-xs text-red-300" title={node.error}>{node.error}</p>
+    {(node.status === 'failed' && (node.errorReason || node.error))
+      ? <p className={`mb-2 line-clamp-3 whitespace-pre-line break-words text-xs ${node.errorReason ? 'text-amber-200' : 'text-red-300'}`} title={node.errorReason ?? node.error}>{node.errorReason ?? node.error}</p>
+      : (node.status === 'killed' && node.error)
+        ? <p className="mb-2 line-clamp-3 break-words text-xs text-red-300" title={node.error}>{node.error}</p>
       : <p className="mb-2 line-clamp-2 text-xs text-zinc-300" title={latestEvent?.text}>{latestEvent?.text || (node.status === 'queued' ? 'Waiting to start' : 'Waiting for events…')}</p>}
     {confirmingKill ? <div className="flex items-center gap-1.5 rounded border border-red-900/70 bg-red-950/30 p-1.5 text-[11px]">
       <span className="mr-auto text-red-200">Kill this node?</span>

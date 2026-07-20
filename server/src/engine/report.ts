@@ -13,7 +13,7 @@ function duration(milliseconds: number | undefined): string {
 }
 
 function truncate(value: string, limit: number): string {
-  return value.length <= limit ? value : `${value.slice(0, limit)}…`;
+  return value.length <= limit ? value : `${value.slice(0, Math.max(0, limit - 1))}…`;
 }
 
 function fenced(value: string): string {
@@ -70,7 +70,7 @@ export function buildRunReport(run: RunSnapshot, workspace: Workspace, events: A
       const tokens = node.usage ? (node.usage.inputTokens ?? 0) + (node.usage.outputTokens ?? 0) : undefined;
       const tools = events.filter((event) => event.nodeRunId === node.nodeRunId && event.kind === 'tool_use').length;
       lines.push(`- **${node.label}** — ${node.agent.provider}${model}; status ${node.status}; attempts ${node.attempt}; duration ${duration(node.startedAt === undefined || node.endedAt === undefined ? undefined : node.endedAt - node.startedAt)}; tokens ${tokens ?? 'n/a'}; diffstat ${patchStat(node.patchFile)}; verification ${verificationLabel(node)}; tool calls ${tools}`);
-      if (node.status === 'failed' && node.error) lines.push(`  - Error: ${node.error}`);
+      if (node.status === 'failed' && (node.errorReason || node.error)) lines.push(`  - Error: ${truncate(node.errorReason ?? node.error!, 200)}`);
       if (node.handoff) {
         const sources = node.handoff.priorNodeRunIds.length > 0 ? `← ${node.handoff.priorNodeRunIds.join(', ')}` : '← no upstream nodes';
         const extras = [node.handoff.orchestratorContext ? 'orchestrator context' : '', node.handoff.retryAddendum ? 'retry note' : ''].filter(Boolean);

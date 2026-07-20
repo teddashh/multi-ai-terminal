@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { buildRunReport } from '../../src/engine/report.js';
 
 const dirs: string[] = [];
-afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
+afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 3 }))));
 
 describe('run report', () => {
   it('renders deterministic evidence, handoffs, degraded gates, and failure logs', () => {
@@ -41,5 +41,21 @@ describe('run report', () => {
     expect(report).toContain('## Verification logs');
     expect(report).toContain('assertion failed');
     expect(report).toContain('tool calls 1');
+  });
+
+  it('includes a bounded errorReason for failed nodes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mat-report-auth-')); dirs.push(dir);
+    const reason = `Sign in: ${'x'.repeat(240)}`;
+    const run: RunSnapshot = {
+      runId: 'run-auth', workspaceId: 'w', task: 'Auth', status: 'failed', createdAt: 1, endedAt: 2,
+      workflow: { schemaVersion: 1, id: 'wf', name: 'Auth', description: '', maxParallel: 1, maxRetriesPerStage: 1, orchestrator: { enabled: false, agent: { provider: 'mock', permission: 'safe' }, gateTimeoutSec: 30 }, stages: [{ id: 's', name: 'S', slots: [], isolation: 'none', join: 'all', timeoutSec: 30, stallSec: 10, gate: false, requireVerified: false }] },
+      nodes: [{ nodeRunId: 's.a.0', stageId: 's', slotId: 'a', instanceIndex: 0, agent: { provider: 'codex', permission: 'safe' }, label: 'A', status: 'failed', attempt: 1, cwd: dir, error: 'exit 1', errorReason: reason }], gateDecisions: [],
+    };
+    const report = buildRunReport(run, { id: 'w', name: 'W', path: dir, isGit: false }, []);
+    const line = report.split('\n').find((value) => value.includes('  - Error:'))!;
+    expect(line).toContain('Sign in:');
+    expect(line).not.toContain('exit 1');
+    expect(line.length).toBeLessThanOrEqual(213);
+    expect(line.endsWith('…')).toBe(true);
   });
 });

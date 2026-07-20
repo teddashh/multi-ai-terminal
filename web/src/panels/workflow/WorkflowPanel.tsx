@@ -65,6 +65,7 @@ export function WorkflowPanel({ api = apiClient }: WorkflowPanelProps) {
   const invalidStage = workflow?.stages.find((stage) => stage.slots.length === 0 || stageAgentCount(stage) > MAX_STAGE_AGENTS);
   const unavailableBindings = workflow ? unavailableProviderBindings(workflow, providers) : [];
   const providerPreflightError = unavailableBindings.length > 0 ? unavailableBindings.join('\n') : undefined;
+  const authWarnings = workflow ? workflowAuthWarnings(workflow, providers) : [];
 
   useEffect(() => {
     if (!workflow) return;
@@ -164,6 +165,7 @@ export function WorkflowPanel({ api = apiClient }: WorkflowPanelProps) {
           {activeRun && <p className="mt-2 text-xs text-amber-300">A {activeRun.status} run already exists in this workspace.</p>}
           {invalidStage && <p className="mt-2 text-xs text-red-300">{invalidStage.name} must contain 1–12 agents.</p>}
           {providerPreflightError && <p className="mt-2 whitespace-pre-line text-xs text-red-300">{providerPreflightError}</p>}
+          {authWarnings.length > 0 && <p className="mt-2 text-xs text-amber-300" role="status">Sign-in warning: {authWarnings.join(' · ')}</p>}
           <button type="button" onClick={() => void startRun()} disabled={!task.trim() || !!activeRun || !!invalidStage || !!providerPreflightError || actionPending || runsLoading} className="mt-3 w-full rounded bg-accent px-3 py-2 text-sm font-semibold text-zinc-950 disabled:cursor-not-allowed disabled:opacity-40">{actionPending || runsLoading ? 'Working…' : 'Start'}</button>
         </section>
 
@@ -270,7 +272,7 @@ function PaletteAgent({ provider, api }: { provider: ProviderInfo; api: ApiClien
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState<string>();
   const [logTail, setLogTail] = useState<string>();
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<'install' | 'sign-in'>();
   const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
   const unavailable = provider.detail ? `Unavailable: ${provider.detail}` : 'Provider unavailable';
   const install = async () => {
@@ -283,16 +285,18 @@ function PaletteAgent({ provider, api }: { provider: ProviderInfo; api: ApiClien
     } catch (error) { setInstallError(error instanceof Error ? error.message : 'Provider setup failed.'); }
     finally { setInstalling(false); }
   };
-  const copy = async () => {
-    if (!provider.manualCommand) return;
-    try { await navigator.clipboard.writeText(provider.manualCommand); setCopied(true); setInstallError(undefined); }
+  const copy = async (value: string, kind: 'install' | 'sign-in') => {
+    try { await navigator.clipboard.writeText(value); setCopied(kind); setInstallError(undefined); }
     catch { setInstallError('Could not copy the command.'); }
   };
-  return <span title={provider.ok ? `Drag ${provider.id} to a stage${provider.version ? ` · ${provider.version}` : ''}` : unavailable} className="relative inline-flex items-center gap-1"><button ref={setNodeRef} type="button" style={style} {...listeners} {...attributes} disabled={!provider.ok} aria-label={`${provider.id} provider${provider.ok ? '' : ` unavailable: ${provider.detail ?? 'not detected'}`}`} className={`rounded-full text-left ${provider.ok ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed grayscale opacity-40'} ${isDragging ? 'z-50 opacity-70' : ''}`}><AgentChip agent={{ provider: provider.id, model: provider.defaultModel, permission: 'auto' }} /></button>{provider.version && <span className="max-w-24 truncate text-[10px] text-muted">{provider.version}</span>}{!provider.ok && <button type="button" onClick={() => setSetupOpen((value) => !value)} aria-expanded={setupOpen} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-violet-200 hover:border-accent">Setup</button>}{setupOpen && <div role="dialog" aria-label={`Setup ${provider.id}`} className="absolute left-0 top-full z-40 mt-2 w-72 rounded border border-accent bg-panel p-3 shadow-2xl">
+  const title = provider.authAlert?.message ?? (provider.ok ? `Drag ${provider.id} to a stage${provider.version ? ` · ${provider.version}` : ''}` : unavailable);
+  return <span title={title} className="relative inline-flex items-center gap-1"><button ref={setNodeRef} type="button" style={style} {...listeners} {...attributes} disabled={!provider.ok} aria-label={`${provider.id} provider${provider.ok ? '' : ` unavailable: ${provider.detail ?? 'not detected'}`}${provider.authAlert ? ' authentication required' : ''}`} className={`rounded-full text-left ${provider.ok ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed grayscale opacity-40'} ${provider.authAlert && provider.ok ? 'ring-1 ring-amber-500' : ''} ${isDragging ? 'z-50 opacity-70' : ''}`}><AgentChip agent={{ provider: provider.id, model: provider.defaultModel, permission: 'auto' }} /></button>{provider.authAlert && <span className="rounded border border-amber-700 bg-amber-950/50 px-1 py-0.5 text-[9px] font-medium text-amber-300">auth</span>}{provider.version && <span className="max-w-24 truncate text-[10px] text-muted">{provider.version}</span>}{(!provider.ok || provider.authAlert !== undefined) && <button type="button" onClick={() => setSetupOpen((value) => !value)} aria-expanded={setupOpen} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-violet-200 hover:border-accent">Setup</button>}{setupOpen && <div role="dialog" aria-label={`Setup ${provider.id}`} className="absolute left-0 top-full z-40 mt-2 w-72 rounded border border-accent bg-panel p-3 shadow-2xl">
     <div className="flex items-center justify-between"><strong className="text-xs">Setup {provider.id}</strong><button type="button" onClick={() => setSetupOpen(false)} aria-label={`Close ${provider.id} setup`} className="text-muted">×</button></div>
     <p className="mt-2 text-xs text-muted">{provider.version ?? provider.detail ?? 'Provider not detected.'}</p>
-    {provider.installable && <button type="button" disabled={installing} onClick={() => void install()} className="mt-3 rounded bg-accent px-2 py-1.5 text-xs font-medium text-zinc-950 disabled:opacity-50">{installing ? 'Installing…' : 'Install'}</button>}
-    {!provider.installable && provider.manualCommand && <div className="mt-3"><code className="block select-all break-all rounded bg-zinc-950 p-2 text-[11px] text-ink">{provider.manualCommand}</code><button type="button" onClick={() => void copy()} className="mt-2 rounded border border-border px-2 py-1 text-xs">{copied ? 'Copied' : 'Copy'}</button></div>}
+    {provider.authAlert && <p className="mt-2 whitespace-pre-line break-words text-xs text-amber-200">{provider.authAlert.message}</p>}
+    {provider.signInCommand && <div className="mt-3"><strong className="text-[11px] text-muted">Sign in</strong><code className="mt-1 block select-all break-words rounded bg-zinc-950 p-2 text-[11px] text-ink">{provider.signInCommand}</code><button type="button" onClick={() => void copy(provider.signInCommand!, 'sign-in')} className="mt-2 rounded border border-border px-2 py-1 text-xs">{copied === 'sign-in' ? 'Copied' : 'Copy'}</button></div>}
+    {!provider.ok && provider.installable && <button type="button" disabled={installing} onClick={() => void install()} className="mt-3 rounded bg-accent px-2 py-1.5 text-xs font-medium text-zinc-950 disabled:opacity-50">{installing ? 'Installing…' : 'Install'}</button>}
+    {!provider.ok && !provider.installable && provider.manualCommand && <div className="mt-3"><code className="block select-all break-all rounded bg-zinc-950 p-2 text-[11px] text-ink">{provider.manualCommand}</code><button type="button" onClick={() => void copy(provider.manualCommand!, 'install')} className="mt-2 rounded border border-border px-2 py-1 text-xs">{copied === 'install' ? 'Copied' : 'Copy'}</button></div>}
     {installError && <p role="alert" className="mt-2 text-xs text-red-300">{installError}</p>}
     {logTail && <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-zinc-950 p-2 text-[10px] text-red-200">{logTail}</pre>}
   </div>}</span>;
@@ -312,4 +316,10 @@ export function unavailableProviderBindings(workflow: WorkflowDef, providers: re
       ? [`${label} · ${provider} unavailable: ${availability.detail || 'not detected'}`]
       : [];
   });
+}
+
+function workflowAuthWarnings(workflow: WorkflowDef, providers: readonly ProviderInfo[]): string[] {
+  const used = new Set(workflow.stages.flatMap((stage) => stage.slots.map((slot) => slot.agent.provider)));
+  if (workflow.orchestrator.enabled) used.add(workflow.orchestrator.agent.provider);
+  return providers.filter((provider) => used.has(provider.id) && provider.authAlert).map((provider) => provider.authAlert!.message.split('\n', 1)[0]!);
 }

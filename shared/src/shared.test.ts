@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { AgentEventSchema, NodeRunSchema, RunSnapshotSchema, StageSchema, SteerMessageSchema, SteerRequestSchema, WorkflowDefSchema, WorkspacePatchRequestSchema, WorkspaceSchema, applyWorkflowDefaults } from './index.js';
+import { AgentEventSchema, NodeRunSchema, ProviderInfoSchema, RunSnapshotSchema, StageSchema, SteerMessageSchema, SteerRequestSchema, WorkflowDefSchema, WorkspacePatchRequestSchema, WorkspaceSchema, applyWorkflowDefaults } from './index.js';
 
 describe('shared schemas', () => {
   it('round-trips an event', () => {
@@ -27,14 +27,23 @@ describe('shared schemas', () => {
       nodeRunId: 's.a.0', stageId: 's', slotId: 'a', instanceIndex: 0,
       agent: { provider: 'mock', permission: 'safe' }, label: 'A', status: 'done', attempt: 1, cwd: '/tmp',
       verification: { status: 'failed', command: 'npm test', exitCode: 1, durationMs: 25, outputTail: 'failed', reason: 'check failed', logFile: '/tmp/check.log' },
-      handoff: { priorNodeRunIds: ['prior.a.0'], orchestratorContext: true, retryAddendum: false },
+      handoff: { priorNodeRunIds: ['prior.a.0'], orchestratorContext: true, retryAddendum: false }, errorReason: 'mock is not signed in.',
     });
     expect(node.verification?.status).toBe('failed');
     expect(node.handoff?.priorNodeRunIds).toEqual(['prior.a.0']);
+    expect(node.errorReason).toBe('mock is not signed in.');
     expect(RunSnapshotSchema.parse({ runId: 'r', workspaceId: 'w', workflow: preset('pipeline'), task: 't', status: 'done', nodes: [node], gateDecisions: [], providerVersions: { mock: 'mock/0' }, createdAt: 1, endedAt: 2 }).providerVersions).toEqual({ mock: 'mock/0' });
     expect(WorkspaceSchema.parse({ id: 'w', name: 'W', path: '/tmp', isGit: true, verifyCommand: 'npm test', verifyTimeoutSec: 60 })).toMatchObject({ verifyCommand: 'npm test', verifyTimeoutSec: 60 });
     expect(WorkspacePatchRequestSchema.parse({ verifyCommand: null, verifyTimeoutSec: null })).toEqual({ verifyCommand: null, verifyTimeoutSec: null });
     expect(StageSchema.parse({ id: 's', name: 'S', slots: [{ id: 'a', label: 'A', agent: { provider: 'mock', permission: 'safe' }, count: 1, promptTemplate: '' }] }).requireVerified).toBe(false);
+  });
+
+  it('keeps provider auth additions optional and strict', () => {
+    const provider = { id: 'codex', tier: 'rich', ok: true, installable: true, models: ['gpt'], defaultModel: 'gpt', authAlert: { message: 'sign in', at: 1, runId: 'run' }, signInCommand: 'codex login' };
+    expect(ProviderInfoSchema.parse(provider)).toEqual(provider);
+    expect(ProviderInfoSchema.safeParse({ ...provider, extra: true }).success).toBe(false);
+    const { authAlert: _alert, signInCommand: _command, ...legacy } = provider;
+    expect(ProviderInfoSchema.parse(legacy)).toEqual(legacy);
   });
 
   it('enforces the per-stage fan-out cap', () => {

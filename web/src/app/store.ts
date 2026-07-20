@@ -5,6 +5,7 @@ import { apiClient, type ApiClient } from '../api/client.js';
 
 export const EVENT_RING_LIMIT = 20_000;
 export const ACTIVE_RUN_STATUSES: ReadonlySet<RunSnapshot['status']> = new Set(['created', 'running', 'gating']);
+const TERMINAL_RUN_STATUSES: ReadonlySet<RunSnapshot['status']> = new Set(['done', 'failed', 'aborted']);
 export interface MatFilters { nodeRunIds: string[]; roles: EventRole[]; follow: boolean }
 export interface MatState {
   workspaces: Workspace[];
@@ -67,16 +68,22 @@ export function createMatStore(client: ApiClient = apiClient): StoreApi<MatStore
         if (latest !== undefined && msg.event.seq > latest + 1) console.warn(`Event gap for ${msg.event.runId}: expected ${latest + 1}, received ${msg.event.seq}`);
         return { events: { ...state.events, [msg.event.runId]: uniqueSorted([...current, msg.event]).slice(-EVENT_RING_LIMIT) } };
       });
-      else if (msg.type === 'run') set((state) => {
-        const currentActiveRun = state.activeRunId ? state.runs[state.activeRunId] : undefined;
-        const shouldActivate = msg.run.workspaceId === state.selectedWorkspaceId
-          && ACTIVE_RUN_STATUSES.has(msg.run.status)
-          && (state.activeRunId === undefined || state.activeRunId === msg.run.runId || (currentActiveRun !== undefined && !ACTIVE_RUN_STATUSES.has(currentActiveRun.status)));
-        return {
-          runs: { ...state.runs, [msg.run.runId]: msg.run },
-          ...(shouldActivate ? { activeRunId: msg.run.runId } : {}),
-        };
-      });
+      else if (msg.type === 'run') {
+        const previous = get().runs[msg.run.runId];
+        set((state) => {
+          const currentActiveRun = state.activeRunId ? state.runs[state.activeRunId] : undefined;
+          const shouldActivate = msg.run.workspaceId === state.selectedWorkspaceId
+            && ACTIVE_RUN_STATUSES.has(msg.run.status)
+            && (state.activeRunId === undefined || state.activeRunId === msg.run.runId || (currentActiveRun !== undefined && !ACTIVE_RUN_STATUSES.has(currentActiveRun.status)));
+          return {
+            runs: { ...state.runs, [msg.run.runId]: msg.run },
+            ...(shouldActivate ? { activeRunId: msg.run.runId } : {}),
+          };
+        });
+        if (TERMINAL_RUN_STATUSES.has(msg.run.status) && (!previous || !TERMINAL_RUN_STATUSES.has(previous.status))) {
+          void client.getProviders().then((providers) => set({ providers })).catch(() => undefined);
+        }
+      }
       else void client.getWorkspaces().then((workspaces) => set({ workspaces })).catch(() => undefined);
     },
     focusNode: (focusedNodeRunId) => set({ ui: { focusedNodeRunId } }),

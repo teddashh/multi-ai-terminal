@@ -40,8 +40,8 @@ function renderPanel(element: ReactElement): void {
 }
 
 const providers: ProviderInfo[] = [
-  { id: 'codex', tier: 'rich', ok: true, installable: true, models: ['gpt-test', 'gpt-next'], defaultModel: 'gpt-test' },
-  { id: 'grok', tier: 'rich', ok: false, detail: 'binary missing', installable: true, models: ['grok-test'], defaultModel: 'grok-test' },
+  { id: 'codex', tier: 'rich', ok: true, installable: true, models: ['gpt-test', 'gpt-next'], defaultModel: 'gpt-test', signInCommand: 'codex logout && codex login' },
+  { id: 'grok', tier: 'rich', ok: false, detail: 'binary missing', installable: true, models: ['grok-test'], defaultModel: 'grok-test', signInCommand: 'grok login --device-code' },
 ];
 
 const workflow: WorkflowDef = {
@@ -140,6 +140,27 @@ describe('WorkflowPanel', () => {
     expect(apiMocks.installProvider).toHaveBeenCalledWith('grok');
     expect(apiMocks.getProviders).toHaveBeenCalledOnce();
     expect(matStore.getState().providers.find((provider) => provider.id === 'grok')?.ok).toBe(true);
+  });
+
+  it('shows an auth-marked chip, sign-in setup with copy, and a non-blocking composer warning', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    matStore.setState({ providers: providers.map((provider) => provider.id === 'codex' ? { ...provider, authAlert: { message: 'codex is not signed in.\nFix: codex logout && codex login', at: 10, runId: 'run-auth' } } : provider) });
+    renderPanel(<WorkflowPanel />);
+    await screen.findByRole('heading', { name: 'Agent palette' });
+    const chip = screen.getByRole('button', { name: 'codex provider authentication required' });
+    const paletteItem = chip.parentElement!;
+    expect(within(paletteItem).getByText('auth')).toBeTruthy();
+    expect(paletteItem.title).toContain('codex is not signed in.');
+    act(() => fireEvent.click(within(paletteItem).getByRole('button', { name: 'Setup' })));
+    const dialog = screen.getByRole('dialog', { name: 'Setup codex' });
+    expect(within(dialog).getByText('Sign in')).toBeTruthy();
+    expect(within(dialog).getByText('codex logout && codex login', { selector: 'code' })).toBeTruthy();
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Copy' })); });
+    expect(writeText).toHaveBeenCalledWith('codex logout && codex login');
+    act(() => fireEvent.change(screen.getByLabelText('Task'), { target: { value: 'Keep going' } }));
+    expect(screen.getByText(/Sign-in warning: codex is not signed in/)).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('adds a provider through the keyboard fallback as an ephemeral builtin edit', async () => {

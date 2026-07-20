@@ -3,10 +3,13 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AgentEvent, NodeRun, Stage } from '@mat/shared';
+import type { AgentEvent, NodeRun, ProviderId, Stage } from '@mat/shared';
 import type { Adapter, NodeOutcome, SpawnedNode } from '../../src/adapters/base.js';
 import { EventLog, configureEventLog } from '../../src/store/eventLog.js';
 import { emitRetryBoundary, killActiveNode, markNodeKilled, registerNodeContext, resetNodeForRetry, runNode } from '../../src/engine/nodeRunner.js';
+import { clearAllAuthAlerts, getAuthAlert } from '../../src/providers/auth.js';
+import { mockAdapter } from '../../src/adapters/mock.js';
+import { clearProviderSpawnSlots } from '../../src/adapters/base.js';
 
 const dirs: string[] = [];
 const oldDataDir = process.env.MAT_DATA_DIR;
@@ -23,14 +26,16 @@ function setup(adapter: Adapter, persist?: () => Promise<void>): { node: NodeRun
   return { node, events: () => log.afterSeq('run'), persisted };
 }
 
-function adapterFrom(spawn: Adapter['spawn']): Adapter {
-  return { id: 'mock', tier: 'rich', models: ['test'], defaultModel: 'test', available: async () => ({ ok: true }), spawn };
+function adapterFrom(spawn: Adapter['spawn'], id: ProviderId = 'mock'): Adapter {
+  return { id, tier: 'rich', models: ['test'], defaultModel: 'test', available: async () => ({ ok: true }), spawn };
 }
 
 afterEach(async () => {
   vi.useRealTimers();
+  clearAllAuthAlerts();
+  clearProviderSpawnSlots();
   if (oldDataDir === undefined) delete process.env.MAT_DATA_DIR; else process.env.MAT_DATA_DIR = oldDataDir;
-  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 3 })));
 });
 
 describe('node runner lifecycle', () => {
@@ -163,6 +168,33 @@ describe('node runner lifecycle', () => {
     expect(setupResult.events()).toContainEqual(expect.objectContaining({
       role: 'system', kind: 'error', text: 'provider failed', data: expect.objectContaining({ status: 'failed', exitCode: 7 }),
     }));
+  });
+
+  it('registers an auth alert from both output streams and clears it after provider success', async () => {
+    const failing = adapterFrom((_spec, io) => {
+      io.onRaw('request failed: 401 Unauthorized', 'out');
+      io.onRaw('Please log out and sign in again', 'err');
+      return { pid: 12345, kill() {}, completion: Promise.resolve({ exitCode: 1 }) };
+    }, 'grok');
+    const result = setup(failing); result.node.agent = { provider: 'grok', permission: 'safe' };
+    await runNode(result.node, stage, 'prompt');
+    expect(result.node.errorReason).toContain('grok sign-in expired.');
+    expect(result.events()).toContainEqual(expect.objectContaining({ role: 'system', kind: 'error', data: expect.objectContaining({ detail: 'auth' }) }));
+    expect(getAuthAlert('grok')).toMatchObject({ runId: 'run', nodeRunId: result.node.nodeRunId, message: result.node.errorReason });
+
+    clearProviderSpawnSlots();
+    const succeeding = setup(adapterFrom(() => ({ pid: 12346, kill() {}, completion: Promise.resolve({ exitCode: 0, resultText: 'ok' }) }), 'grok'));
+    succeeding.node.agent = { provider: 'grok', permission: 'safe' };
+    await runNode(succeeding.node, stage, 'prompt');
+    expect(getAuthAlert('grok')).toBeUndefined();
+  });
+
+  it('does not turn MOCK_AUTHFAIL output into a mock provider alert', async () => {
+    const result = setup(mockAdapter); result.node.agent.model = 'MOCK_AUTHFAIL';
+    await runNode(result.node, stage, 'prompt');
+    expect(result.node.status).toBe('failed');
+    expect(result.node.errorReason).toBeUndefined();
+    expect(getAuthAlert('mock')).toBeUndefined();
   });
 
   it('does not spawn after a queued node is killed while prepare is blocked', async () => {

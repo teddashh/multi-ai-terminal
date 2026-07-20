@@ -4,11 +4,12 @@ import type { AdapterContentEvent, NodeRun, RunStatus, Stage, Usage } from '@mat
 import { getAdapter } from '../adapters/registry.js';
 import type { NodeOutcome, ResolvedNodeSpec, SpawnedNode } from '../adapters/base.js';
 import type { Adapter } from '../adapters/base.js';
-import { humanizeError, providerSpawnSlot } from '../adapters/base.js';
+import { detectAuthFailure, humanizeError, providerSpawnSlot } from '../adapters/base.js';
 import { appendEvent } from '../store/eventLog.js';
 import { runDirectory } from './worktree.js';
 import { recordToolUse, resetToolCount } from './digest.js';
 import { diag } from '../diag.js';
+import { clearAuthAlert, setAuthAlert } from '../providers/auth.js';
 
 export interface NodeExecutionContext {
   runId: string;
@@ -28,6 +29,7 @@ interface LiveNode {
   context: NodeExecutionContext;
   killedReason?: 'user' | 'user-retry' | 'abort' | 'timeout' | 'gate-timeout' | 'steer';
   wasStalled?: boolean;
+  outputTail: string;
 }
 
 const contexts = new WeakMap<NodeRun, NodeExecutionContext>();
@@ -110,6 +112,7 @@ export function resetNodeForRetry(node: NodeRun): void {
   delete node.endedAt;
   delete node.resultText;
   delete node.error;
+  delete node.errorReason;
   delete node.patchFile;
   delete node.baseCommit;
   delete node.exitCode;
@@ -207,6 +210,12 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
   let spawned: SpawnedNode;
   const effectiveStallMs = Math.max(stage.stallSec, node.agent.provider === 'agy' ? 600 : 0) * 1000;
   const key = liveKey(context.runId, node.nodeRunId);
+  let outputTail = '';
+  const appendOutputTail = (text: string): void => {
+    outputTail = `${outputTail}${text}\n`.slice(-4096);
+    const current = liveNodes.get(key);
+    if (current) current.outputTail = outputTail;
+  };
 
   const armStall = (): void => {
     if (stallTimer) clearTimeout(stallTimer);
@@ -248,11 +257,13 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
     }
     spawned = adapter.spawn(spec, {
       onEvent(event) {
+        appendOutputTail(event.text);
         if (!readyForContent) { pendingContent.push(event); return; }
         activity();
         appendContent(node, context, event);
       },
       onRaw(line, stream) {
+        appendOutputTail(line);
         appendFileSync(rawPath, `${JSON.stringify({ s: stream, l: line, ts: Date.now() })}\n`, 'utf8');
         if (readyForContent) activity();
       },
@@ -270,7 +281,7 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
     return;
   }
 
-  const live: LiveNode = { spawned, node, context };
+  const live: LiveNode = { spawned, node, context, outputTail };
   liveNodes.set(key, live);
   node.status = 'running';
   node.startedAt = Date.now();
@@ -305,6 +316,7 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
   } catch (error) {
     outcome = { exitCode: null, error: error instanceof Error ? error.message : String(error) };
   }
+  if (outcome.error) appendOutputTail(outcome.error);
   if (stallTimer) clearTimeout(stallTimer);
   if (hardTimer) clearTimeout(hardTimer);
   const liveState = liveNodes.get(key);
@@ -333,10 +345,21 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
   } else if (outcome.exitCode === 0 && !outcome.error) {
     node.status = 'done';
     delete node.error;
+    delete node.errorReason;
+    clearAuthAlert(node.agent.provider);
   } else {
     node.status = 'failed';
     node.error = outcomeError ?? `Node exited with code ${String(outcome.exitCode)}`;
     lifecycle(node, context, 'error', node.error, { status: 'failed', exitCode: outcome.exitCode });
+  }
+  if (node.status === 'failed' && !node.errorReason) {
+    const authFailure = detectAuthFailure(node.agent.provider, outputTail);
+    if (authFailure) {
+      node.errorReason = authFailure;
+      lifecycle(node, context, 'error', authFailure, { status: 'failed', detail: 'auth' });
+      diag(context.runId, 'error', { nodeRunId: node.nodeRunId, kind: 'auth' });
+      setAuthAlert(node.agent.provider, authFailure, context.runId, node.nodeRunId);
+    }
   }
   lifecycle(node, context, 'result', node.resultText ?? '', {
     exitCode: outcome.exitCode,

@@ -2,6 +2,7 @@ import type { AdapterContentEvent, AgentBinding, ProviderId, Usage } from '@mat/
 import type { ChildProcess } from 'node:child_process';
 import { spawnManaged } from '../spawn.js';
 import { diag } from '../diag.js';
+import { signInCommand } from '../providers/auth.js';
 
 export interface ResolvedNodeSpec {
   binding: AgentBinding; promptText: string; cwd: string;
@@ -21,6 +22,41 @@ export interface Adapter {
   models: string[]; defaultModel: string;
 }
 export type { AdapterContentEvent } from '@mat/shared';
+
+const AUTH_PATTERNS = [
+  /refresh token[\s\S]*?(?:revoked|already used)/i,
+  /refresh_token_invalidated/i,
+  /401 Unauthorized/i,
+  /not signed in/i,
+  /log out and sign in again/i,
+  /please (?:sign|log) in/i,
+  /authentication (?:failed|required)/i,
+  /invalid api key/i,
+];
+
+export function detectAuthFailure(provider: string, text: string): string | undefined {
+  if (provider === 'mock') return undefined;
+  const tail = text.slice(-4096);
+  if (!AUTH_PATTERNS.some((pattern) => pattern.test(tail))) return undefined;
+  const command = signInCommand(provider);
+  if (!command) return undefined;
+  const expired = /refresh(?:_| )token|401 Unauthorized/i.test(tail);
+  const message = `${provider}${expired ? ' sign-in expired.' : ' is not signed in.'}\nFix: ${command}`;
+  const instruction = tail.split(/\r?\n/).map((line) => line.trim()).filter((line) => {
+    if (!line || !/run:|login|api.?key/i.test(line)) return false;
+    if (/api.?key\s*[:=]\s*\S+/i.test(line)) return false;
+    return /run:|login|(?:set|export|use|provide).{0,80}api.?key/i.test(line);
+  }).sort((left, right) => instructionScore(right, provider) - instructionScore(left, provider))[0]?.slice(0, 200);
+  return instruction ? `${message}\n${instruction}` : message;
+}
+
+function instructionScore(line: string, provider: string): number {
+  return (new RegExp(`\\b${provider}\\s+login\\b`, 'i').test(line) ? 8 : 0)
+    + (/--device-code/i.test(line) ? 4 : 0)
+    + (/\blogin\b/i.test(line) ? 2 : 0)
+    + (/api.?key/i.test(line) ? 1 : 0)
+    - (/^run:\s*$/i.test(line) ? 8 : 0);
+}
 
 interface ExtractedError {
   message?: string;

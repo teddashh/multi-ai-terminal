@@ -33,6 +33,7 @@ export interface NodeRun {
   usage?: Usage;
   resultText?: string;
   error?: string;
+  errorReason?: string;
   patchFile?: string;
   baseCommit?: string;
   exitCode?: number | null;
@@ -91,7 +92,7 @@ export const NodeRunSchema = z.object({
   status: NodeRunStatusSchema, attempt: z.number().int().positive(), cwd: z.string(),
   pid: z.number().int().positive().optional(), sessionRef: z.string().optional(),
   startedAt: z.number().int().nonnegative().optional(), endedAt: z.number().int().nonnegative().optional(),
-  usage: UsageSchema.optional(), resultText: z.string().optional(), error: z.string().optional(), patchFile: z.string().optional(),
+  usage: UsageSchema.optional(), resultText: z.string().optional(), error: z.string().optional(), errorReason: z.string().optional(), patchFile: z.string().optional(),
   baseCommit: z.string().optional(), exitCode: z.number().int().nullable().optional(),
   verification: VerificationResultSchema.optional(), handoff: NodeHandoffSchema.optional(),
 }).strict();

@@ -12,7 +12,7 @@ vi.mock('../../api/client.js', () => ({
 }));
 
 import { matStore } from '../../app/store.js';
-import { RunPanel } from './RunPanel.js';
+import { NodeCard, RunPanel } from './RunPanel.js';
 
 const workflow: RunSnapshot['workflow'] = {
   schemaVersion: 1, id: 'wf', name: 'Planning', description: '', maxParallel: 2, maxRetriesPerStage: 2,
@@ -88,6 +88,18 @@ describe('RunPanel smoke', () => {
       await Promise.resolve();
     });
     await waitFor(() => expect(apiMocks.steerRun).toHaveBeenCalledWith('r1', { text: 'new instruction', mode: 'interrupt' }));
+  });
+
+  it('renders errorReason for a failed node as amber multi-line guidance', () => {
+    const failed = { ...run.nodes[0]!, status: 'failed' as const, error: 'exit 1', errorReason: 'codex sign-in expired.\nFix: codex logout && codex login' };
+    const { container } = renderWithWorkspaceReact(<NodeCard node={failed} latestEvent={undefined} now={Date.now()} confirmingKill={false} onRequestKill={() => undefined} onCancelKill={() => undefined} onKill={() => undefined} onPatch={() => undefined} onFocus={() => undefined} />);
+    const reason = container.querySelector('p[title*="codex sign-in expired"]')!;
+    expect(reason.getAttribute('title')).toBe('codex sign-in expired.\nFix: codex logout && codex login');
+    expect(reason.textContent).toBe('codex sign-in expired.\nFix: codex logout && codex login');
+    expect(reason.className).toContain('line-clamp-3');
+    expect(reason.className).toContain('whitespace-pre-line');
+    expect(reason.className).toContain('text-amber-200');
+    expect(screen.queryByText('exit 1')).toBeNull();
   });
 
   it('downloads the debug bundle from the Debug button', async () => {

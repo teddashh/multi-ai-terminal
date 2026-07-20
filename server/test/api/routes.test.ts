@@ -8,6 +8,8 @@ import { registerApiRoutes, type ApiRouteDependencies } from '../../src/api/rout
 import { configureRunStore, getRun, saveRun } from '../../src/store/runs.js';
 import { configureWorkspaceStore } from '../../src/store/workspaces.js';
 import { fakeApiDependencies, runSnapshot, workflow } from './helpers.js';
+import { adapters, listProviders } from '../../src/adapters/registry.js';
+import { clearAllAuthAlerts, clearAuthAlert, setAuthAlert } from '../../src/providers/auth.js';
 
 let app: FastifyInstance;
 let dependencies: ApiRouteDependencies;
@@ -22,7 +24,9 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await app.close();
-  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  clearAllAuthAlerts();
+  vi.restoreAllMocks();
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 3 })));
 });
 
 describe('health endpoint', () => {
@@ -139,6 +143,23 @@ describe('run routes', () => {
     expect(response.statusCode).toBe(201);
     expect(response.json()).toMatchObject({ providerVersions: { mock: 'mock/0' } });
     expect(create).toHaveBeenCalledWith(expect.any(Object), { mock: 'mock/0' });
+  });
+
+  it('serves real-provider sign-in commands and current auth alerts', async () => {
+    for (const adapter of Object.values(adapters)) vi.spyOn(adapter, 'available').mockResolvedValue({ ok: true, version: `${adapter.id}/test` });
+    dependencies.providers = listProviders;
+    setAuthAlert('grok', 'grok is not signed in.\nFix: grok login', 'run-auth', 'node-auth');
+    let response = await app.inject({ method: 'GET', url: '/api/providers' });
+    expect(response.statusCode).toBe(200);
+    const listed = response.json() as Array<Record<string, unknown>>;
+    expect(listed.find((provider) => provider.id === 'codex')).toMatchObject({ signInCommand: 'codex logout && codex login' });
+    expect(listed.find((provider) => provider.id === 'grok')).toMatchObject({ authAlert: { message: expect.stringContaining('not signed in'), runId: 'run-auth' }, signInCommand: expect.stringContaining('grok login --device-code') });
+    expect(listed.find((provider) => provider.id === 'mock')).not.toHaveProperty('signInCommand');
+    expect(listed.find((provider) => provider.id === 'mock')).not.toHaveProperty('authAlert');
+
+    clearAuthAlert('grok');
+    response = await app.inject({ method: 'GET', url: '/api/providers' });
+    expect((response.json() as Array<Record<string, unknown>>).find((provider) => provider.id === 'grok')).not.toHaveProperty('authAlert');
   });
 
   it('serves a Markdown run report', async () => {

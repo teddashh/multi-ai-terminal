@@ -14,6 +14,7 @@ export const mockAdapter: Adapter = {
   async available() { return { ok: true, version: 'mock/0' }; },
   spawn(spec, io): SpawnedNode {
     const model = spec.binding.model ?? 'ok';
+    const authFail = model.includes('MOCK_AUTHFAIL') || spec.promptText.includes('MOCK_AUTHFAIL');
     // MOCK_REPLY controls result text; MOCK_WRITE creates one deterministic candidate artifact.
     const markerIndex = spec.promptText.indexOf('MOCK_REPLY:');
     const echoReply = markerIndex >= 0
@@ -42,6 +43,13 @@ export const mockAdapter: Adapter = {
     };
     const run = (index = 0): void => {
       if (killed) return;
+      if (authFail) {
+        const text = 'Not signed in. To authenticate without a browser, run:\n  grok login --device-code\n\nAlternatively, set the XAI_API_KEY environment variable or run `grok login` on a machine with a browser.';
+        io.onRaw(text, 'err');
+        io.onEvent({ role: 'agent', kind: 'message', text });
+        finish({ exitCode: 1 });
+        return;
+      }
       if (model === 'fail' && echoReply === undefined) {
         io.onRaw('mock failure', 'err');
         finish({ exitCode: 1, error: 'mock failure' });
