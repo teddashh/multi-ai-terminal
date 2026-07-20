@@ -1,5 +1,5 @@
 import { once } from 'node:events';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import type { Readable } from 'node:stream';
@@ -56,13 +56,10 @@ describe('spawnManaged', () => {
   });
 
   it('augments Unix PATH with the user-local and system CLI directories that exist', () => {
-    const home = join(testRoot, 'home');
-    const localBin = join(home, '.local', 'bin');
-    mkdirSync(localBin, { recursive: true });
-    const exists = (path: string) => path === localBin || path === '/usr/local/bin';
-    const env = augmentedPathEnv({ platform: 'linux', delimiter: ':', homedir: home, env: { PATH: '/bin' }, exists });
-    expect(env.PATH?.split(':')).toEqual(['/bin', localBin, '/usr/local/bin']);
-    expect(augmentedPathEnv({ platform: 'linux', delimiter: ':', homedir: join(testRoot, 'missing'), env: { PATH: '/bin' }, exists: () => false }).PATH).toBe('/bin');
+    const exists = (path: string) => path === '/fake/home/.local/bin' || path === '/usr/local/bin';
+    const env = augmentedPathEnv({ platform: 'linux', delimiter: ':', homedir: '/fake/home', env: { PATH: '/bin' }, exists });
+    expect(env.PATH?.split(':')).toEqual(['/bin', '/fake/home/.local/bin', '/usr/local/bin']);
+    expect(augmentedPathEnv({ platform: 'linux', delimiter: ':', homedir: '/fake/missing', env: { PATH: '/bin' }, exists: () => false }).PATH).toBe('/bin');
   });
 
   it('augments Windows PATH case-insensitively from injected platform and environment values', () => {
