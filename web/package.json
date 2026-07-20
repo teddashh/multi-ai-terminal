@@ -1,9 +1,11 @@
 {
   "name": "@mat/web",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -13,6 +15,7 @@
     "@dnd-kit/core": "^6.3.1",
     "@mat/shared": "0.0.0",
     "@tanstack/react-virtual": "^3.13.9",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^5.0.5"

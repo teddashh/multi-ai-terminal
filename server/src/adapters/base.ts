@@ -56,6 +56,13 @@ export function humanizeError(value: unknown, provider?: string): string {
   const message = extracted.message ?? original;
   const spawn = /spawn (\S+) ENOENT/.exec(message);
   if (spawn?.[1]) return `\`${spawn[1]}\` CLI not found on PATH — install it or remove this agent from the workflow.`;
+  if (provider && provider !== 'mock' && (/refresh token .*(revoked|already used)/i.test(message) || /401 Unauthorized/.test(message))) {
+    const relogin = provider === 'codex'
+      ? 'Sign out and back in with the codex CLI (e.g. `codex logout && codex login`)'
+      : `Sign out and back in with the ${provider} CLI`;
+    return `${provider} sign-in expired — parallel ${provider} sessions can race single-use refresh tokens. ${relogin}, or switch to API-key auth to avoid the race.`;
+  }
+  if (provider && message.startsWith(`${provider} sign-in expired`)) return message;
   if (provider !== 'codex' || message.startsWith('codex: ')) return message;
   const detail = [extracted.status, extracted.type].filter(Boolean).join(' ');
   return `codex: ${detail ? `${detail} — ` : ''}${message}`;
@@ -163,6 +170,11 @@ export class ContentCoalescer {
 const VERSION_CACHE_TTL_MS = 10 * 60 * 1000;
 const versionCache = new Map<string, { expiresAt: number; value: Promise<{ ok: boolean; version?: string; detail?: string }> }>();
 
+export function clearVersionCache(command?: string): void {
+  if (command === undefined) versionCache.clear();
+  else versionCache.delete(command);
+}
+
 export function probeVersion(command: string): Promise<{ ok: boolean; version?: string; detail?: string }> {
   const now = Date.now();
   const cached = versionCache.get(command);
@@ -174,7 +186,11 @@ export function probeVersion(command: string): Promise<{ ok: boolean; version?: 
     const finish = (result: { ok: boolean; version?: string; detail?: string }): void => {
       if (settled) return;
       settled = true;
-      diag(null, 'probe', { command, ok: result.ok, ...(result.version ? { version: result.version } : {}) });
+      diag(null, 'probe', {
+        command, ok: result.ok,
+        ...(result.version ? { version: result.version } : {}),
+        ...(!result.ok && result.detail ? { detail: result.detail } : {}),
+      });
       resolve(result);
     };
     let managed: ReturnType<typeof spawnManaged>;
@@ -197,9 +213,43 @@ export function probeVersion(command: string): Promise<{ ok: boolean; version?: 
     child.once('close', (code) => {
       const output = (stdout.trim() || stderr.trim()).split(/\r?\n/, 1)[0]?.trim().slice(0, 120) ?? '';
       if (code === 0) finish({ ok: true, ...(output ? { version: output } : {}) });
-      else finish({ ok: false, detail: output || `version probe exited ${String(code)}` });
+      else finish({ ok: false, detail: output || `exit ${String(code)}` });
     });
   });
   versionCache.set(command, { expiresAt: now + VERSION_CACHE_TTL_MS, value });
   return value;
+}
+
+interface ProviderSpawnSlotOptions {
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+  intervalMs?: number;
+}
+
+const providerSpawnChains = new Map<string, Promise<void>>();
+const providerLastSpawn = new Map<string, number>();
+
+export function providerSpawnSlot(providerId: string, options: ProviderSpawnSlotOptions = {}): Promise<void> {
+  if (providerId === 'mock') return Promise.resolve();
+  const now = options.now ?? Date.now;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const intervalMs = options.intervalMs ?? 1500;
+  const previous = providerSpawnChains.get(providerId) ?? Promise.resolve();
+  const current = previous.catch(() => undefined).then(async () => {
+    const last = providerLastSpawn.get(providerId);
+    if (last !== undefined) {
+      const waitMs = Math.max(0, intervalMs - (now() - last));
+      if (waitMs > 0) await sleep(waitMs);
+    }
+    providerLastSpawn.set(providerId, now());
+  });
+  providerSpawnChains.set(providerId, current);
+  const cleanup = (): void => { if (providerSpawnChains.get(providerId) === current) providerSpawnChains.delete(providerId); };
+  void current.then(cleanup, cleanup);
+  return current;
+}
+
+export function clearProviderSpawnSlots(): void {
+  providerSpawnChains.clear();
+  providerLastSpawn.clear();
 }

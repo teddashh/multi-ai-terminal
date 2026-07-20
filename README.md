@@ -54,6 +54,20 @@ Install desktop builds from the repository's GitHub Releases page. The desktop a
 
 The desktop shell runs the exact same bundled server on an ephemeral `127.0.0.1` port and keeps data in `~/.multi-ai-terminal/`, just like the web-served build. To build the desktop resources locally, run `npm run build` followed by `npm run desktop:bundle`; `npm run desktop:build` additionally requires the Rust and native Tauri build prerequisites.
 
+When adding a workspace, desktop builds provide a native **Browse…** folder picker. Pure-browser use keeps the manual absolute-path field and does not load the desktop dialog integration.
+
+## Provider setup
+
+Unavailable providers expose **Setup** in the agent palette. An install starts only after an explicit click and uses a fixed server-side recipe: npm global installs for Claude Code, Codex, and Grok; `winget` for Antigravity on Windows; and a displayed, copyable manual command for Antigravity elsewhere. No CLI is bundled or downloaded implicitly. Provider licenses remain independent, the upstream package manager supplies current releases, and each CLI may still require its own sign-in.
+
+MAT augments child-process `PATH` with existing well-known CLI locations: `%LOCALAPPDATA%\Antigravity` and `%APPDATA%\npm` on Windows, or `~/.local/bin`, `/usr/local/bin`, and `/opt/homebrew/bin` elsewhere. This lets the desktop server discover common user-level installs without inheriting environment-variable values into diagnostics.
+
+## Provider sign-in & parallel sessions
+
+Some Codex authentication failures are caused by concurrent CLI sessions racing rotation of a single-use OAuth refresh token. MAT spaces launches of the same real provider at least 1.5 seconds apart to reduce the race, including orchestrator launches, but this cannot make upstream token rotation atomic. See [openai/codex#9634](https://github.com/openai/codex/issues/9634) and [openai/codex#15502](https://github.com/openai/codex/issues/15502).
+
+The durable options are API-key authentication or serial provider usage. Codex supports API-key login, and Claude Code honors `ANTHROPIC_API_KEY`. If an OAuth refresh token has already been revoked, sign out and back in with that CLI first; for Codex, run `codex logout && codex login`.
+
 ## Providers (verified invocations)
 
 | Provider | CLI | Stream | Notes |

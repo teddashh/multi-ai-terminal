@@ -13,8 +13,10 @@ import { WorkspacePanel } from './WorkspacePanel.js';
 const apiMocks = vi.hoisted(() => ({
   createWorkspace: vi.fn(), updateWorkspace: vi.fn(), deleteWorkspace: vi.fn(),
 }));
+const dialogMocks = vi.hoisted(() => ({ open: vi.fn() }));
 
 vi.mock('../../api/client.js', () => ({ apiClient: apiMocks }));
+vi.mock('@tauri-apps/plugin-dialog', () => dialogMocks);
 vi.mock('zustand', async () => {
   const { useSyncExternalStore } = await vi.importActual<typeof import('react')>('react');
   return {
@@ -42,6 +44,8 @@ const workspaces: Workspace[] = [
 
 beforeEach(() => {
   apiMocks.createWorkspace.mockReset(); apiMocks.updateWorkspace.mockReset(); apiMocks.deleteWorkspace.mockReset();
+  dialogMocks.open.mockReset();
+  delete (window as Window & { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__;
   matStore.setState({ workspaces, selectedWorkspaceId: 'w1', runs: {
     live: { runId: 'live', workspaceId: 'w1', status: 'running' } as RunSnapshot,
   } });
@@ -52,6 +56,22 @@ afterEach(() => {
 });
 
 describe('WorkspacePanel', () => {
+  it('hides Browse outside Tauri', () => {
+    renderPanel(<WorkspacePanel />);
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Add workspace' })));
+    expect(screen.queryByRole('button', { name: 'Browse…' })).toBeNull();
+  });
+
+  it('fills the path from the Tauri folder picker', async () => {
+    (window as Window & { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__ = {};
+    dialogMocks.open.mockResolvedValueOnce(String.raw`C:\projects\castle`);
+    renderPanel(<WorkspacePanel />);
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Add workspace' })));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Browse…' })); });
+    expect(dialogMocks.open).toHaveBeenCalledWith({ directory: true, multiple: false });
+    expect((screen.getByLabelText('Absolute path') as HTMLInputElement).value).toBe(String.raw`C:\projects\castle`);
+  });
+
   it('renders workspace metadata, last-run time, git state, and a live pulse', () => {
     renderPanel(<WorkspacePanel />);
 

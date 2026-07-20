@@ -1,6 +1,9 @@
 import type { ApiRouteDependencies } from '../../src/api/routes.js';
 import type { AgentEvent, RunCreateRequest, RunSnapshot, WorkflowDef, Workspace } from '@mat/shared';
 import { tmpdir } from 'node:os';
+import { clearVersionCache } from '../../src/adapters/base.js';
+import { providerInstallPlan } from '../../src/providers/install.js';
+import { clearAugmentedPathCache, spawnManaged } from '../../src/spawn.js';
 
 export const workflow = (overrides: Partial<WorkflowDef> = {}): WorkflowDef => ({
   schemaVersion: 1,
@@ -77,6 +80,7 @@ export function fakeApiDependencies(run = runSnapshot()): ApiRouteDependencies {
   const workflows = [workflow()];
   return {
     providers: async () => [],
+    providerInstall: { plan: providerInstallPlan, spawn: spawnManaged, clearVersionCache, clearPathCache: clearAugmentedPathCache },
     report: (snapshot) => `# Run report — ${snapshot.workflow.name}\n`,
     workspaces: {
       list: async () => workspaces,

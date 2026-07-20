@@ -4,7 +4,7 @@ import type { AdapterContentEvent, NodeRun, RunStatus, Stage, Usage } from '@mat
 import { getAdapter } from '../adapters/registry.js';
 import type { NodeOutcome, ResolvedNodeSpec, SpawnedNode } from '../adapters/base.js';
 import type { Adapter } from '../adapters/base.js';
-import { humanizeError } from '../adapters/base.js';
+import { humanizeError, providerSpawnSlot } from '../adapters/base.js';
 import { appendEvent } from '../store/eventLog.js';
 import { runDirectory } from './worktree.js';
 import { recordToolUse, resetToolCount } from './digest.js';
@@ -17,6 +17,7 @@ export interface NodeExecutionContext {
   adapter?: Adapter;
   persist(): Promise<void>;
   getRunStatus?(): RunStatus;
+  steerPending?(): boolean;
   prepare?(): Promise<void>;
   finalize?(): Promise<void>;
 }
@@ -235,6 +236,16 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
   let readyForContent = false;
   const pendingContent: AdapterContentEvent[] = [];
   try {
+    // Parallel same-account CLI sessions race single-use OAuth refresh-token rotation.
+    await providerSpawnSlot(node.agent.provider);
+    // A steer interrupt arriving during the stagger wait cannot reach this node
+    // through killAllActiveNodes (nothing is spawned yet), so honor it here.
+    if (shouldSkipSpawn() || context.steerPending?.()) {
+      if (node.status !== 'killed') markNodeKilled(node, context.runId, shouldSkipSpawn() ? 'abort' : 'steer');
+      else emitKilledLifecycle(node, context, 'user');
+      await persistSafely(node, context);
+      return;
+    }
     spawned = adapter.spawn(spec, {
       onEvent(event) {
         if (!readyForContent) { pendingContent.push(event); return; }

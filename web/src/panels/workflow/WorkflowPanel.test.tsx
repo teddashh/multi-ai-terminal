@@ -11,7 +11,7 @@ import { WorkflowPanel } from './WorkflowPanel.js';
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const apiMocks = vi.hoisted(() => ({
-  createRun: vi.fn(), duplicateWorkflow: vi.fn(), updateWorkflow: vi.fn(),
+  createRun: vi.fn(), duplicateWorkflow: vi.fn(), updateWorkflow: vi.fn(), installProvider: vi.fn(), getProviders: vi.fn(),
 }));
 
 vi.mock('../../api/client.js', () => ({ apiClient: apiMocks }));
@@ -40,8 +40,8 @@ function renderPanel(element: ReactElement): void {
 }
 
 const providers: ProviderInfo[] = [
-  { id: 'codex', tier: 'rich', ok: true, models: ['gpt-test', 'gpt-next'], defaultModel: 'gpt-test' },
-  { id: 'grok', tier: 'rich', ok: false, detail: 'binary missing', models: ['grok-test'], defaultModel: 'grok-test' },
+  { id: 'codex', tier: 'rich', ok: true, installable: true, models: ['gpt-test', 'gpt-next'], defaultModel: 'gpt-test' },
+  { id: 'grok', tier: 'rich', ok: false, detail: 'binary missing', installable: true, models: ['grok-test'], defaultModel: 'grok-test' },
 ];
 
 const workflow: WorkflowDef = {
@@ -93,8 +93,53 @@ describe('WorkflowPanel', () => {
 
     act(() => fireEvent.click(screen.getByRole('button', { name: /R1 codex gpt-test high/ })));
     const slotEditor = screen.getByRole('dialog', { name: 'Edit R1' });
-    expect(within(slotEditor).getByLabelText('Model').getAttribute('list')).toBe('models-round-table-r1');
+    expect((within(slotEditor).getByLabelText('Model') as HTMLSelectElement).value).toBe('gpt-test');
     expect((within(slotEditor).getByLabelText('Prompt template') as HTMLTextAreaElement).value).toBe('{{task}}');
+  });
+
+  it('selects a listed model', async () => {
+    renderPanel(<WorkflowPanel />);
+    await screen.findByRole('heading', { name: 'Round Table' });
+    act(() => fireEvent.click(screen.getByRole('button', { name: /R1 codex gpt-test high/ })));
+    act(() => fireEvent.change(within(screen.getByRole('dialog', { name: 'Edit R1' })).getByLabelText('Model'), { target: { value: 'gpt-next' } }));
+    expect(matStore.getState().ephemeralWorkflowEdits.planning?.stages[0]!.slots[0]!.agent.model).toBe('gpt-next');
+    expect(screen.queryByLabelText('Custom model')).toBeNull();
+  });
+
+  it('selects Custom and edits a full model id', async () => {
+    renderPanel(<WorkflowPanel />);
+    await screen.findByRole('heading', { name: 'Round Table' });
+    act(() => fireEvent.click(screen.getByRole('button', { name: /R1 codex gpt-test high/ })));
+    act(() => fireEvent.change(within(screen.getByRole('dialog', { name: 'Edit R1' })).getByLabelText('Model'), { target: { value: '__custom__' } }));
+    const custom = screen.getByLabelText('Custom model') as HTMLInputElement;
+    expect(document.activeElement).toBe(custom);
+    act(() => fireEvent.change(custom, { target: { value: 'claude-fable-5' } }));
+    expect(matStore.getState().ephemeralWorkflowEdits.planning?.stages[0]!.slots[0]!.agent.model).toBe('claude-fable-5');
+  });
+
+  it('switches a custom model back to the provider default and clears the key', async () => {
+    renderPanel(<WorkflowPanel />);
+    await screen.findByRole('heading', { name: 'Round Table' });
+    act(() => fireEvent.click(screen.getByRole('button', { name: /R1 codex gpt-test high/ })));
+    const model = within(screen.getByRole('dialog', { name: 'Edit R1' })).getByLabelText('Model');
+    act(() => fireEvent.change(model, { target: { value: '__custom__' } }));
+    act(() => fireEvent.change(screen.getByLabelText('Custom model'), { target: { value: 'claude-fable-5' } }));
+    act(() => fireEvent.change(model, { target: { value: '' } }));
+    expect(matStore.getState().ephemeralWorkflowEdits.planning?.stages[0]!.slots[0]!.agent).not.toHaveProperty('model');
+    expect(screen.queryByLabelText('Custom model')).toBeNull();
+  });
+
+  it('installs an unavailable provider and refreshes provider state', async () => {
+    const refreshed = providers.map((provider) => provider.id === 'grok' ? { ...provider, ok: true, version: 'grok 1.0.0' } : provider);
+    apiMocks.installProvider.mockResolvedValueOnce({ ok: true, exitCode: 0, logTail: '', provider: refreshed[1] });
+    apiMocks.getProviders.mockResolvedValueOnce(refreshed);
+    renderPanel(<WorkflowPanel />);
+    await screen.findByRole('heading', { name: 'Agent palette' });
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Setup' })));
+    await act(async () => { fireEvent.click(within(screen.getByRole('dialog', { name: 'Setup grok' })).getByRole('button', { name: 'Install' })); });
+    expect(apiMocks.installProvider).toHaveBeenCalledWith('grok');
+    expect(apiMocks.getProviders).toHaveBeenCalledOnce();
+    expect(matStore.getState().providers.find((provider) => provider.id === 'grok')?.ok).toBe(true);
   });
 
   it('adds a provider through the keyboard fallback as an ephemeral builtin edit', async () => {

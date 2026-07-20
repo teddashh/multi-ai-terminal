@@ -5,10 +5,17 @@ import { claudeAdapter } from './claude.js';
 import { codexAdapter } from './codex.js';
 import { grokAdapter } from './grok.js';
 import { mockAdapter } from './mock.js';
+import { providerInstallPlan } from '../providers/install.js';
 
 export const adapters: Readonly<Record<ProviderId, Adapter>> = { claude: claudeAdapter, codex: codexAdapter, grok: grokAdapter, agy: agyAdapter, mock: mockAdapter };
 export const adapterRegistry = adapters;
 export const getAdapter = (id: ProviderId): Adapter => adapters[id];
 export async function listProviders(): Promise<ProviderInfo[]> {
-  return Promise.all(Object.values(adapters).map(async (adapter) => ({ id: adapter.id, tier: adapter.tier, ...(await adapter.available()), models: adapter.models, defaultModel: adapter.defaultModel })));
+  return Promise.all(Object.values(adapters).map(async (adapter) => {
+    const install = providerInstallPlan(adapter.id);
+    return {
+      id: adapter.id, tier: adapter.tier, ...(await adapter.available()), installable: install.recipe !== undefined,
+      ...(install.manualCommand ? { manualCommand: install.manualCommand } : {}), models: adapter.models, defaultModel: adapter.defaultModel,
+    };
+  }));
 }

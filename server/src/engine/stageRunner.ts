@@ -137,6 +137,7 @@ export async function executeNodes(
     registerNodeContext(node, {
       runId: run.runId,
       getRunStatus: () => run.status,
+      steerPending: () => hasPendingInterruptSteer(run),
       persist: async () => persistRun(run),
       prepare: async () => {
         if (stage.isolation !== 'worktree' || !actuallyGit) return;

@@ -170,7 +170,7 @@ export function WorkflowPanel({ api = apiClient }: WorkflowPanelProps) {
         <section aria-labelledby="agent-palette-heading" className="mt-4 rounded border border-border bg-zinc-950/60 p-3">
           <h3 id="agent-palette-heading" className="text-xs font-semibold uppercase tracking-wide text-muted">Agent palette</h3>
           <p className="mt-1 text-[11px] text-muted">Drag a provider onto a stage, or use the add-agent controls.</p>
-          <div className="mt-2 flex flex-wrap gap-2">{providers.map((provider) => <PaletteAgent key={provider.id} provider={provider} />)}</div>
+          <div className="mt-2 flex flex-wrap gap-2">{providers.map((provider) => <PaletteAgent key={provider.id} provider={provider} api={api} />)}</div>
           {providers.length === 0 && <p className="mt-2 text-xs text-muted">Provider discovery pending.</p>}
           <div className="mt-3 grid grid-cols-[1fr_1fr_auto] gap-2">
             <select aria-label="Stage for new agent" value={fallbackStage} onChange={(event) => setFallbackStage(event.target.value)} className="min-w-0 rounded border border-border bg-zinc-950 px-2 py-1.5 text-xs"><option value="">Stage</option>{workflow.stages.map((stage) => <option key={stage.id} value={stage.id} disabled={stageAgentCount(stage) >= MAX_STAGE_AGENTS}>{stage.name}</option>)}</select>
@@ -212,13 +212,11 @@ function StageEditor({ stage, providers, openSlot, onOpenSlot, onUpdate }: Stage
 
 function SlotEditor({ stage, slot, providers, onChange, onRemove, onClose }: { stage: Stage; slot: Slot; providers: ProviderInfo[]; onChange(update: (slot: Slot) => Slot): void; onRemove(): void; onClose(): void }) {
   const provider = providers.find((item) => item.id === slot.agent.provider);
-  const listId = `models-${stage.id}-${slot.id}`;
   const canIncrease = validateSlotCount(stage, slot.id, slot.count + 1).valid;
   const editAgent = (update: (agent: AgentBinding) => void) => onChange((current) => { const agent = { ...current.agent }; update(agent); return { ...current, agent }; });
   return <div role="dialog" aria-label={`Edit ${slot.label}`} className="absolute left-0 top-full z-30 mt-2 w-72 rounded border border-accent bg-panel p-3 shadow-2xl">
     <div className="flex items-center justify-between"><strong className="text-xs">{slot.label}</strong><button type="button" onClick={onClose} aria-label="Close slot editor" className="text-muted hover:text-ink">×</button></div>
-    <label className="mt-2 block text-xs text-muted">Model<input list={listId} value={slot.agent.model ?? ''} onChange={(event) => editAgent((agent) => { if (event.target.value) agent.model = event.target.value; else delete agent.model; })} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink" /></label>
-    <datalist id={listId}>{provider?.models.map((model) => <option key={model} value={model} />)}</datalist>
+    <ModelEditor key={slot.agent.provider} model={slot.agent.model} models={provider?.models ?? []} onChange={(model) => editAgent((agent) => { if (model) agent.model = model; else delete agent.model; })} />
     <label className="mt-2 block text-xs text-muted">Effort<select value={slot.agent.effort ?? ''} onChange={(event) => editAgent((agent) => { if (event.target.value) agent.effort = event.target.value as NonNullable<AgentBinding['effort']>; else delete agent.effort; })} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink"><option value="">default</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select></label>
     <div className="mt-2 text-xs text-muted">Count<div className="mt-1 inline-flex items-center rounded border border-border bg-zinc-950"><button type="button" aria-label="Decrease count" disabled={slot.count <= 1} onClick={() => onChange((current) => ({ ...current, count: current.count - 1 }))} className="px-3 py-1 disabled:opacity-30">−</button><output className="min-w-8 text-center text-ink">{slot.count}</output><button type="button" aria-label="Increase count" disabled={!canIncrease} onClick={() => onChange((current) => ({ ...current, count: current.count + 1 }))} className="px-3 py-1 disabled:opacity-30">+</button></div></div>
     <label className="mt-2 block text-xs text-muted">Permission<select value={slot.agent.permission} onChange={(event) => editAgent((agent) => { agent.permission = event.target.value as AgentBinding['permission']; })} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink"><option value="safe">safe</option><option value="auto">auto</option><option value="full">full</option></select></label>
@@ -233,17 +231,71 @@ function BindingEditor({ title, binding, providers, onChange, onClose }: { title
   return <div role="dialog" aria-label={title} className="absolute left-0 top-full z-30 mt-2 w-full rounded border border-accent bg-panel p-3 shadow-2xl">
     <div className="flex items-center justify-between"><strong className="text-xs">{title}</strong><button type="button" onClick={onClose} aria-label="Close orchestrator editor" className="text-muted">×</button></div>
     <label className="mt-2 block text-xs text-muted">Provider<select value={binding.provider} onChange={(event) => { const next = providers.find((item) => item.id === event.target.value); if (next) onChange({ ...binding, provider: next.id, model: next.defaultModel }); }} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink">{providers.map((item) => <option key={item.id} value={item.id} disabled={!item.ok}>{item.id}</option>)}</select></label>
-    <label className="mt-2 block text-xs text-muted">Model<input list="orchestrator-models" value={binding.model ?? ''} onChange={(event) => edit((copy) => { if (event.target.value) copy.model = event.target.value; else delete copy.model; })} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink" /></label><datalist id="orchestrator-models">{provider?.models.map((model) => <option key={model} value={model} />)}</datalist>
+    <ModelEditor key={binding.provider} model={binding.model} models={provider?.models ?? []} onChange={(model) => edit((copy) => { if (model) copy.model = model; else delete copy.model; })} />
     <label className="mt-2 block text-xs text-muted">Effort<select value={binding.effort ?? ''} onChange={(event) => edit((copy) => { if (event.target.value) copy.effort = event.target.value as NonNullable<AgentBinding['effort']>; else delete copy.effort; })} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink"><option value="">default</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select></label>
     <label className="mt-2 block text-xs text-muted">Permission<select value={binding.permission} onChange={(event) => onChange({ ...binding, permission: event.target.value as AgentBinding['permission'] })} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink"><option value="safe">safe</option><option value="auto">auto</option><option value="full">full</option></select></label>
   </div>;
 }
 
-function PaletteAgent({ provider }: { provider: ProviderInfo }) {
+const CUSTOM_MODEL = '__custom__';
+
+function ModelEditor({ model, models, onChange }: { model: string | undefined; models: string[]; onChange(model?: string): void }) {
+  const isCustomModel = model !== undefined && model !== '' && !models.includes(model);
+  const [customSelected, setCustomSelected] = useState(isCustomModel);
+  const customRef = useRef<HTMLInputElement>(null);
+  const showCustom = customSelected || isCustomModel;
+  // Never auto-collapse: a custom value can pass through a listed model while
+  // being typed (e.g. `sonnet` on the way to `sonnet[1m]`).
+  useEffect(() => {
+    if (isCustomModel) setCustomSelected(true);
+  }, [isCustomModel]);
+  useEffect(() => { if (showCustom) customRef.current?.focus(); }, [showCustom]);
+  return <label className="mt-2 block text-xs text-muted">Model
+    <select aria-label="Model" value={showCustom ? CUSTOM_MODEL : (model ?? '')} onChange={(event) => {
+      if (event.target.value === CUSTOM_MODEL) { setCustomSelected(true); onChange(undefined); }
+      else { setCustomSelected(false); onChange(event.target.value || undefined); }
+    }} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink">
+      <option value="">default</option>
+      {models.map((candidate) => <option key={candidate} value={candidate}>{candidate}</option>)}
+      <option value={CUSTOM_MODEL}>Custom…</option>
+    </select>
+    {showCustom && <input ref={customRef} aria-label="Custom model" value={model ?? ''} onChange={(event) => onChange(event.target.value || undefined)} className="mt-2 w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-ink" />}
+  </label>;
+}
+
+function PaletteAgent({ provider, api }: { provider: ProviderInfo; api: ApiClient }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: `provider-${provider.id}`, data: { providerId: provider.id }, disabled: !provider.ok });
+  const setProviders = useMatStore((state) => state.setProviders);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string>();
+  const [logTail, setLogTail] = useState<string>();
+  const [copied, setCopied] = useState(false);
   const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
   const unavailable = provider.detail ? `Unavailable: ${provider.detail}` : 'Provider unavailable';
-  return <span title={provider.ok ? `Drag ${provider.id} to a stage${provider.version ? ` · ${provider.version}` : ''}` : unavailable} className="inline-flex items-center gap-1"><button ref={setNodeRef} type="button" style={style} {...listeners} {...attributes} disabled={!provider.ok} aria-label={`${provider.id} provider${provider.ok ? '' : ` unavailable: ${provider.detail ?? 'not detected'}`}`} className={`rounded-full text-left ${provider.ok ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed grayscale opacity-40'} ${isDragging ? 'z-50 opacity-70' : ''}`}><AgentChip agent={{ provider: provider.id, model: provider.defaultModel, permission: 'auto' }} /></button>{provider.version && <span className="max-w-24 truncate text-[10px] text-muted">{provider.version}</span>}</span>;
+  const install = async () => {
+    setInstalling(true); setInstallError(undefined); setLogTail(undefined);
+    try {
+      const result = await api.installProvider(provider.id);
+      if (!result.ok && result.logTail) setLogTail(result.logTail);
+      setProviders(await api.getProviders());
+      if (result.ok) setSetupOpen(false);
+    } catch (error) { setInstallError(error instanceof Error ? error.message : 'Provider setup failed.'); }
+    finally { setInstalling(false); }
+  };
+  const copy = async () => {
+    if (!provider.manualCommand) return;
+    try { await navigator.clipboard.writeText(provider.manualCommand); setCopied(true); setInstallError(undefined); }
+    catch { setInstallError('Could not copy the command.'); }
+  };
+  return <span title={provider.ok ? `Drag ${provider.id} to a stage${provider.version ? ` · ${provider.version}` : ''}` : unavailable} className="relative inline-flex items-center gap-1"><button ref={setNodeRef} type="button" style={style} {...listeners} {...attributes} disabled={!provider.ok} aria-label={`${provider.id} provider${provider.ok ? '' : ` unavailable: ${provider.detail ?? 'not detected'}`}`} className={`rounded-full text-left ${provider.ok ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed grayscale opacity-40'} ${isDragging ? 'z-50 opacity-70' : ''}`}><AgentChip agent={{ provider: provider.id, model: provider.defaultModel, permission: 'auto' }} /></button>{provider.version && <span className="max-w-24 truncate text-[10px] text-muted">{provider.version}</span>}{!provider.ok && <button type="button" onClick={() => setSetupOpen((value) => !value)} aria-expanded={setupOpen} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-violet-200 hover:border-accent">Setup</button>}{setupOpen && <div role="dialog" aria-label={`Setup ${provider.id}`} className="absolute left-0 top-full z-40 mt-2 w-72 rounded border border-accent bg-panel p-3 shadow-2xl">
+    <div className="flex items-center justify-between"><strong className="text-xs">Setup {provider.id}</strong><button type="button" onClick={() => setSetupOpen(false)} aria-label={`Close ${provider.id} setup`} className="text-muted">×</button></div>
+    <p className="mt-2 text-xs text-muted">{provider.version ?? provider.detail ?? 'Provider not detected.'}</p>
+    {provider.installable && <button type="button" disabled={installing} onClick={() => void install()} className="mt-3 rounded bg-accent px-2 py-1.5 text-xs font-medium text-zinc-950 disabled:opacity-50">{installing ? 'Installing…' : 'Install'}</button>}
+    {!provider.installable && provider.manualCommand && <div className="mt-3"><code className="block select-all break-all rounded bg-zinc-950 p-2 text-[11px] text-ink">{provider.manualCommand}</code><button type="button" onClick={() => void copy()} className="mt-2 rounded border border-border px-2 py-1 text-xs">{copied ? 'Copied' : 'Copy'}</button></div>}
+    {installError && <p role="alert" className="mt-2 text-xs text-red-300">{installError}</p>}
+    {logTail && <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-zinc-950 p-2 text-[10px] text-red-200">{logTail}</pre>}
+  </div>}</span>;
 }
 
 function bindingSummary(binding: AgentBinding): string {

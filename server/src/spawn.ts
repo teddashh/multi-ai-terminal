@@ -1,6 +1,7 @@
 import { spawn as spawnChild, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter as pathDelimiter } from 'node:path';
+import { delimiter as pathDelimiter, win32 } from 'node:path';
 import crossSpawn from 'cross-spawn';
 
 export interface SpawnProcessOptions {
@@ -24,6 +25,45 @@ interface EnvironmentOptions {
   platform?: NodeJS.Platform;
   delimiter?: string;
   homedir?: string;
+  env?: NodeJS.ProcessEnv;
+  exists?: (path: string) => boolean;
+}
+
+let cachedPathAdditions: string[] | undefined;
+
+function environmentValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
+  const key = Object.keys(env).find((candidate) => candidate.toLowerCase() === name.toLowerCase());
+  return key ? env[key] : undefined;
+}
+
+export function augmentedPathEnv(options: EnvironmentOptions = {}): NodeJS.ProcessEnv {
+  const cacheable = Object.keys(options).length === 0;
+  const platform = options.platform ?? process.platform;
+  const delimiter = options.delimiter ?? pathDelimiter;
+  const source = options.env ?? process.env;
+  const env = { ...source };
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? (platform === 'win32' ? 'Path' : 'PATH');
+  const entries = (env[pathKey] ?? '').split(delimiter).filter(Boolean);
+  const exists = options.exists ?? existsSync;
+  const additions = cacheable && cachedPathAdditions
+    ? cachedPathAdditions
+    : (platform === 'win32'
+      ? [
+        environmentValue(env, 'LOCALAPPDATA') ? win32.join(environmentValue(env, 'LOCALAPPDATA')!, 'Antigravity') : undefined,
+        environmentValue(env, 'APPDATA') ? win32.join(environmentValue(env, 'APPDATA')!, 'npm') : undefined,
+      ]
+      : [`${options.homedir ?? homedir()}/.local/bin`, '/usr/local/bin', '/opt/homebrew/bin']).filter((addition): addition is string => addition !== undefined && exists(addition));
+  if (cacheable && !cachedPathAdditions) cachedPathAdditions = [...additions];
+  for (const addition of additions) {
+    const normalized = platform === 'win32' ? addition.toLowerCase() : addition;
+    if (!entries.some((entry) => (platform === 'win32' ? entry.toLowerCase() : entry) === normalized)) entries.push(addition);
+  }
+  env[pathKey] = entries.join(delimiter);
+  return env;
+}
+
+export function clearAugmentedPathCache(): void {
+  cachedPathAdditions = undefined;
 }
 
 function taskkillProcessTree(pid: number): void {
@@ -67,19 +107,18 @@ export function sanitizedEnvironment(
   options: EnvironmentOptions = {},
 ): NodeJS.ProcessEnv {
   const platform = options.platform ?? process.platform;
-  const delimiter = options.delimiter ?? pathDelimiter;
-  const env = { ...process.env, ...overrides };
+  const env = { ...(options.env ?? process.env), ...overrides };
   delete env.LD_LIBRARY_PATH;
 
   const overridePathKey = Object.keys(overrides).find((key) => key.toLowerCase() === 'path');
-  const inheritedPathKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path');
+  const inheritedPathKey = Object.keys(options.env ?? process.env).find((key) => key.toLowerCase() === 'path');
   const pathKey = platform === 'win32'
     ? (overridePathKey ?? inheritedPathKey ?? 'Path')
     : 'PATH';
   const pathValue = overridePathKey
     ? overrides[overridePathKey]
     : inheritedPathKey
-      ? process.env[inheritedPathKey]
+      ? (options.env ?? process.env)[inheritedPathKey]
       : undefined;
 
   if (platform === 'win32') {
@@ -88,14 +127,7 @@ export function sanitizedEnvironment(
     }
   }
 
-  const additions = platform === 'win32'
-    ? []
-    : [`${options.homedir ?? homedir()}/.local/bin`, '/usr/local/bin'];
-  const entries = (pathValue ?? '').split(delimiter).filter(Boolean);
-  for (const addition of additions) {
-    if (!entries.includes(addition)) entries.push(addition);
-  }
-  env[pathKey] = entries.join(delimiter);
+  if (pathValue !== undefined) env[pathKey] = pathValue;
   return env;
 }
 
@@ -105,11 +137,14 @@ export function spawnManaged(options: SpawnProcessOptions): ManagedProcess {
   // command-not-found (parsed.file is never set when shell is true) and swallows
   // the real exit event. Shell commands need no .cmd/PATHEXT shim, so bypass it.
   const spawnImpl: typeof spawnChild = options.shell ? spawnChild : (crossSpawn as typeof spawnChild);
+  const baseEnv = augmentedPathEnv();
+  const explicitPathKey = Object.keys(options.env ?? {}).find((key) => key.toLowerCase() === 'path');
+  if (explicitPathKey) for (const key of Object.keys(baseEnv)) if (key.toLowerCase() === 'path') delete baseEnv[key];
   const child = spawnImpl(options.command, options.args, {
     cwd: options.cwd,
     detached: !windows,
     windowsHide: windows,
-    env: sanitizedEnvironment(options.env),
+    env: sanitizedEnvironment({ ...baseEnv, ...options.env }),
     stdio: [options.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     shell: options.shell ?? false,
   });

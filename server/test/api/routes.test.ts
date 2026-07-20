@@ -116,7 +116,7 @@ describe('run routes', () => {
   });
 
   it('rejects a run when a bound provider is unavailable', async () => {
-    dependencies.providers = async () => [{ id: 'grok', tier: 'rich', ok: false, detail: 'not installed', models: ['grok'], defaultModel: 'grok' }];
+    dependencies.providers = async () => [{ id: 'grok', tier: 'rich', ok: false, detail: 'not installed', installable: true, models: ['grok'], defaultModel: 'grok' }];
     const override = workflow({
       stages: [{ ...workflow().stages[0]!, slots: [{ ...workflow().stages[0]!.slots[0]!, label: 'Reviewer', agent: { provider: 'grok', permission: 'safe' } }] }],
     });
@@ -129,7 +129,7 @@ describe('run routes', () => {
   });
 
   it('returns provider versions and snapshots bound versions at run creation', async () => {
-    dependencies.providers = async () => [{ id: 'mock', tier: 'rich', ok: true, version: 'mock/0', models: ['ok'], defaultModel: 'ok' }];
+    dependencies.providers = async () => [{ id: 'mock', tier: 'rich', ok: true, version: 'mock/0', installable: false, models: ['ok'], defaultModel: 'ok' }];
     const create = vi.fn(dependencies.runs.create);
     dependencies.runs.create = create;
     const providers = await app.inject({ method: 'GET', url: '/api/providers' });

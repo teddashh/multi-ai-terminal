@@ -23,6 +23,7 @@ export function WorkspacePanel({ api = apiClient }: WorkspacePanelProps) {
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string>();
   const [deleteError, setDeleteError] = useState<string>();
+  const tauri = '__TAURI_INTERNALS__' in window;
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
@@ -81,6 +82,17 @@ export function WorkspacePanel({ api = apiClient }: WorkspacePanelProps) {
     } finally { setSaving(false); }
   };
 
+  const browse = async () => {
+    setFormError(undefined);
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const directory = await open({ directory: true, multiple: false });
+      if (typeof directory === 'string') setPath(directory);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Could not open the folder picker.');
+    }
+  };
+
   const deleteWorkspace = async (id: string) => {
     setDeleteError(undefined);
     try {
@@ -128,7 +140,7 @@ export function WorkspacePanel({ api = apiClient }: WorkspacePanelProps) {
     <ModalDialog open={addOpen || editingId !== undefined} title={editingId ? 'Edit workspace' : 'Add workspace'} onClose={closeDialog} footer={<div className="flex justify-end gap-2"><button type="button" onClick={closeDialog} className="rounded px-3 py-1.5 text-sm text-muted hover:bg-zinc-800">Cancel</button><button type="submit" form="workspace-form" disabled={saving} className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-zinc-950 disabled:opacity-50">{saving ? 'Saving…' : editingId ? 'Save' : 'Add workspace'}</button></div>}>
       <form id="workspace-form" aria-label={editingId ? 'Edit workspace' : 'Add workspace'} onSubmit={(event) => void submitWorkspace(event)} className="space-y-4">
         <label className="block text-sm"><span className="mb-1 block text-muted">Name</span><input autoFocus required value={name} onChange={(event) => setName(event.target.value)} className="w-full rounded border border-border bg-zinc-950 px-3 py-2 text-ink outline-none focus:border-accent" /></label>
-        <label className="block text-sm"><span className="mb-1 block text-muted">Absolute path</span><input required disabled={editingId !== undefined} value={path} onChange={(event) => setPath(event.target.value)} placeholder="/home/ted/projects/example" className="w-full rounded border border-border bg-zinc-950 px-3 py-2 text-ink outline-none focus:border-accent disabled:opacity-60" /></label>
+        <label className="block text-sm"><span className="mb-1 block text-muted">Absolute path</span><span className="flex gap-2"><input required disabled={editingId !== undefined} value={path} onChange={(event) => setPath(event.target.value)} placeholder="/home/ted/projects/example" className="min-w-0 flex-1 rounded border border-border bg-zinc-950 px-3 py-2 text-ink outline-none focus:border-accent disabled:opacity-60" />{tauri && editingId === undefined && <button type="button" onClick={() => void browse()} className="rounded border border-border px-3 py-2 text-xs text-ink hover:border-accent">Browse…</button>}</span></label>
         <label className="block text-sm"><span className="mb-1 block text-muted">Verify command</span><input value={verifyCommand} onChange={(event) => setVerifyCommand(event.target.value)} placeholder="npm test" className="w-full rounded border border-border bg-zinc-950 px-3 py-2 font-mono text-ink outline-none focus:border-accent" /></label>
         <label className="block text-sm"><span className="mb-1 block text-muted">Verify timeout (seconds)</span><input type="number" min={1} step={1} value={verifyTimeout} onChange={(event) => setVerifyTimeout(event.target.value)} placeholder="600" className="w-full rounded border border-border bg-zinc-950 px-3 py-2 text-ink outline-none focus:border-accent" /></label>
         {formError && <p role="alert" className="rounded border border-red-900 bg-red-950/40 px-3 py-2 text-sm text-red-300">{formError}</p>}

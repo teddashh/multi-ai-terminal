@@ -1,11 +1,11 @@
 import { once } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import type { Readable } from 'node:stream';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createLineBuffer } from '../../src/adapters/base.js';
-import { sanitizedEnvironment, spawnManaged } from '../../src/spawn.js';
+import { augmentedPathEnv, sanitizedEnvironment, spawnManaged } from '../../src/spawn.js';
 
 const testRoot = mkdtempSync(join(tmpdir(), 'mat-spawn-tests-'));
 afterAll(() => rmSync(testRoot, { recursive: true, force: true }));
@@ -46,13 +46,34 @@ setInterval(() => undefined, 1_000);
 `;
 
 describe('spawnManaged', () => {
-  it('sanitizes Unix PATH values with injectable platform inputs', () => {
+  it('sanitizes Unix environment values without inventing PATH entries', () => {
     const env = sanitizedEnvironment(
       { LD_LIBRARY_PATH: '/bad/appimage', PATH: '/bin' },
       { platform: 'linux', delimiter: ':', homedir: '/home/tester' },
     );
     expect(env.LD_LIBRARY_PATH).toBeUndefined();
-    expect(env.PATH?.split(':')).toEqual(['/bin', '/home/tester/.local/bin', '/usr/local/bin']);
+    expect(env.PATH?.split(':')).toEqual(['/bin']);
+  });
+
+  it('augments Unix PATH with the user-local and system CLI directories that exist', () => {
+    const home = join(testRoot, 'home');
+    const localBin = join(home, '.local', 'bin');
+    mkdirSync(localBin, { recursive: true });
+    const exists = (path: string) => path === localBin || path === '/usr/local/bin';
+    const env = augmentedPathEnv({ platform: 'linux', delimiter: ':', homedir: home, env: { PATH: '/bin' }, exists });
+    expect(env.PATH?.split(':')).toEqual(['/bin', localBin, '/usr/local/bin']);
+    expect(augmentedPathEnv({ platform: 'linux', delimiter: ':', homedir: join(testRoot, 'missing'), env: { PATH: '/bin' }, exists: () => false }).PATH).toBe('/bin');
+  });
+
+  it('augments Windows PATH case-insensitively from injected platform and environment values', () => {
+    const local = String.raw`C:\Users\Tester\AppData\Local`;
+    const roaming = String.raw`C:\Users\Tester\AppData\Roaming`;
+    const existing = new Set([String.raw`C:\Users\Tester\AppData\Local\Antigravity`, String.raw`C:\Users\Tester\AppData\Roaming\npm`]);
+    const env = augmentedPathEnv({
+      platform: 'win32', delimiter: ';', env: { Path: String.raw`C:\Windows;c:\users\tester\appdata\roaming\NPM`, LOCALAPPDATA: local, APPDATA: roaming },
+      exists: (path) => existing.has(path),
+    });
+    expect(env.Path?.split(';')).toEqual([String.raw`C:\Windows`, String.raw`c:\users\tester\appdata\roaming\NPM`, String.raw`C:\Users\Tester\AppData\Local\Antigravity`]);
   });
 
   it('preserves the Windows PATH key casing and delimiter without Unix additions', () => {

@@ -9,7 +9,7 @@ import {
 } from './logic.js';
 
 const provider: ProviderInfo = {
-  id: 'codex', tier: 'rich', ok: true, models: ['gpt-test'], defaultModel: 'gpt-test',
+  id: 'codex', tier: 'rich', ok: true, installable: true, models: ['gpt-test'], defaultModel: 'gpt-test',
 };
 
 const stage = (counts = [1]): Stage => ({

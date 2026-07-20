@@ -1,6 +1,6 @@
 [package]
 name = "multi-ai-terminal"
-version = "0.1.7"
+version = "0.1.8"
 description = "Desktop shell for Multi-AI Terminal"
 edition = "2021"
 
@@ -15,6 +15,7 @@ tauri-build = "2"
 dunce = "1"
 serde_json = "1"
 tauri = { version = "2", features = ["devtools"] }
+tauri-plugin-dialog = "2"
 tauri-plugin-single-instance = "2"
 
 [target.'cfg(unix)'.dependencies]

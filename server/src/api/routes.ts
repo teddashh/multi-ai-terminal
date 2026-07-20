@@ -13,17 +13,21 @@ import {
   type RunSnapshot,
   type SteerRequest,
   type ProviderInfo,
+  type ProviderId,
   type WorkflowDef,
   type Workspace,
 } from '@mat/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { listProviders } from '../adapters/registry.js';
+import { clearVersionCache } from '../adapters/base.js';
 import { VERSION } from '../version.js';
 import { diag, serverDiagPath } from '../diag.js';
 import * as runManager from '../engine/runManager.js';
 import { buildDebugBundle, readTail } from '../engine/debugBundle.js';
 import { buildRunReport } from '../engine/report.js';
+import { providerInstallPlan, type ProviderInstallPlan } from '../providers/install.js';
+import { clearAugmentedPathCache, spawnManaged, type ManagedProcess } from '../spawn.js';
 import { readEventsAfter } from '../store/eventLog.js';
 import {
   deleteRun,
@@ -65,6 +69,12 @@ const ClientLogSchema = z.object({
 
 export interface ApiRouteDependencies {
   providers(): ReturnType<typeof listProviders>;
+  providerInstall: {
+    plan(providerId: ProviderId): ProviderInstallPlan;
+    spawn: typeof spawnManaged;
+    clearVersionCache(command?: string): void;
+    clearPathCache(): void;
+  };
   report: typeof buildRunReport;
   workspaces: {
     list: typeof listWorkspaces; get: typeof getWorkspace; create: typeof createWorkspace;
@@ -89,6 +99,7 @@ export interface ApiRouteDependencies {
 
 const defaultDependencies: ApiRouteDependencies = {
   providers: listProviders,
+  providerInstall: { plan: providerInstallPlan, spawn: spawnManaged, clearVersionCache, clearPathCache: clearAugmentedPathCache },
   report: buildRunReport,
   workspaces: { list: listWorkspaces, get: getWorkspace, create: createWorkspace, update: updateWorkspace, delete: deleteWorkspace },
   workflows: { list: listWorkflows, create: createWorkflow, update: updateWorkflow, delete: deleteWorkflow, duplicate: duplicateWorkflow },
@@ -109,10 +120,58 @@ const defaultDependencies: ApiRouteDependencies = {
 
 export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiRouteDependencies = defaultDependencies): Promise<void> {
   let acceptedClientLogs = 0;
+  const runningInstalls = new Set<ProviderId>();
   app.setErrorHandler((error, request, reply) => sendError(reply, error, request));
 
   app.get('/api/health', wrap(async () => ({ ok: true, version: VERSION })));
   app.get('/api/providers', wrap(async () => dependencies.providers()));
+  app.post('/api/providers/:id/install', wrap(async (request, reply) => {
+    const id = parseId(request);
+    const providers = await dependencies.providers();
+    const current = providers.find((provider) => provider.id === id);
+    if (!current) throw apiError(404, 'NOT_FOUND', `Provider not found: ${id}`);
+    if (current.ok) throw apiError(409, 'CONFLICT', `${id} is already installed`);
+    if (runningInstalls.has(current.id)) throw apiError(409, 'CONFLICT', `${id} installation is already running`);
+    const plan = dependencies.providerInstall.plan(current.id);
+    if (!plan.recipe) return reply.send({ ok: false, ...(plan.manualCommand ? { manualCommand: plan.manualCommand } : {}) });
+
+    runningInstalls.add(current.id);
+    const startedAt = Date.now();
+    let exitCode: number | null = null;
+    let output = Buffer.alloc(0);
+    const appendOutput = (chunk: Buffer | string): void => {
+      output = Buffer.concat([output, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+      if (output.length > 64 * 1024) output = output.subarray(output.length - 64 * 1024);
+    };
+    try {
+      let managed: ManagedProcess | undefined;
+      try {
+        managed = dependencies.providerInstall.spawn({
+          command: plan.recipe.command, args: plan.recipe.args, cwd: process.cwd(), timeoutMs: 300_000, shell: false,
+        });
+      } catch (error) {
+        appendOutput(error instanceof Error ? error.message : String(error));
+      }
+      if (managed) {
+        managed.child.stdout?.on('data', appendOutput);
+        managed.child.stderr?.on('data', appendOutput);
+        exitCode = await new Promise<number | null>((resolve) => {
+          let settled = false;
+          const finish = (code: number | null): void => { if (!settled) { settled = true; resolve(code); } };
+          managed.child.once('error', (error) => { appendOutput(error.message); if (managed.child.pid === undefined) finish(null); });
+          managed.child.once('close', (code) => finish(code));
+        });
+      }
+      dependencies.providerInstall.clearPathCache();
+      dependencies.providerInstall.clearVersionCache(current.id);
+      const provider = (await dependencies.providers()).find((candidate) => candidate.id === current.id) ?? current;
+      const logTail = output.subarray(Math.max(0, output.length - 8 * 1024)).toString('utf8');
+      diag(null, 'install', { providerId: current.id, exitCode, durationMs: Math.max(0, Date.now() - startedAt) });
+      return reply.send({ ok: exitCode === 0 && provider.ok, exitCode, logTail, provider });
+    } finally {
+      runningInstalls.delete(current.id);
+    }
+  }));
   app.post('/api/client-log', wrap(async (request, reply) => {
     const body = ClientLogSchema.parse(request.body);
     if (acceptedClientLogs < 200) {

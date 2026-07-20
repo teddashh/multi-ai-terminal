@@ -1,4 +1,4 @@
-import type { AgentEvent, ApplyPatchResponse, ProviderInfo, RetryStageRequest, RunCreateRequest, RunSnapshot, SteerRequest, WorkflowDef, Workspace } from '@mat/shared';
+import type { AgentEvent, ApplyPatchResponse, ProviderInfo, ProviderInstallResponse, RetryStageRequest, RunCreateRequest, RunSnapshot, SteerRequest, WorkflowDef, Workspace } from '@mat/shared';
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string, readonly code = 'HTTP_ERROR') { super(message); }
@@ -14,6 +14,7 @@ export class ApiClient {
   get token(): string | undefined { return typeof this.#token === 'function' ? this.#token() : this.#token; }
   health(): Promise<{ ok: boolean; version: string }> { return this.request('/api/health'); }
   getProviders(): Promise<ProviderInfo[]> { return this.request('/api/providers'); }
+  installProvider(id: string): Promise<ProviderInstallResponse> { return this.request(`/api/providers/${encodeURIComponent(id)}/install`, { method: 'POST' }); }
   getWorkspaces(): Promise<Workspace[]> { return this.request('/api/workspaces'); }
   getWorkspace(id: string): Promise<Workspace> { return this.request(`/api/workspaces/${encodeURIComponent(id)}`); }
   createWorkspace(value: { name: string; path: string; defaultWorkflowId?: string; verifyCommand?: string; verifyTimeoutSec?: number }): Promise<Workspace> { return this.request('/api/workspaces', { method: 'POST', body: value }); }
