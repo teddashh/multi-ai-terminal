@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 import type { AgentEvent, RunSnapshot } from '@mat/shared';
-import { screen, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { act, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('zustand', () => ({ useStore: (store: { getState(): unknown }, selector: (state: never) => unknown) => selector(store.getState() as never) }));
+const apiMocks = vi.hoisted(() => ({ steerRun: vi.fn(), getDebugBundle: vi.fn() }));
 vi.mock('../../api/client.js', () => ({
-  apiClient: { getRuns: vi.fn().mockResolvedValue([]), getWorkspaces: vi.fn().mockResolvedValue([]) },
+  apiClient: { getRuns: vi.fn().mockResolvedValue([]), getWorkspaces: vi.fn().mockResolvedValue([]), steerRun: apiMocks.steerRun, getDebugBundle: apiMocks.getDebugBundle },
 }));
 
 import { matStore } from '../../app/store.js';
@@ -44,7 +45,11 @@ function renderWithWorkspaceReact(ui: ReactElement) {
   return { container };
 }
 
-beforeEach(() => matStore.setState({ activeRunId: 'r1', runs: { r1: run }, events: { r1: events }, filters: { nodeRunIds: [], roles: ['user', 'agent', 'tool', 'thinking', 'system', 'decision'], follow: true }, ui: { focusedNodeRunId: undefined } }));
+beforeEach(() => {
+  apiMocks.steerRun.mockReset().mockResolvedValue(run);
+  apiMocks.getDebugBundle.mockReset().mockResolvedValue(new Blob(['zip']));
+  matStore.setState({ activeRunId: 'r1', runs: { r1: run }, events: { r1: events }, filters: { nodeRunIds: [], roles: ['user', 'agent', 'tool', 'thinking', 'system', 'decision'], follow: true }, ui: { focusedNodeRunId: undefined } });
+});
 afterEach(() => { for (const item of mounted.splice(0)) { act(() => item.root.unmount()); item.container.remove(); } });
 
 describe('RunPanel smoke', () => {
@@ -62,5 +67,45 @@ describe('RunPanel smoke', () => {
     expect(screen.getByText(/1 upstream node/)).toBeTruthy();
     expect(screen.getByText('Seed prompt')).toBeTruthy();
     expect(screen.getByText('1 passed / 0 failed / 0 skipped')).toBeTruthy();
+  });
+
+  it('submits the default interrupt mode and renders steer groups with review decisions', async () => {
+    const steered: RunSnapshot = {
+      ...run,
+      nodes: [...run.nodes, { ...run.nodes[0]!, nodeRunId: 'steer-1.agent.0', stageId: 'steer-1', slotId: 'agent', label: 'Steer · codex', attempt: 1 }],
+      steers: [{ steerId: 's_1', text: 'change direction', mode: 'interrupt', status: 'reviewed', createdAt: 1, steerStageId: 'steer-1' }],
+      gateDecisions: [...run.gateDecisions, { stageId: 'steer-1', gateAttempt: 1, action: 'advance', rationale: 'Steer accepted.', ts: 200 }],
+    };
+    apiMocks.steerRun.mockResolvedValue(steered);
+    matStore.setState({ runs: { r1: steered } });
+    renderWithWorkspaceReact(<RunPanel />);
+    expect(screen.getByTestId('steer-group')).toBeTruthy();
+    expect(screen.getByText('steer review')).toBeTruthy();
+    const input = screen.getByLabelText('Steer instruction');
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'new instruction' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(apiMocks.steerRun).toHaveBeenCalledWith('r1', { text: 'new instruction', mode: 'interrupt' }));
+  });
+
+  it('downloads the debug bundle from the Debug button', async () => {
+    const createObjectURL = vi.fn().mockReturnValue('blob:debug');
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    renderWithWorkspaceReact(<RunPanel />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Debug' }));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(apiMocks.getDebugBundle).toHaveBeenCalledWith('r1'));
+    expect(createObjectURL).toHaveBeenCalled();
+    expect(click).toHaveBeenCalled();
+    delete (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
+    delete (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL;
+    click.mockRestore();
   });
 });

@@ -1,4 +1,4 @@
-import type { AgentEvent, ApplyPatchResponse, ProviderInfo, RetryStageRequest, RunCreateRequest, RunSnapshot, WorkflowDef, Workspace } from '@mat/shared';
+import type { AgentEvent, ApplyPatchResponse, ProviderInfo, RetryStageRequest, RunCreateRequest, RunSnapshot, SteerRequest, WorkflowDef, Workspace } from '@mat/shared';
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string, readonly code = 'HTTP_ERROR') { super(message); }
@@ -29,14 +29,17 @@ export class ApiClient {
   getRun(id: string): Promise<RunSnapshot> { return this.request(`/api/runs/${encodeURIComponent(id)}`); }
   getEvents(id: string, afterSeq = 0, limit = 1000): Promise<AgentEvent[]> { return this.request(`/api/runs/${encodeURIComponent(id)}/events${queryString({ afterSeq, limit })}`); }
   getReport(id: string): Promise<string> { return this.request(`/api/runs/${encodeURIComponent(id)}/report`, { response: 'text' }); }
+  getDebugBundle(id: string): Promise<Blob> { return this.request(`/api/runs/${encodeURIComponent(id)}/debug-bundle`, { response: 'blob' }); }
   getPatch(id: string, nodeRunId: string): Promise<string> { return this.request(`/api/runs/${encodeURIComponent(id)}/patches/${encodeURIComponent(nodeRunId)}`, { response: 'text' }); }
   abortRun(id: string): Promise<RunSnapshot> { return this.request(`/api/runs/${encodeURIComponent(id)}/abort`, { method: 'POST' }); }
   killNode(id: string, nodeRunId: string): Promise<RunSnapshot> { return this.request(`/api/runs/${encodeURIComponent(id)}/nodes/${encodeURIComponent(nodeRunId)}/kill`, { method: 'POST' }); }
   retryStage(id: string, stageId: string, value: RetryStageRequest = {}): Promise<RunSnapshot> { return this.request(`/api/runs/${encodeURIComponent(id)}/stages/${encodeURIComponent(stageId)}/retry`, { method: 'POST', body: value }); }
+  steerRun(id: string, value: SteerRequest): Promise<RunSnapshot> { return this.request(`/api/runs/${encodeURIComponent(id)}/steer`, { method: 'POST', body: value }); }
+  clientLog(value: { level: 'error'|'warn'; message: string; stack?: string; url?: string }): Promise<void> { return this.request('/api/client-log', { method: 'POST', body: value }); }
   applyPatch(id: string, nodeRunId: string): Promise<ApplyPatchResponse> { return this.request(`/api/runs/${encodeURIComponent(id)}/nodes/${encodeURIComponent(nodeRunId)}/apply-patch`, { method: 'POST' }); }
   deleteRun(id: string): Promise<void> { return this.request(`/api/runs/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
 
-  async request<T>(path: string, options: { method?: string; body?: unknown; response?: 'json'|'text' } = {}): Promise<T> {
+  async request<T>(path: string, options: { method?: string; body?: unknown; response?: 'json'|'text'|'blob' } = {}): Promise<T> {
     const headers = new Headers();
     if (options.body !== undefined) headers.set('content-type', 'application/json');
     if (this.token) headers.set('authorization', `Bearer ${this.token}`);
@@ -49,7 +52,7 @@ export class ApiClient {
       throw new ApiError(response.status, message, code);
     }
     if (response.status === 204) return undefined as T;
-    return (options.response === 'text' ? await response.text() : await response.json()) as T;
+    return (options.response === 'text' ? await response.text() : options.response === 'blob' ? await response.blob() : await response.json()) as T;
   }
 }
 

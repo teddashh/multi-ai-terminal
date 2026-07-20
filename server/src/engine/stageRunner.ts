@@ -5,21 +5,48 @@ import { saveRun } from '../store/runs.js';
 import { getWorkspace } from '../store/workspaces.js';
 import { evaluateGate } from '../orchestrator/gate.js';
 import { renderTemplate } from '../orchestrator/prompts.js';
+import { diag } from '../diag.js';
 import { assembleArtifacts, buildDigest } from './digest.js';
 import { emitRetryBoundary, killActiveNode, registerNodeContext, resetNodeForRetry, runNode } from './nodeRunner.js';
 import { collectPatch, createWorktree, isGitRepository, isWorkspaceDirty, runDirectory } from './worktree.js';
 import { verifyCandidate } from './verify.js';
 
-interface StageControl {
+export interface StageControl {
   stageId: string;
   gating: boolean;
   pendingRetry?: { promptAddendum?: string };
+  steerInterrupt?: boolean;
 }
 
 const controls = new Map<string, StageControl>();
 const saveTails = new WeakMap<RunSnapshot, Promise<void>>();
 const queuedRetryAddenda = new Map<string, string>();
 const isAborted = (run: RunSnapshot): boolean => run.status === 'aborted';
+
+export const hasPendingInterruptSteer = (run: RunSnapshot): boolean =>
+  (run.steers ?? []).some((steer) => steer.status === 'pending' && steer.mode === 'interrupt');
+
+export function requestSteerInterrupt(runId: string): boolean {
+  const control = controls.get(runId);
+  if (!control || control.gating) return false;
+  control.steerInterrupt = true;
+  return true;
+}
+
+// Which stage a steer actually cut short. steerRun's killed>0 marking misses the
+// races (kill between node spawns, gate-ordered retry reset); runStage records
+// the truth here and the steer cycle consumes it.
+const steerInterruptedStages = new Map<string, string>();
+
+export function takeSteerInterruptedStage(runId: string): string | undefined {
+  const stageId = steerInterruptedStages.get(runId);
+  steerInterruptedStages.delete(runId);
+  return stageId;
+}
+
+export function clearSteerInterrupt(runId: string): void {
+  steerInterruptedStages.delete(runId);
+}
 
 export function queueStageRetryAddendum(runId: string, stageId: string, promptAddendum?: string): void {
   queuedRetryAddenda.set(`${runId}\0${stageId}`, promptAddendum ?? '');
@@ -90,7 +117,14 @@ function promptFor(run: RunSnapshot, stage: Stage, node: NodeRun, workspace: Wor
   });
 }
 
-async function executeNodes(run: RunSnapshot, stage: Stage, nodes: NodeRun[], workspace: Workspace, addenda: ReadonlyMap<string, string>): Promise<void> {
+export async function executeNodes(
+  run: RunSnapshot,
+  stage: Stage,
+  nodes: NodeRun[],
+  workspace: Workspace,
+  addenda: ReadonlyMap<string, string>,
+  promptOverride?: (node: NodeRun) => string,
+): Promise<void> {
   const actuallyGit = workspace.isGit && await isGitRepository(workspace.path);
   if (stage.isolation === 'worktree' && !actuallyGit) {
     systemEvent(run, stage.id, 'Worktree isolation unavailable; running in the workspace.', { detail: 'non-git-workspace' });
@@ -124,19 +158,19 @@ async function executeNodes(run: RunSnapshot, stage: Stage, nodes: NodeRun[], wo
 
   let cursor = 0;
   const worker = async (): Promise<void> => {
-    while (cursor < nodes.length && run.status !== 'aborted') {
+    while (cursor < nodes.length && run.status !== 'aborted' && !hasPendingInterruptSteer(run)) {
       const node = nodes[cursor++];
       if (!node) return;
       if (isAborted(run) || node.status !== 'queued') continue;
       const retryAddendum = addenda.get(node.nodeRunId) ?? '';
       if (node.attempt > 1) emitRetryBoundary(node);
-      await runNode(node, stage, promptFor(run, stage, node, workspace, retryAddendum));
+      await runNode(node, stage, promptOverride ? promptOverride(node) : promptFor(run, stage, node, workspace, retryAddendum));
     }
   };
   await Promise.all(Array.from({ length: Math.min(run.workflow.maxParallel, nodes.length) }, () => worker()));
 }
 
-function appendDecision(run: RunSnapshot, decision: GateDecision): void {
+export function appendDecision(run: RunSnapshot, decision: GateDecision, options: { engineForced?: boolean } = {}): void {
   run.gateDecisions.push(decision);
   appendEvent(run.runId, {
     runId: run.runId,
@@ -148,6 +182,10 @@ function appendDecision(run: RunSnapshot, decision: GateDecision): void {
     kind: 'decision',
     text: decision.rationale,
     data: { ...decision },
+  });
+  diag(run.runId, 'decision', {
+    stageId: decision.stageId, action: decision.action, degraded: decision.degraded === true,
+    ...(options.engineForced ? { engineForced: true } : {}),
   });
 }
 
@@ -162,13 +200,26 @@ export async function runStage(run: RunSnapshot, stage: Stage): Promise<void> {
   await persistRun(run);
 
   let selected = nodes.filter((node) => node.status === 'queued');
+  diag(run.runId, 'stage', { stageId: stage.id, phase: 'start', selectedCount: selected.length });
   const queuedAddendum = queuedRetryAddenda.get(`${run.runId}\0${stage.id}`);
   queuedRetryAddenda.delete(`${run.runId}\0${stage.id}`);
   let addenda = new Map(selected.map((node) => [node.nodeRunId, queuedAddendum ?? '']));
   try {
     while (selected.length > 0 && !isAborted(run)) {
+      if (hasPendingInterruptSteer(run)) {
+        steerInterruptedStages.set(run.runId, stage.id);
+        return;
+      }
       await executeNodes(run, stage, selected, workspace, addenda);
       if (isAborted(run)) return;
+      if (control.steerInterrupt || hasPendingInterruptSteer(run)) {
+        delete control.steerInterrupt;
+        if (nodes.some((node) => node.status === 'queued' || node.status === 'killed')) {
+          steerInterruptedStages.set(run.runId, stage.id);
+          return;
+        }
+        // The stage finished intact; run its gate and apply the steer at the boundary.
+      }
 
       const allFailed = nodes.every((node) => node.status === 'failed');
       if (allFailed && !run.workflow.orchestrator.enabled) {
@@ -202,6 +253,7 @@ export async function runStage(run: RunSnapshot, stage: Stage): Promise<void> {
       control.gating = true;
       await persistRun(run);
       let decision = await evaluateGate(run, stage, buildDigest(nodes));
+      let engineForced = false;
       if (isAborted(run)) return;
       const maxEvaluations = 1 + run.workflow.maxRetriesPerStage;
       const manual = control.pendingRetry;
@@ -226,6 +278,8 @@ export async function runStage(run: RunSnapshot, stage: Stage): Promise<void> {
           retryNodeRunIds: failedVerificationNodes.map((node) => node.nodeRunId),
           rationale: `${decision.rationale} [engine] requireVerified: no candidate passed verification; retrying failing candidates.`,
         };
+        engineForced = true;
+        diag(run.runId, 'decision', { stageId: stage.id, action: 'retry', degraded: false, engineForced: true, detail: 'requireVerified' });
       }
       if (decision.action === 'retry' && decision.gateAttempt >= maxEvaluations) {
         const { retryNodeRunIds: _retryIds, promptAddendum: _addendum, ...rest } = decision;
@@ -235,11 +289,12 @@ export async function runStage(run: RunSnapshot, stage: Stage): Promise<void> {
           degraded: true,
           rationale: `${decision.rationale} Gate retry budget exhausted; advancing.`,
         };
+        engineForced = true;
       }
       if (decision.degraded) {
         systemEvent(run, stage.id, `Gate advanced in degraded mode: ${decision.rationale}`, { detail: 'gate-degraded' });
       }
-      appendDecision(run, decision);
+      appendDecision(run, decision, { engineForced });
       if (decision.action === 'abort') {
         run.status = 'aborted';
         run.endedAt = Date.now();
@@ -263,6 +318,7 @@ export async function runStage(run: RunSnapshot, stage: Stage): Promise<void> {
       await persistRun(run);
     }
   } finally {
+    diag(run.runId, 'stage', { stageId: stage.id, phase: 'end', selectedCount: selected.length });
     controls.delete(run.runId);
   }
 }

@@ -6,6 +6,7 @@ import { humanizeError } from '../adapters/base.js';
 import { spawnManaged } from '../spawn.js';
 import { appendEvent } from '../store/eventLog.js';
 import { runDirectory } from './worktree.js';
+import { diag } from '../diag.js';
 
 const OUTPUT_TAIL_LIMIT = 2000;
 
@@ -81,6 +82,8 @@ export async function verifyCandidate(node: NodeRun, workspace: Workspace, runId
   });
 
   const startedAt = Date.now();
+  const timeoutSec = workspace.verifyTimeoutSec ?? 600;
+  diag(runId, 'verify-start', { nodeRunId: node.nodeRunId, attempt: node.attempt, command, cwd: node.cwd, timeoutSec });
   const logFile = join(runDirectory(runId), 'artifacts', `${node.nodeRunId}.a${node.attempt}.verify.log`);
   let output = '';
   let timedOut = false;
@@ -91,7 +94,7 @@ export async function verifyCandidate(node: NodeRun, workspace: Workspace, runId
       cwd: node.cwd,
       env: process.env,
       shell: true,
-      timeoutMs: (workspace.verifyTimeoutSec ?? 600) * 1000,
+      timeoutMs: timeoutSec * 1000,
       onTimeout: () => { timedOut = true; },
     });
     managed.child.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString('utf8'); });
@@ -123,6 +126,10 @@ export async function verifyCandidate(node: NodeRun, workspace: Workspace, runId
           ? { status: 'passed', ...common }
           : { status: 'failed', ...common };
     emitResult(node, runId, result);
+    diag(runId, 'verify-result', {
+      nodeRunId: node.nodeRunId, attempt: node.attempt, status: result.status,
+      exitCode: result.exitCode, durationMs: result.durationMs, ...(result.reason ? { reason: result.reason } : {}),
+    });
     return result;
   } catch (error) {
     const durationMs = Math.max(0, Date.now() - startedAt);
@@ -132,6 +139,10 @@ export async function verifyCandidate(node: NodeRun, workspace: Workspace, runId
       reason: timedOut ? 'timeout' : humanizeError(error), logFile,
     };
     emitResult(node, runId, result);
+    diag(runId, 'verify-result', {
+      nodeRunId: node.nodeRunId, attempt: node.attempt, status: result.status,
+      exitCode: result.exitCode, durationMs: result.durationMs, reason: result.reason,
+    });
     return result;
   }
 }

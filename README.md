@@ -20,6 +20,14 @@ Workspaces can define a verification command such as `npm test` and an optional 
 
 The UI and generated Markdown report distinguish generated, reviewed, advanced, and verified work. A degraded or unverified advance is labeled, never hidden. Open **Report** in the run panel or request `GET /api/runs/:id/report` for a PR- and retrospective-ready record of outcomes, handoffs, decisions, provider CLI versions, usage, patches, and verification evidence. The builtin **Pipeline: Implement → Test → Review** preset provides the shortest evidence-gated production line.
 
+## Steering
+
+While a run is active, enter a new instruction in the run panel. **Interrupt** (the default) terminates the active candidate process trees, preserves their partial logs and patches, runs the new instruction through the normal evidence path, then records a gate-style review that decides whether to redo the interrupted stage, continue, or abort. **Queue** waits for the next stage boundary and applies the instruction without killing current work. Steering is FIFO, capped at eight messages per run, and remains deterministic when the orchestrator is disabled. It never uses a PTY or writes to a running child's stdin.
+
+## Debug bundle
+
+Choose **Debug** beside **Report** to download one `mat-debug-<runId>.zip`. It contains the full run snapshot, events, diagnostic journal, Markdown report, raw adapter output, patches, verification logs, runtime/provider versions, and the tail of the server diagnostic log. Browser errors are also reported best-effort to the server journal; environment variable values are never intentionally recorded.
+
 ## Quickstart
 
 Requirements: Node.js ≥ 20, Git ≥ 2.32 recommended (older Git falls back to plain `git apply --check`), plus whichever agent CLIs you want: `claude`, `codex`, `grok`, `agy`.
@@ -68,7 +76,7 @@ Binds `127.0.0.1` by default. `--host 0.0.0.0` exposes the API/UI to your networ
 
 ## Docs
 
-- [SPEC.md](./SPEC.md) — the engineering contract (v1.1)
+- [SPEC.md](./SPEC.md) — the engineering contract (v1.3)
 - [docs/spec-review-panel.md](./docs/spec-review-panel.md) — 4-model spec review record
 - [docs/code-review-panel.md](./docs/code-review-panel.md) — 4-model code review record (25 findings fixed, 3 refuted)
 

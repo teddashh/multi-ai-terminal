@@ -20,6 +20,14 @@
 
 UI 與產生的 Markdown 報告會區分「已產生、已審查、已前進、已驗證」。降級或未驗證的前進會明確標示，絕不隱藏。可在執行面板開啟 **Report**，或呼叫 `GET /api/runs/:id/report`，取得適合 PR 與回顧使用的結果、交接、決策、供應商 CLI 版本、用量、patch 與驗證證據。內建的 **Pipeline: Implement → Test → Review** 預設是最短的證據把關生產線。
 
+## 導引（Steering）
+
+執行進行中時，可在執行面板輸入新指示。預設的 **Interrupt** 會終止目前候選項的整個行程樹、保留部分日誌與 patch，讓新指示走過相同的證據流程，之後以閘門式審查決定重做被中斷階段、繼續或中止。**Queue** 會等到下一個階段邊界再套用，不終止目前工作。導引訊息依 FIFO 處理，每次執行最多八則；停用調度者時仍採確定性政策。此功能不使用 PTY，也不會寫入執行中子行程的 stdin。
+
+## 除錯套件
+
+按 **Report** 旁的 **Debug**，即可下載單一 `mat-debug-<runId>.zip`。內容包括完整執行快照、事件、診斷日誌、Markdown 報告、adapter 原始輸出、patch、驗證日誌、執行環境與供應商版本，以及伺服器診斷日誌尾端。瀏覽器錯誤也會以 best-effort 方式送入伺服器日誌；系統不會刻意記錄環境變數值。
+
 ## 快速開始
 
 需求:Node.js ≥ 20、建議 Git ≥ 2.32(較舊的 Git 會退回純 `git apply --check`),以及你想用的 agent CLI:`claude`、`codex`、`grok`、`agy`。
@@ -68,7 +76,7 @@ npm start                      # 在 http://127.0.0.1:7788 提供網頁 UI + API
 
 ## 文件
 
-- [SPEC.md](./SPEC.md) — 工程契約(v1.1)
+- [SPEC.md](./SPEC.md) — 工程契約(v1.3)
 - [docs/spec-review-panel.md](./docs/spec-review-panel.md) — 4 模型規格審查記錄
 - [docs/code-review-panel.md](./docs/code-review-panel.md) — 4 模型程式碼審查記錄(25 項發現已修復、3 項駁回)
 

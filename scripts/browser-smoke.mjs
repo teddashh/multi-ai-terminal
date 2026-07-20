@@ -16,6 +16,7 @@ let child;
 let dataDir;
 let workspaceDir;
 let verifiedWorkspaceDir;
+let steerWorkspaceDir;
 
 const overallDeadline = setTimeout(() => {
   console.error('[smoke:browser] FAIL: smoke test exceeded the 120-second hard deadline.');
@@ -33,6 +34,9 @@ const overallDeadline = setTimeout(() => {
   }
   if (verifiedWorkspaceDir) {
     void rm(verifiedWorkspaceDir, { recursive: true, force: true });
+  }
+  if (steerWorkspaceDir) {
+    void rm(steerWorkspaceDir, { recursive: true, force: true });
   }
   process.exit(1);
 }, 120_000);
@@ -208,6 +212,7 @@ try {
   dataDir = await mkdtemp(path.join(os.tmpdir(), 'mat-smoke-'));
   workspaceDir = await mkdtemp(path.join(os.tmpdir(), 'mat-smoke-workspace-'));
   verifiedWorkspaceDir = await mkdtemp(path.join(os.tmpdir(), 'mat-smoke-verified-'));
+  steerWorkspaceDir = await mkdtemp(path.join(os.tmpdir(), 'mat-smoke-steer-'));
 
   child = spawn(process.execPath, [
     'server/dist/index.js',
@@ -403,6 +408,62 @@ try {
     if (!(await dialog.textContent())?.includes('verified')) throw new Error('Run report did not contain verified evidence.');
     if (pageErrors.length > 0) throw new Error(`Captured ${pageErrors.length} page error${pageErrors.length === 1 ? '' : 's'}.`);
   });
+
+  await phase('steer and debug export', async () => {
+    await page.getByRole('button', { name: 'Close dialog' }).click();
+    await runCommand('git', ['init', '-q'], steerWorkspaceDir);
+    await runCommand('git', ['config', 'user.email', 'mat-smoke@example.test'], steerWorkspaceDir);
+    await runCommand('git', ['config', 'user.name', 'MAT Smoke'], steerWorkspaceDir);
+    await runCommand('git', ['commit', '--allow-empty', '-qm', 'base'], steerWorkspaceDir);
+    const workspace = await api('/api/workspaces', { method: 'POST', body: JSON.stringify({
+      name: 'Steer Smoke', path: steerWorkspaceDir, verifyCommand: 'node -e "process.exit(0)"',
+    }) });
+    await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent?.includes('Steer Smoke')), null, { timeout: 10_000 });
+    await page.evaluate(() => {
+      const button = [...document.querySelectorAll('button')].find((candidate) => candidate.textContent?.includes('Steer Smoke'));
+      button?.click();
+    });
+    const workflows = await api('/api/workflows');
+    const source = workflows[0];
+    if (!source) throw new Error('No workflow was available for the steer smoke run.');
+    const workflowOverride = {
+      ...source,
+      id: 'steer-smoke',
+      name: 'Steer Smoke',
+      orchestrator: { ...source.orchestrator, enabled: false },
+      stages: [{
+        ...source.stages[0], id: 'steered-work', name: 'Steered work', isolation: 'worktree', gate: false, requireVerified: false,
+        slots: [{
+          id: 'writer', label: 'Writer', agent: { provider: 'mock', model: 'slow:1200', permission: 'auto' }, count: 1,
+          promptTemplate: 'MOCK_WRITE:steer-smoke.txt\nMOCK_REPLY: steer smoke complete {{retry_addendum}}',
+        }],
+      }],
+    };
+    delete workflowOverride.builtin;
+    const steerRun = await api('/api/runs', { method: 'POST', body: JSON.stringify({
+      workspaceId: workspace.id, workflowId: source.id, task: 'Exercise steering', workflowOverride,
+    }) });
+    await page.waitForSelector('[data-node-run-id="steered-work.writer.0"]');
+    await page.waitForFunction(() => document.querySelector('[data-node-run-id="steered-work.writer.0"]')?.textContent?.includes('running'), null, { timeout: 10_000 });
+    await page.getByLabel('Steer instruction').fill('Revise the active work, then return to it.');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('[data-node-run-id="steered-work.writer.0"]')?.textContent?.includes('killed'), null, { timeout: 10_000 });
+    await page.getByTestId('steer-group').waitFor({ timeout: 10_000 });
+    const deadline = Date.now() + 30_000;
+    let snapshot = steerRun;
+    while (Date.now() < deadline && snapshot.status !== 'done') {
+      await delay(250);
+      snapshot = await api(`/api/runs/${encodeURIComponent(steerRun.runId)}`);
+    }
+    if (snapshot.status !== 'done') throw new Error(`Steer run ${steerRun.runId} did not finish (status=${snapshot.status}).`);
+    if (snapshot.nodes.find((node) => node.nodeRunId === 'steered-work.writer.0')?.attempt !== 2) throw new Error('Interrupted node did not complete attempt 2.');
+    const bundle = await page.evaluate(async (runId) => {
+      const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/debug-bundle`);
+      return { ok: response.ok, type: response.headers.get('content-type'), size: (await response.arrayBuffer()).byteLength };
+    }, steerRun.runId);
+    if (!bundle.ok || !bundle.type?.includes('application/zip') || bundle.size <= 1024) throw new Error(`Invalid debug bundle: ${JSON.stringify(bundle)}`);
+    if (pageErrors.length > 0) throw new Error(`Captured ${pageErrors.length} page error${pageErrors.length === 1 ? '' : 's'}.`);
+  });
 } catch (error) {
   failure = error;
   if (page) {
@@ -431,7 +492,7 @@ try {
     cleanupFailure ??= error;
   }
   // Windows keeps transient locks on freshly used git/worktree dirs; retry removal.
-  for (const dir of [dataDir, workspaceDir, verifiedWorkspaceDir]) {
+  for (const dir of [dataDir, workspaceDir, verifiedWorkspaceDir, steerWorkspaceDir]) {
     if (!dir) continue;
     try {
       await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

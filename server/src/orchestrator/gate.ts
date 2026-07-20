@@ -3,6 +3,7 @@ import { saveRun } from '../store/runs.js';
 import { buildGatePrompt } from './prompts.js';
 import { degradedDecision, tryParseDecision } from './decision.js';
 import { killActiveNode, registerNodeContext, runNode } from '../engine/nodeRunner.js';
+import { diag } from '../diag.js';
 
 const RESUMABLE = new Set(['claude', 'codex', 'grok']);
 const hasNodeStatus = (node: NodeRun, status: NodeRun['status']): boolean => node.status === status;
@@ -15,9 +16,15 @@ function orchestratorNode(run: RunSnapshot): NodeRun {
   return node;
 }
 
-export async function evaluateGate(run: RunSnapshot, stage: Stage, digest: string): Promise<GateDecision> {
+export async function evaluateGate(
+  run: RunSnapshot,
+  stage: Stage,
+  digest: string,
+  validRetryIds?: string[],
+  review?: { interruptedStageName: string | null; steerText: string },
+): Promise<GateDecision> {
   const gateAttempt = run.gateDecisions.filter((decision) => decision.stageId === stage.id).length + 1;
-  const validIds = run.nodes.filter((node) => node.stageId === stage.id).map((node) => node.nodeRunId);
+  const validIds = validRetryIds ?? run.nodes.filter((node) => node.stageId === stage.id).map((node) => node.nodeRunId);
   if (!run.workflow.orchestrator.enabled) {
     return {
       stageId: stage.id,
@@ -41,7 +48,8 @@ export async function evaluateGate(run: RunSnapshot, stage: Stage, digest: strin
     if (remainingMs <= 0) throw new GateTimeoutError('Orchestrator gate timed out');
     const canResume = RESUMABLE.has(node.agent.provider) && Boolean(node.sessionRef);
     lastUsedResume = canResume;
-    const prompt = buildGatePrompt(run, stage, digest, !canResume, reask);
+    const prompt = buildGatePrompt(run, stage, digest, !canResume, reask, review);
+    diag(run.runId, 'gate-request', { stageId: stage.id, gateAttempt, promptChars: prompt.length, prompt });
     registerNodeContext(node, {
       runId: run.runId,
       stageId: null,
@@ -79,6 +87,17 @@ export async function evaluateGate(run: RunSnapshot, stage: Stage, digest: strin
     return node.resultText ?? '';
   };
 
+  const parse = (raw: string): GateDecision => {
+    try {
+      const decision = tryParseDecision(raw, stage.id, gateAttempt, validIds);
+      diag(run.runId, 'gate-response', { stageId: stage.id, gateAttempt, raw, action: decision.action });
+      return decision;
+    } catch (error) {
+      diag(run.runId, 'gate-response', { stageId: stage.id, gateAttempt, raw, parseError: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  };
+
   try {
     lastRaw = await execute(false);
     if (hasNodeStatus(node, 'killed')) return degradedDecision(stage.id, gateAttempt, 'Orchestrator gate was interrupted; advancing.', lastRaw);
@@ -89,13 +108,13 @@ export async function evaluateGate(run: RunSnapshot, stage: Stage, digest: strin
       if (hasNodeStatus(node, 'killed')) return degradedDecision(stage.id, gateAttempt, 'Orchestrator gate was interrupted; advancing.', lastRaw);
     }
     try {
-      return tryParseDecision(lastRaw, stage.id, gateAttempt, validIds);
+      return parse(lastRaw);
     } catch {
       node.status = 'queued';
       lastRaw = await execute(true);
       if (hasNodeStatus(node, 'killed')) return degradedDecision(stage.id, gateAttempt, 'Orchestrator gate was interrupted; advancing.', lastRaw);
       try {
-        return tryParseDecision(lastRaw, stage.id, gateAttempt, validIds);
+        return parse(lastRaw);
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
         return degradedDecision(stage.id, gateAttempt, `Orchestrator returned invalid JSON twice: ${detail}`, lastRaw);

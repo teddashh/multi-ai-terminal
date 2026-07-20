@@ -66,7 +66,7 @@ function lastError(node: NodeRun): string {
   return 'none';
 }
 
-export function buildDigest(nodes: NodeRun[]): string {
+export function buildDigest(nodes: NodeRun[], options: { interruptedPartial?: boolean } = {}): string {
   const ordered = [...nodes];
   const budget = digestResultBudget(ordered.length);
   return ordered.map((node) => {
@@ -76,7 +76,7 @@ export function buildDigest(nodes: NodeRun[]): string {
     const verification = formatVerification(node);
     const evidenceBudget = verification.slice(1).reduce((sum, line) => sum + line.length + 1, 0);
     return [
-      `## ${node.label} [${node.nodeRunId}]`,
+      `## ${node.label} [${node.nodeRunId}]${options.interruptedPartial && node.status === 'killed' ? ' [interrupted partial]' : ''}`,
       `provider/model: ${node.agent.provider}${model}`,
       `status: ${node.status}; attempt: ${node.attempt}; duration: ${duration}`,
       `usage: ${formatUsage(node)}; tool-calls: ${toolCount}; diffstat: ${patchStat(node.patchFile)}; last-error: ${lastError(node)}`,

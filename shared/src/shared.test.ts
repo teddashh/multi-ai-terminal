@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { AgentEventSchema, NodeRunSchema, RunSnapshotSchema, StageSchema, WorkflowDefSchema, WorkspacePatchRequestSchema, WorkspaceSchema, applyWorkflowDefaults } from './index.js';
+import { AgentEventSchema, NodeRunSchema, RunSnapshotSchema, StageSchema, SteerMessageSchema, SteerRequestSchema, WorkflowDefSchema, WorkspacePatchRequestSchema, WorkspaceSchema, applyWorkflowDefaults } from './index.js';
 
 describe('shared schemas', () => {
   it('round-trips an event', () => {
@@ -42,6 +42,15 @@ describe('shared schemas', () => {
     value.stages[0]!.slots[0]!.count = 8;
     value.stages[0]!.slots[1]!.count = 8;
     expect(WorkflowDefSchema.safeParse(value).success).toBe(false);
+  });
+
+  it('validates steer messages and defaults steer requests to interrupt', () => {
+    const steer = { steerId: 's_1', text: 'change direction', mode: 'interrupt', status: 'pending', createdAt: 1 };
+    expect(SteerMessageSchema.parse(steer)).toEqual(steer);
+    expect(SteerRequestSchema.parse({ text: 'change direction' })).toEqual({ text: 'change direction', mode: 'interrupt' });
+    expect(SteerRequestSchema.safeParse({ text: '' }).success).toBe(false);
+    expect(SteerRequestSchema.safeParse({ text: 'x'.repeat(4001) }).success).toBe(false);
+    expect(SteerMessageSchema.safeParse({ ...steer, extra: true }).success).toBe(false);
   });
 
   it.each([

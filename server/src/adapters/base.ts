@@ -1,6 +1,7 @@
 import type { AdapterContentEvent, AgentBinding, ProviderId, Usage } from '@mat/shared';
 import type { ChildProcess } from 'node:child_process';
 import { spawnManaged } from '../spawn.js';
+import { diag } from '../diag.js';
 
 export interface ResolvedNodeSpec {
   binding: AgentBinding; promptText: string; cwd: string;
@@ -173,6 +174,7 @@ export function probeVersion(command: string): Promise<{ ok: boolean; version?: 
     const finish = (result: { ok: boolean; version?: string; detail?: string }): void => {
       if (settled) return;
       settled = true;
+      diag(null, 'probe', { command, ok: result.ok, ...(result.version ? { version: result.version } : {}) });
       resolve(result);
     };
     let managed: ReturnType<typeof spawnManaged>;

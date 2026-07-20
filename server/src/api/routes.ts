@@ -1,5 +1,7 @@
+import { existsSync } from 'node:fs';
 import {
   RetryStageRequestSchema,
+  SteerRequestSchema,
   RunCreateRequestSchema,
   WorkspaceCreateRequestSchema,
   WorkspacePatchRequestSchema,
@@ -9,6 +11,7 @@ import {
   type RetryStageRequest,
   type RunCreateRequest,
   type RunSnapshot,
+  type SteerRequest,
   type ProviderInfo,
   type WorkflowDef,
   type Workspace,
@@ -17,7 +20,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { listProviders } from '../adapters/registry.js';
 import { VERSION } from '../version.js';
+import { diag, serverDiagPath } from '../diag.js';
 import * as runManager from '../engine/runManager.js';
+import { buildDebugBundle, readTail } from '../engine/debugBundle.js';
 import { buildRunReport } from '../engine/report.js';
 import { readEventsAfter } from '../store/eventLog.js';
 import {
@@ -53,6 +58,10 @@ const EventsQuerySchema = z.object({
   afterSeq: z.coerce.number().int().nonnegative().default(0),
   limit: z.coerce.number().int().min(1).max(10_000).default(1000),
 }).strict();
+const ClientLogSchema = z.object({
+  level: z.enum(['error', 'warn']), message: z.string().max(4000),
+  stack: z.string().max(8000).optional(), url: z.string().optional(),
+}).strict();
 
 export interface ApiRouteDependencies {
   providers(): ReturnType<typeof listProviders>;
@@ -73,6 +82,7 @@ export interface ApiRouteDependencies {
     abort(runId: string): Promise<void>;
     killNode(runId: string, nodeRunId: string): Promise<void>;
     retryStage(runId: string, stageId: string, req: RetryStageRequest): Promise<RunSnapshot>;
+    steer(runId: string, req: SteerRequest): Promise<RunSnapshot>;
     applyPatch(runId: string, nodeRunId: string): Promise<ApplyPatchResponse>;
   };
 }
@@ -92,15 +102,29 @@ const defaultDependencies: ApiRouteDependencies = {
     abort: runManager.abortRun,
     killNode: runManager.killNode,
     retryStage: runManager.retryStage,
+    steer: runManager.steerRun,
     applyPatch: runManager.applyPatch,
   },
 };
 
 export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiRouteDependencies = defaultDependencies): Promise<void> {
-  app.setErrorHandler((error, _request, reply) => sendError(reply, error));
+  let acceptedClientLogs = 0;
+  app.setErrorHandler((error, request, reply) => sendError(reply, error, request));
 
   app.get('/api/health', wrap(async () => ({ ok: true, version: VERSION })));
   app.get('/api/providers', wrap(async () => dependencies.providers()));
+  app.post('/api/client-log', wrap(async (request, reply) => {
+    const body = ClientLogSchema.parse(request.body);
+    if (acceptedClientLogs < 200) {
+      acceptedClientLogs += 1;
+      diag(null, 'client', body);
+    }
+    return reply.code(204).send();
+  }));
+  app.get('/api/debug/server-log', wrap(async (_request, reply) => {
+    const path = serverDiagPath();
+    return reply.type('text/plain; charset=utf-8').send(existsSync(path) ? readTail(path) : Buffer.alloc(0));
+  }));
 
   app.get('/api/workspaces', wrap(async () => dependencies.workspaces.list()));
   app.post('/api/workspaces', wrap(async (request) => {
@@ -171,6 +195,16 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
     const events = await dependencies.runs.events(run.runId, 0, Number.MAX_SAFE_INTEGER);
     return reply.type('text/markdown; charset=utf-8').send(dependencies.report(run, workspace, events));
   }));
+  app.get('/api/runs/:id/debug-bundle', wrap(async (request, reply) => {
+    const run = await dependencies.runs.get(parseId(request));
+    const workspace = await dependencies.workspaces.get(run.workspaceId);
+    const events = await dependencies.runs.events(run.runId, 0, Number.MAX_SAFE_INTEGER);
+    const zip = buildDebugBundle(run, workspace, events);
+    return reply
+      .header('content-disposition', `attachment; filename="mat-debug-${run.runId}.zip"`)
+      .type('application/zip')
+      .send(zip.outputStream);
+  }));
   app.get('/api/runs/:id/patches/:nodeRunId', wrap(async (request, reply) => {
     const { id, nodeRunId } = NodeParamsSchema.parse(request.params);
     const patch = await dependencies.runs.patch(id, nodeRunId);
@@ -195,6 +229,12 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
     const run = await dependencies.runs.get(id);
     validateRetryStage(run, stageId);
     return dependencies.runs.retryStage(id, stageId, body);
+  }));
+  app.post('/api/runs/:id/steer', wrap(async (request) => {
+    const id = parseId(request);
+    await dependencies.runs.get(id);
+    const body = SteerRequestSchema.parse(request.body) as SteerRequest;
+    return dependencies.runs.steer(id, body);
   }));
   app.post('/api/runs/:id/nodes/:nodeRunId/apply-patch', wrap(async (request) => {
     const { id, nodeRunId } = NodeParamsSchema.parse(request.params);
@@ -263,27 +303,33 @@ function wrap(
 ): (request: FastifyRequest, reply: FastifyReply) => Promise<unknown> {
   return async (request, reply) => {
     try { return await handler(request, reply); }
-    catch (error) { return sendError(reply, error); }
+    catch (error) { return sendError(reply, error, request); }
   };
 }
 
-function sendError(reply: FastifyReply, error: unknown): FastifyReply {
+function sendError(reply: FastifyReply, error: unknown, request?: FastifyRequest): FastifyReply {
+  const send = (status: number, body: object): FastifyReply => {
+    diag(null, 'api-error', {
+      method: request?.method ?? 'unknown', url: request?.url ?? 'unknown', status, message: messageOf(error),
+    });
+    return reply.code(status).send(body);
+  };
   if (error instanceof z.ZodError) {
     const issue = error.issues[0];
     const location = issue?.path.length ? `${issue.path.join('.')}: ` : '';
-    return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: `${location}${issue?.message ?? 'Invalid request'}` } });
+    return send(400, { error: { code: 'VALIDATION_ERROR', message: `${location}${issue?.message ?? 'Invalid request'}` } });
   }
   const candidate = error as { statusCode?: unknown; code?: unknown; message?: unknown };
-  if (candidate.code === 'NOT_FOUND') return reply.code(404).send(errorBody('NOT_FOUND', messageOf(error)));
-  if (candidate.code === 'CONFLICT') return reply.code(409).send(errorBody('CONFLICT', messageOf(error)));
+  if (candidate.code === 'NOT_FOUND') return send(404, errorBody('NOT_FOUND', messageOf(error)));
+  if (candidate.code === 'CONFLICT') return send(409, errorBody('CONFLICT', messageOf(error)));
   if (candidate.code === 'INVALID_PATH' || candidate.code === 'INVALID_DATA') {
-    return reply.code(400).send(errorBody(String(candidate.code), messageOf(error)));
+    return send(400, errorBody(String(candidate.code), messageOf(error)));
   }
   if (typeof candidate.statusCode === 'number' && candidate.statusCode >= 400 && candidate.statusCode < 500) {
-    return reply.code(candidate.statusCode).send(errorBody(typeof candidate.code === 'string' ? candidate.code : 'BAD_REQUEST', messageOf(error)));
+    return send(candidate.statusCode, errorBody(typeof candidate.code === 'string' ? candidate.code : 'BAD_REQUEST', messageOf(error)));
   }
   reply.log.error(error);
-  return reply.code(500).send(errorBody('INTERNAL_ERROR', 'Internal server error'));
+  return send(500, errorBody('INTERNAL_ERROR', 'Internal server error'));
 }
 
 function errorBody(code: string, message: string): { error: { code: string; message: string } } {

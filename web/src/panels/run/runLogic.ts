@@ -1,4 +1,4 @@
-import type { AgentEvent, GateDecision, NodeRun, RunSnapshot } from '@mat/shared';
+import type { AgentEvent, GateDecision, NodeRun, RunSnapshot, SteerMessage } from '@mat/shared';
 
 export type NodeDisplayStatus = NodeRun['status'] | 'thinking';
 
@@ -71,4 +71,18 @@ export function verificationSummary(nodes: readonly NodeRun[]): { passed: number
     else if (node.verification?.status === 'skipped' && node.verification.reason !== 'no-verify-command') skipped += 1;
   }
   return { passed, failed, skipped };
+}
+
+export interface SteerGroup { steer: SteerMessage; nodes: NodeRun[]; decisions: GateDecision[] }
+
+export function steerGroups(run: RunSnapshot): SteerGroup[] {
+  return (run.steers ?? []).map((steer) => ({
+    steer,
+    nodes: steer.steerStageId ? run.nodes.filter((node) => node.stageId === steer.steerStageId) : [],
+    decisions: steer.steerStageId ? run.gateDecisions.filter((decision) => decision.stageId === steer.steerStageId).sort((a, b) => a.gateAttempt - b.gateAttempt) : [],
+  }));
+}
+
+export function canComposeSteer(run: RunSnapshot): boolean {
+  return !['done', 'failed', 'aborted'].includes(run.status) && (run.steers?.length ?? 0) < 8;
 }

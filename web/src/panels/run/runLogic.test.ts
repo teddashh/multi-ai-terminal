@@ -1,6 +1,6 @@
 import type { AgentEvent, GateDecision, NodeRun, RunSnapshot } from '@mat/shared';
 import { describe, expect, it } from 'vitest';
-import { canRetryStage, decisionDisplay, formatElapsed, nodeDisplayStatus, verificationSummary } from './runLogic.js';
+import { canComposeSteer, canRetryStage, decisionDisplay, formatElapsed, nodeDisplayStatus, steerGroups, verificationSummary } from './runLogic.js';
 
 const node: NodeRun = {
   nodeRunId: 's1.r1.0', stageId: 's1', slotId: 'r1', instanceIndex: 0,
@@ -58,5 +58,17 @@ describe('run panel logic', () => {
       { ...node, nodeRunId: 'unconfigured', verification: { status: 'skipped', reason: 'no-verify-command' } },
       { ...node, nodeRunId: 'absent' },
     ])).toEqual({ passed: 1, failed: 2, skipped: 1 });
+  });
+
+  it('derives steer groups and composer enablement without changing store selectors', () => {
+    const steered = run({
+      steers: [{ steerId: 's_1', text: 'adjust', mode: 'interrupt', status: 'reviewed', createdAt: 2, steerStageId: 'steer-1' }],
+      nodes: [...run().nodes, { ...node, nodeRunId: 'steer-1.agent.0', stageId: 'steer-1', slotId: 'agent' }],
+      gateDecisions: [{ ...decision, stageId: 'steer-1' }],
+    });
+    expect(steerGroups(steered)).toEqual([expect.objectContaining({ nodes: [expect.objectContaining({ nodeRunId: 'steer-1.agent.0' })], decisions: [expect.objectContaining({ stageId: 'steer-1' })] })]);
+    expect(canComposeSteer(steered)).toBe(true);
+    expect(canComposeSteer({ ...steered, status: 'done' })).toBe(false);
+    expect(canComposeSteer({ ...steered, steers: Array.from({ length: 8 }, (_, index) => ({ steerId: `s_${index}`, text: 'x', mode: 'queue' as const, status: 'pending' as const, createdAt: index })) })).toBe(false);
   });
 });

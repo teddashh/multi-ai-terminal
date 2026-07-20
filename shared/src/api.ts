@@ -18,6 +18,7 @@ export interface RunCreateRequest {
   workflowOverride?: WorkflowDef;
 }
 export interface RetryStageRequest { promptAddendum?: string }
+export interface SteerRequest { text: string; mode?: 'interrupt'|'queue' }
 export interface ApplyPatchResponse { ok: boolean; conflicts?: string[]; message: string }
 export type WsClientMsg = { type:'sub'|'unsub'; runId: string };
 export type WsServerMsg =
@@ -36,6 +37,7 @@ export const RunCreateRequestSchema = z.object({
   workspaceId: z.string().min(1), workflowId: z.string().min(1), task: z.string().min(1), workflowOverride: WorkflowDefSchema.optional(),
 }).strict();
 export const RetryStageRequestSchema = z.object({ promptAddendum: z.string().optional() }).strict();
+export const SteerRequestSchema = z.object({ text: z.string().min(1).max(4000), mode: z.enum(['interrupt', 'queue']).default('interrupt') }).strict();
 export const ApplyPatchResponseSchema = z.object({ ok: z.boolean(), conflicts: z.array(z.string()).optional(), message: z.string() }).strict();
 export const WsClientMsgSchema = z.object({ type: z.enum(['sub', 'unsub']), runId: z.string().min(1) }).strict();
 export const WsServerMsgSchema = z.discriminatedUnion('type', [

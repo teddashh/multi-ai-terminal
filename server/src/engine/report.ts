@@ -60,7 +60,7 @@ export function buildRunReport(run: RunSnapshot, workspace: Workspace, events: A
   const degradedStages = [...new Set(run.gateDecisions.filter((decision) => decision.action === 'advance' && decision.degraded).map((decision) => run.workflow.stages.find((stage) => stage.id === decision.stageId)?.name ?? decision.stageId))];
   lines.push('', '## Outcome', '');
   const progression = run.status === 'done' ? 'advanced' : run.status;
-  lines.push(`${generated} candidates generated · ${passed} verified · ${failedChecks} failed checks · ${progression}${degradedStages.length ? ` (degraded at stage ${degradedStages.join(', ')})` : ''}`);
+  lines.push(`${generated} candidates generated · ${passed} verified · ${failedChecks} failed checks · ${progression}${degradedStages.length ? ` (degraded at stage ${degradedStages.join(', ')})` : ''}${run.steers?.length ? ` · ${run.steers.length} steers` : ''}`);
 
   lines.push('', '## Stages', '');
   for (const stage of run.workflow.stages) {
@@ -80,11 +80,33 @@ export function buildRunReport(run: RunSnapshot, workspace: Workspace, events: A
     lines.push('');
   }
 
+  if (run.steers?.length) {
+    lines.push('## Steering', '');
+    for (const steer of run.steers) {
+      const decision = steer.steerStageId ? run.gateDecisions.find((candidate) => candidate.stageId === steer.steerStageId) : undefined;
+      lines.push(`### ${steer.steerStageId ?? steer.steerId}`, '');
+      lines.push(`- Mode: ${steer.mode}`);
+      lines.push(`- Status: ${steer.status}`);
+      lines.push(`- Created: ${iso(steer.createdAt)}`);
+      lines.push(`- Applied: ${iso(steer.appliedAt)}`);
+      lines.push(`- Interrupted: ${steer.interruptedStageId ?? 'stage boundary'}`);
+      lines.push(`- Instruction: ${truncate(steer.text, 300)}`);
+      if (decision) lines.push(`- Review: ${decision.action}${decision.degraded ? ' (degraded)' : ''} — ${decision.rationale}`);
+      for (const node of run.nodes.filter((candidate) => candidate.stageId === steer.steerStageId)) {
+        const model = node.agent.model ? `/${node.agent.model}` : '';
+        lines.push(`- **${node.label}** — ${node.agent.provider}${model}; status ${node.status}; attempts ${node.attempt}; diffstat ${patchStat(node.patchFile)}; verification ${verificationLabel(node)}`);
+      }
+      lines.push('');
+    }
+  }
+
   lines.push('## Gate decisions', '');
   const decisions = [...run.gateDecisions].sort((left, right) => left.ts - right.ts || left.gateAttempt - right.gateAttempt);
   if (decisions.length === 0) lines.push('No gate decisions recorded.', '');
   for (const decision of decisions) {
-    const stage = run.workflow.stages.find((candidate) => candidate.id === decision.stageId)?.name ?? decision.stageId;
+    const stage = run.workflow.stages.find((candidate) => candidate.id === decision.stageId)?.name
+      ?? run.steers?.find((steer) => steer.steerStageId === decision.stageId)?.steerStageId
+      ?? decision.stageId;
     lines.push(`- **${stage}** — ${decision.action}${decision.degraded ? ' (degraded)' : ''}: ${decision.rationale}`);
     if (decision.contextForNext) lines.push(`  > ${truncate(decision.contextForNext, 600).replaceAll('\n', '\n  > ')}`);
   }

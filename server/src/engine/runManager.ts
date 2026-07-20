@@ -9,6 +9,8 @@ import {
   type RetryStageRequest,
   type RunCreateRequest,
   type RunSnapshot,
+  type SteerMessage,
+  type SteerRequest,
   type WorkflowDef,
 } from '@mat/shared';
 import { appendEvent, readEventsAfter } from '../store/eventLog.js';
@@ -17,9 +19,11 @@ import { listWorkflows } from '../store/workflows.js';
 import { getWorkspace } from '../store/workspaces.js';
 import { execFile } from '../execFile.js';
 import { terminateProcessGroup } from '../spawn.js';
+import { diag } from '../diag.js';
 import { EngineConflictError, EngineNotFoundError } from './errors.js';
 import { killActiveNode, killAllActiveNodes, markNodeKilled, resetNodeForRetry } from './nodeRunner.js';
-import { persistRun, queueStageRetryAddendum, requestActiveStageRetry, runStage } from './stageRunner.js';
+import { clearSteerInterrupt, persistRun, queueStageRetryAddendum, requestActiveStageRetry, requestSteerInterrupt, runStage } from './stageRunner.js';
+import { expireSteers, runSteerCycle, type SteerOutcome } from './steer.js';
 import { isGitRepository, pruneWorktrees, runDirectory } from './worktree.js';
 
 const activeRuns = new Map<string, RunSnapshot>();
@@ -27,6 +31,7 @@ const executions = new Map<string, Promise<void>>();
 const runMutationTails = new Map<string, Promise<void>>();
 const workspaceApplyTails = new Map<string, Promise<void>>();
 const TERMINAL_RUN_STATUSES = new Set(['done', 'failed', 'aborted']);
+const executionStopped = (run: RunSnapshot): boolean => run.status === 'aborted' || run.status === 'failed';
 
 async function withMutex<T>(tails: Map<string, Promise<void>>, key: string, operation: () => Promise<T>): Promise<T> {
   const prior = tails.get(key) ?? Promise.resolve();
@@ -63,6 +68,7 @@ function validateWorkflowIdentity(workflow: WorkflowDef): void {
   const nodeIds = new Set<string>();
   for (const stage of workflow.stages) {
     if (stages.has(stage.id)) throw new Error(`Duplicate stage id: ${stage.id}`);
+    if (stage.id.startsWith('steer-')) throw new Error(`Stage id ${stage.id} is reserved for steering`);
     stages.add(stage.id);
     const slots = new Set<string>();
     for (const slot of stage.slots) {
@@ -123,13 +129,29 @@ async function resolvedWorkflow(req: RunCreateRequest): Promise<WorkflowDef> {
 async function executeRun(run: RunSnapshot, startIndex = 0): Promise<void> {
   activeRuns.set(run.runId, run);
   try {
-    for (let index = startIndex; index < run.workflow.stages.length; index += 1) {
-      if (run.status === 'aborted' || run.status === 'failed') return;
+    let lastStageId: string | undefined;
+    for (let index = startIndex; index < run.workflow.stages.length;) {
+      if (executionStopped(run)) return;
       const stage = run.workflow.stages[index];
       if (!stage) break;
       await runStage(run, stage);
+      lastStageId = stage.id;
+      if (executionStopped(run)) return;
+      let outcome: SteerOutcome | undefined;
+      for (;;) {
+        const steer = (run.steers ?? []).find((candidate) => candidate.status === 'pending');
+        if (!steer) break;
+        outcome = await runSteerCycle(run, steer, stage);
+        if (outcome === 'abort') return;
+        if (outcome === 'redo') break;
+      }
+      if (outcome === 'redo') continue;
+      index += 1;
     }
     if (run.status !== 'aborted' && run.status !== 'failed') {
+      // A trailing steer leaves currentStageId on its synthetic stage; terminal
+      // stage retry resolves against the last real workflow stage.
+      if (lastStageId !== undefined && run.currentStageId?.startsWith('steer-')) run.currentStageId = lastStageId;
       run.status = 'done';
       run.endedAt = Date.now();
       systemEvent(run, 'status', 'Run completed.', { status: 'done' });
@@ -140,10 +162,16 @@ async function executeRun(run: RunSnapshot, startIndex = 0): Promise<void> {
     run.status = 'failed';
     run.endedAt = Date.now();
     const detail = error instanceof Error ? error.message : String(error);
+    diag(run.runId, 'error', { message: detail, ...(error instanceof Error && error.stack ? { stack: error.stack } : {}) });
     systemEvent(run, 'error', `Run failed: ${detail}`);
     await persistRun(run);
   } finally {
-    if (activeRuns.get(run.runId) === run) activeRuns.delete(run.runId);
+    try {
+      if (TERMINAL_RUN_STATUSES.has(run.status)) await expireSteers(run);
+    } finally {
+      clearSteerInterrupt(run.runId);
+      if (activeRuns.get(run.runId) === run) activeRuns.delete(run.runId);
+    }
   }
 }
 
@@ -173,6 +201,7 @@ export async function createRun(req: RunCreateRequest, providerVersions?: Record
   };
   return withRunMutation(run.runId, async () => {
     await saveRun(run);
+    diag(run.runId, 'run', { action: 'create', status: run.status, workspaceId: run.workspaceId });
     activeRuns.set(run.runId, run);
     startExecution(run);
     return structuredClone(run);
@@ -190,9 +219,34 @@ export async function abortRun(runId: string): Promise<void> {
     }
     killAllActiveNodes(runId, 'abort');
     systemEvent(run, 'status', 'Run aborted by user.', { status: 'aborted' });
+    diag(run.runId, 'run', { action: 'abort', status: run.status });
     await persistRun(run);
     const execution = executions.get(runId);
     if (execution) await execution.catch(() => undefined);
+  });
+}
+
+export async function steerRun(runId: string, req: SteerRequest): Promise<RunSnapshot> {
+  return withRunMutation(runId, async () => {
+    const run = activeRuns.get(runId) ?? await getRun(runId);
+    if (TERMINAL_RUN_STATUSES.has(run.status)) throw new EngineConflictError(`Run ${runId} is terminal`);
+    if ((run.steers ?? []).length >= 8) throw new EngineConflictError('A run accepts at most 8 steer messages');
+    const steer: SteerMessage = {
+      steerId: `s_${nanoid()}`, text: req.text, mode: req.mode ?? 'interrupt', status: 'pending', createdAt: Date.now(),
+    };
+    (run.steers ??= []).push(steer);
+    appendEvent(run.runId, {
+      runId: run.runId, stageId: null, nodeRunId: null, attempt: 0, role: 'user', kind: 'message', text: steer.text,
+      data: { detail: 'steer', steerId: steer.steerId, mode: steer.mode },
+    });
+    diag(run.runId, 'steer', { steerId: steer.steerId, transition: 'pending', mode: steer.mode });
+    if (steer.mode === 'interrupt' && run.status === 'running') {
+      requestSteerInterrupt(runId);
+      const killed = killAllActiveNodes(runId, 'steer');
+      if (killed > 0) steer.interruptedStageId = run.currentStageId ?? null;
+    }
+    await persistRun(run);
+    return structuredClone(run);
   });
 }
 
@@ -256,6 +310,7 @@ export async function retryStage(runId: string, stageId: string, req: RetryStage
     run.status = 'running';
     delete run.endedAt;
     await saveRun(run);
+    diag(run.runId, 'run', { action: 'retry', stageId, status: run.status });
     startExecution(run, stageIndex);
     return structuredClone(run);
   });
@@ -337,6 +392,13 @@ export async function sweepOnBoot(): Promise<void> {
     if (!(tail?.kind === 'status' && tail.data?.detail === 'server-restart' && tail.runId === run.runId)) {
       systemEvent(run, 'status', 'Run aborted during server restart recovery.', { status: 'aborted', detail: 'server-restart' });
     }
+    for (const steer of run.steers ?? []) {
+      if (steer.status !== 'pending' && steer.status !== 'active') continue;
+      steer.status = 'expired';
+      systemEvent(run, 'status', `Steer ${steer.steerId} expired during server restart recovery.`, { detail: 'steer-expired', steerId: steer.steerId });
+      diag(run.runId, 'steer', { steerId: steer.steerId, transition: 'expired', mode: steer.mode, ...(steer.interruptedStageId !== undefined ? { interruptedStageId: steer.interruptedStageId } : {}) });
+    }
+    diag(run.runId, 'run', { action: 'boot-sweep', status: run.status });
     await saveRun(run);
   }
 }

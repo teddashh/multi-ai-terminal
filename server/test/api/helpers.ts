@@ -137,6 +137,7 @@ export function fakeApiDependencies(run = runSnapshot()): ApiRouteDependencies {
         currentRun = { ...currentRun, nodes: currentRun.nodes.map((node) => node.nodeRunId === nodeRunId ? { ...node, status: 'killed' } : node) };
       },
       retryStage: async (_runId, stageId) => ({ ...currentRun, status: 'running', currentStageId: stageId }),
+      steer: async (_runId, request) => ({ ...currentRun, steers: [{ steerId: 's_test', text: request.text, mode: request.mode ?? 'interrupt', status: 'pending', createdAt: Date.now() }] }),
       applyPatch: async () => ({ ok: true, message: 'Applied' }),
     },
   };

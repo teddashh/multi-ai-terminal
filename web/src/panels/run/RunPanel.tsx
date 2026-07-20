@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { apiClient } from '../../api/client.js';
 import { useMatStore } from '../../app/store.js';
 import { AgentChip, Collapsible, ModalDialog, PROVIDER_COLORS, mergeConsecutiveEvents } from '../../components/index.js';
-import { canRetryStage, decisionDisplay, elapsedForNode, formatElapsed, nodeDisplayStatus, verificationSummary, type NodeDisplayStatus } from './runLogic.js';
+import { canComposeSteer, canRetryStage, decisionDisplay, elapsedForNode, formatElapsed, nodeDisplayStatus, steerGroups, verificationSummary, type NodeDisplayStatus } from './runLogic.js';
 
 const STATUS_STYLE: Record<NodeDisplayStatus, string> = {
   queued: 'bg-zinc-700 text-zinc-200',
@@ -41,6 +41,10 @@ export function RunPanel() {
   const [patchDialog, setPatchDialog] = useState<PatchDialogState>();
   const [actionError, setActionError] = useState<string>();
   const [report, setReport] = useState<{ loading: boolean; content?: string; error?: string }>();
+  const [steerText, setSteerText] = useState('');
+  const [steerMode, setSteerMode] = useState<'interrupt'|'queue'>('interrupt');
+  const [steering, setSteering] = useState(false);
+  const [debugging, setDebugging] = useState(false);
 
   useEffect(() => {
     if (!run?.nodes.some((node) => node.startedAt !== undefined && node.endedAt === undefined)) return;
@@ -62,6 +66,7 @@ export function RunPanel() {
     }
     return result;
   }, [events, run]);
+  const steerGroupList = useMemo(() => run ? steerGroups(run) : [], [run]);
 
   if (!run) return <section className="h-full overflow-auto p-3" aria-label="Run panel">
     <PanelHeading />
@@ -71,6 +76,7 @@ export function RunPanel() {
   </section>;
 
   const orchestrator = run.nodes.find((node) => node.nodeRunId === 'orchestrator');
+  const nonTerminal = !['done', 'failed', 'aborted'].includes(run.status);
   const doKill = async (nodeRunId: string) => {
     setActionError(undefined);
     try { upsertRun(await apiClient.killNode(run.runId, nodeRunId)); setKillConfirmation(undefined); }
@@ -111,6 +117,23 @@ export function RunPanel() {
     const url = URL.createObjectURL(new Blob([report.content], { type: 'text/markdown;charset=utf-8' }));
     const link = document.createElement('a'); link.href = url; link.download = `mat-run-${run.runId}.md`; link.click(); URL.revokeObjectURL(url);
   };
+  const submitSteer = async () => {
+    const text = steerText.trim();
+    if (!text || !canComposeSteer(run)) return;
+    setSteering(true); setActionError(undefined);
+    try { upsertRun(await apiClient.steerRun(run.runId, { text, mode: steerMode })); setSteerText(''); }
+    catch (error) { setActionError(errorMessage(error)); }
+    finally { setSteering(false); }
+  };
+  const downloadDebug = async () => {
+    setDebugging(true); setActionError(undefined);
+    try {
+      const blob = await apiClient.getDebugBundle(run.runId);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a'); link.href = url; link.download = `mat-debug-${run.runId}.zip`; link.click(); URL.revokeObjectURL(url);
+    } catch (error) { setActionError(errorMessage(error)); }
+    finally { setDebugging(false); }
+  };
 
   const card = (node: NodeRun) => <NodeCard
     key={node.nodeRunId}
@@ -127,8 +150,16 @@ export function RunPanel() {
   />;
 
   return <section className="h-full overflow-auto p-3" aria-label="Run panel">
-    <PanelHeading onReport={openReport} />
+    <PanelHeading onReport={openReport} onDebug={() => void downloadDebug()} debugging={debugging} />
     <p className="mb-3 line-clamp-3 text-sm text-ink" title={run.task}>{run.task}</p>
+    {nonTerminal && <form className="mb-3 space-y-1.5" onSubmit={(event) => { event.preventDefault(); void submitSteer(); }}>
+      <input type="text" maxLength={4000} disabled={!canComposeSteer(run)} value={steerText} onChange={(event) => setSteerText(event.target.value)} placeholder="Steer this run — new instruction (breaks current work, reviews it after)" aria-label="Steer instruction" className="w-full rounded border border-border bg-zinc-950 px-2 py-1.5 text-xs text-ink outline-none focus:border-violet-500 disabled:opacity-50" />
+      <div className="flex items-center gap-1.5">
+        <button type="button" aria-pressed={steerMode === 'interrupt'} onClick={() => setSteerMode('interrupt')} className={`rounded border px-2 py-1 text-[10px] ${steerMode === 'interrupt' ? 'border-violet-600 text-violet-200' : 'border-border text-muted'}`}>interrupt</button>
+        <button type="button" aria-pressed={steerMode === 'queue'} onClick={() => setSteerMode('queue')} className={`rounded border px-2 py-1 text-[10px] ${steerMode === 'queue' ? 'border-violet-600 text-violet-200' : 'border-border text-muted'}`}>queue</button>
+        <button type="submit" disabled={steering || !steerText.trim() || !canComposeSteer(run)} className="ml-auto rounded bg-violet-700 px-2.5 py-1 text-[11px] text-white hover:bg-violet-600 disabled:opacity-40">{steering ? 'Sending…' : 'Send'}</button>
+      </div>
+    </form>}
     {actionError && <p role="alert" className="mb-3 rounded border border-red-900 bg-red-950/40 p-2 text-xs text-red-200">{actionError}</p>}
     {orchestrator && <div className="mb-4" data-testid="orchestrator-group">
       <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-violet-300">Orchestrator</div>
@@ -147,6 +178,14 @@ export function RunPanel() {
           {decisions.map((decision) => <DecisionCard key={`${decision.stageId}-${decision.gateAttempt}`} decision={decision} run={run} />)}
         </section>;
       })}
+      {steerGroupList.map(({ steer, nodes, decisions }) => <section key={steer.steerId} aria-labelledby={`steer-${steer.steerId}`} data-testid="steer-group">
+        <header className="mb-2">
+          <div className="flex min-w-0 items-center gap-1.5"><h3 id={`steer-${steer.steerId}`} className="shrink-0 text-xs font-semibold text-violet-200">{steer.steerStageId ? `Steer ${steer.steerStageId.split('-').at(-1)}` : 'Steer'}</h3><span className="rounded bg-violet-950 px-1.5 py-0.5 text-[10px] text-violet-200">{steer.mode}</span><span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-300">{steer.status}</span></div>
+          <p className="mt-1 truncate text-[11px] text-muted" title={steer.text}>{steer.text}</p>
+        </header>
+        <div className="grid gap-2">{nodes.map(card)}</div>
+        {decisions.map((decision) => <DecisionCard key={`${decision.stageId}-${decision.gateAttempt}`} decision={decision} run={run} />)}
+      </section>)}
     </div>
     <ModalDialog open={patchDialog !== undefined} title={patchDialog ? `Patch · ${patchDialog.node.label}` : 'Patch'} onClose={() => setPatchDialog(undefined)} footer={patchDialog && !patchDialog.loading && !patchDialog.error ? <button type="button" disabled={patchDialog.applying} onClick={() => void applyPatch()} className="rounded bg-emerald-700 px-3 py-1.5 text-sm text-white hover:bg-emerald-600 disabled:opacity-50">{patchDialog.applying ? 'Applying…' : 'Apply patch'}</button> : undefined}>
       {patchDialog?.loading && <p className="animate-pulse text-sm text-muted">Loading patch…</p>}
@@ -165,8 +204,8 @@ export function RunPanel() {
   </section>;
 }
 
-function PanelHeading({ onReport }: { onReport?: () => void }) {
-  return <div className="mb-3 flex items-center justify-between"><h2 className="text-xs font-semibold uppercase tracking-wider text-muted">Run</h2>{onReport && <button type="button" onClick={onReport} className="rounded-none border border-zinc-700 px-2 py-1 text-[11px] text-zinc-200 hover:border-emerald-600 hover:text-emerald-200">Report</button>}</div>;
+function PanelHeading({ onReport, onDebug, debugging }: { onReport?: () => void; onDebug?: () => void; debugging?: boolean }) {
+  return <div className="mb-3 flex items-center justify-between"><h2 className="text-xs font-semibold uppercase tracking-wider text-muted">Run</h2><div className="flex gap-1.5">{onReport && <button type="button" onClick={onReport} className="rounded-none border border-zinc-700 px-2 py-1 text-[11px] text-zinc-200 hover:border-emerald-600 hover:text-emerald-200">Report</button>}{onDebug && <button type="button" disabled={debugging} onClick={onDebug} className="rounded-none border border-zinc-700 px-2 py-1 text-[11px] text-zinc-200 hover:border-violet-600 hover:text-violet-200 disabled:opacity-50">{debugging ? 'Debug…' : 'Debug'}</button>}</div></div>;
 }
 
 interface NodeCardProps {
@@ -235,7 +274,7 @@ export function DecisionCard({ decision, run }: { decision: GateDecision; run: R
   const labels = new Map(run.nodes.map((node) => [node.nodeRunId, node.label]));
   const summary = verificationSummary(run.nodes.filter((node) => node.stageId === decision.stageId));
   return <article className={`mt-2 rounded-md border bg-emerald-950/20 p-2.5 ${display.borderClass}`} data-degraded={display.degraded ? 'true' : 'false'}>
-    <header className="mb-1 flex items-center justify-between gap-2"><span className={`text-xs font-semibold uppercase ${display.actionClass}`}>{display.label}</span><span className="text-[10px] text-muted">gate {decision.gateAttempt}</span></header>
+    <header className="mb-1 flex items-center justify-between gap-2"><span className={`text-xs font-semibold uppercase ${display.actionClass}`}>{display.label}</span><span className="text-[10px] text-muted">{run.steers?.some((steer) => steer.steerStageId === decision.stageId) ? 'steer review' : `gate ${decision.gateAttempt}`}</span></header>
     {summary.passed + summary.failed + summary.skipped > 0 && <span className="mb-1 inline-flex rounded-none border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-300">{summary.passed} passed / {summary.failed} failed / {summary.skipped} skipped</span>}
     <p className="text-xs leading-relaxed text-emerald-50/90">{decision.rationale}</p>
     {decision.retryNodeRunIds && decision.retryNodeRunIds.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{decision.retryNodeRunIds.map((id) => <span key={id} className="rounded bg-amber-950 px-1.5 py-0.5 text-[10px] text-amber-200">retry: {labels.get(id) ?? id}</span>)}</div>}

@@ -8,6 +8,7 @@ import { humanizeError } from '../adapters/base.js';
 import { appendEvent } from '../store/eventLog.js';
 import { runDirectory } from './worktree.js';
 import { recordToolUse, resetToolCount } from './digest.js';
+import { diag } from '../diag.js';
 
 export interface NodeExecutionContext {
   runId: string;
@@ -24,7 +25,7 @@ interface LiveNode {
   spawned: SpawnedNode;
   node: NodeRun;
   context: NodeExecutionContext;
-  killedReason?: 'user' | 'user-retry' | 'abort' | 'timeout' | 'gate-timeout';
+  killedReason?: 'user' | 'user-retry' | 'abort' | 'timeout' | 'gate-timeout' | 'steer';
   wasStalled?: boolean;
 }
 
@@ -269,6 +270,10 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
   else delete node.pid;
   lifecycle(node, context, 'status', 'spawned', { status: 'spawned', attempt: node.attempt });
   lifecycle(node, context, 'status', 'running', { status: 'running', attempt: node.attempt });
+  diag(context.runId, 'spawn', {
+    nodeRunId: node.nodeRunId, attempt: node.attempt, provider: node.agent.provider,
+    ...(node.agent.model ? { model: node.agent.model } : {}), cwd: node.cwd, pid: spawned.pid,
+  });
   armStall();
   hardTimer = setTimeout(() => {
     const current = liveNodes.get(key);
@@ -304,7 +309,7 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
   node.resultText = outcome.resultText ?? outcomeError ?? '';
   if (outcomeError !== undefined) node.error = outcomeError; else delete node.error;
 
-  if (killedReason === 'user' || killedReason === 'user-retry' || killedReason === 'abort' || killedReason === 'gate-timeout') {
+  if (killedReason === 'user' || killedReason === 'user-retry' || killedReason === 'abort' || killedReason === 'gate-timeout' || killedReason === 'steer') {
     node.status = 'killed';
     emitKilledLifecycle(node, context, killedReason);
     if (liveState?.wasStalled) {
@@ -332,6 +337,10 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
     const detail = error instanceof Error ? error.message : String(error);
     lifecycle(node, context, 'error', `Artifact capture failed: ${detail}`);
   }
+  diag(context.runId, 'exit', {
+    nodeRunId: node.nodeRunId, attempt: node.attempt, status: node.status, exitCode: node.exitCode,
+    ...(killedReason ? { killedReason } : {}), durationMs: Math.max(0, (node.endedAt ?? Date.now()) - (node.startedAt ?? node.endedAt ?? Date.now())),
+  });
   await persistSafely(node, context);
 }
 
