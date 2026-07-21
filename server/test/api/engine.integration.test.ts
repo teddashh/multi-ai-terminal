@@ -54,6 +54,7 @@ function initRepo(path: string): void {
   execFileSync('git', ['init', '-q', path]);
   execFileSync('git', ['-C', path, 'config', 'user.email', 'mat@example.test']);
   execFileSync('git', ['-C', path, 'config', 'user.name', 'MAT Test']);
+  execFileSync('git', ['-C', path, 'config', 'core.autocrlf', 'false']);
   execFileSync('git', ['-C', path, 'commit', '--allow-empty', '-qm', 'base']);
 }
 
@@ -223,7 +224,7 @@ describe('API lifecycle with the real run manager', () => {
       } })).json() as RunSnapshot;
       const finished = await waitForRun(app, created.runId, terminal);
       const node = finished.nodes[0]!;
-      expect(finished.workspaceSnapshot).toEqual({ name: 'Repo', path: workspaceDir, isGit: true });
+      expect(finished.workspaceSnapshot).toEqual({ name: 'Repo', path: workspace.path, isGit: true });
       expect(node.patchFile?.startsWith(dataDir)).toBe(true);
       expect(existsSync(node.patchFile!)).toBe(true);
       expect(existsSync(node.cwd)).toBe(true);

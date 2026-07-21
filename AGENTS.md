@@ -21,5 +21,6 @@
 
 - Spawn/worktree tests: explicit `, 30_000` timeouts and deadline-based waits.
 - Injected path predicates: pure-POSIX fixture paths + fake fs (never `join()` against template-string paths).
+- Compare workspace paths to the canonical store/API value; fixture repos that assert patch bytes set local `core.autocrlf=false`.
 - `rmSync` with `maxRetries: 10, retryDelay: 100`.
 - Keep the cross-spawn bypass in `server/src/spawn.ts` (`options.shell ? spawnChild : crossSpawn`).

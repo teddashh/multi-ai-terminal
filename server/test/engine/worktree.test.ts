@@ -31,6 +31,7 @@ describe('worktree lifecycle', () => {
     }
     execFileSync('git', ['-C', repo, 'config', 'user.email', 'mat@example.test']);
     execFileSync('git', ['-C', repo, 'config', 'user.name', 'MAT Test']);
+    execFileSync('git', ['-C', repo, 'config', 'core.autocrlf', 'false']);
     writeFileSync(join(repo, 'base.txt'), 'base\n');
     execFileSync('git', ['-C', repo, 'add', '.']);
     execFileSync('git', ['-C', repo, 'commit', '-m', 'base']);

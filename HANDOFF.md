@@ -86,6 +86,8 @@ Dev-box quirks: prefix `git push`/`gh` with `env -u LD_LIBRARY_PATH`; `gh run vi
 
 - New tests that spawn processes or cycle worktrees need explicit timeouts (`, 30_000`) and deadline-based waits — vitest's 5 s default fails only on Windows CI.
 - When injecting an `exists`/path predicate into tests, use **pure-POSIX fixture paths** and fake fs — `join()` produces backslashes on Windows while production template strings produce forward slashes; string equality silently diverges (`existsSync` tolerates mixed separators, hiding it locally).
+- Compare workspace paths against the canonical path returned by the store/API, not the raw `mkdtemp` string — Windows can create the fixture through an 8.3 path such as `RUNNER~1` and resolve it back to the long user name.
+- Fixture repositories that assert patch/file bytes must set local `core.autocrlf=false` — otherwise the Windows runner can rewrite LF to CRLF during `git apply` even though the patch is correct.
 - Recursive removals: `rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })` — Windows holds file locks briefly.
 - `.cmd` shims need `shell: true` to spawn; that path must keep using raw `spawn` (not cross-spawn) or exit-1 becomes a fake ENOENT.
 - jsdom lies about rendering — the real-browser smoke (`smoke:browser`) exists because jsdom hid a total black screen for four releases. Never remove it from CI.
