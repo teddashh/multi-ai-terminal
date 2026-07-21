@@ -208,6 +208,7 @@ export class ContentCoalescer {
 
 const VERSION_SUCCESS_CACHE_TTL_MS = 10 * 60 * 1000;
 const VERSION_FAILURE_CACHE_TTL_MS = 2 * 1000;
+const VERSION_EXIT_FLUSH_MS = 500;
 const versionCache = new Map<string, { expiresAt: number; value: Promise<{ ok: boolean; version?: string; detail?: string }> }>();
 
 export function providerVersionProbeTimeoutMs(platform: NodeJS.Platform = process.platform): number {
@@ -236,9 +237,11 @@ export function probeVersion(command: string): Promise<{ ok: boolean; version?: 
     let settled = false;
     let stdout = '';
     let stderr = '';
+    let exitFlushTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (result: { ok: boolean; version?: string; detail?: string }): void => {
       if (settled) return;
       settled = true;
+      if (exitFlushTimer) clearTimeout(exitFlushTimer);
       const safeResult = {
         ...result,
         ...(result.version !== undefined ? { version: redactEnvironmentValues(result.version) } : {}),
@@ -267,12 +270,26 @@ export function probeVersion(command: string): Promise<{ ok: boolean; version?: 
     const child: ChildProcess = managed.child;
     child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); });
     child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
-    child.once('error', (error) => finish({ ok: false, detail: humanizeError(error) }));
-    child.once('close', (code) => {
+    const settle = (code: number | null): void => {
       const output = (stdout.trim() || stderr.trim()).split(/\r?\n/, 1)[0]?.trim().slice(0, 120) ?? '';
       if (code === 0) finish({ ok: true, ...(output ? { version: output } : {}) });
       else finish({ ok: false, detail: output || `exit ${String(code)}` });
+    };
+    child.once('error', (error) => finish({ ok: false, detail: humanizeError(error) }));
+    child.once('exit', (code) => {
+      // 'close' additionally waits for every stdio pipe to drain, and a
+      // background descendant that inherited the CLI's stdout can hold the
+      // pipe long past exit — a healthy CLI then reads as a probe timeout.
+      // The version line has already arrived by exit; flush briefly, settle,
+      // and release our pipe ends.
+      exitFlushTimer = setTimeout(() => {
+        settle(code);
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+      }, VERSION_EXIT_FLUSH_MS);
+      exitFlushTimer.unref();
     });
+    child.once('close', (code) => settle(code));
   });
   // Keep an in-flight probe shared, then choose the cache lifetime from its
   // outcome. clearVersionCache() remains authoritative while it is running.

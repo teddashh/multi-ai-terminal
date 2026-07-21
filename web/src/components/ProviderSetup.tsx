@@ -2,6 +2,7 @@ import type { ProviderInfo } from '@mat/shared';
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { apiClient, type ApiClient } from '../api/client.js';
 import { matStore, useMatStore } from '../app/store.js';
+import { displayAuthAlertMessage, displayProviderDetail } from '../i18n/displayText.js';
 import { useUiPreferences } from '../i18n/UiPreferences.js';
 
 interface SetupNotice {
@@ -10,7 +11,7 @@ interface SetupNotice {
 }
 
 export function ProviderSetupButton({ provider, api = apiClient }: { provider: ProviderInfo; api?: ApiClient }) {
-  const { t } = useUiPreferences();
+  const { locale, t } = useUiPreferences();
   const setProviders = useMatStore((state) => state.setProviders);
   const [open, setOpen] = useState(false);
   const [installing, setInstalling] = useState(false);
@@ -109,8 +110,8 @@ export function ProviderSetupButton({ provider, api = apiClient }: { provider: P
     <button ref={triggerRef} type="button" onClick={() => setOpen((value) => !value)} onKeyDown={closeOnEscape} aria-label={t('provider.setupNamed', { provider: provider.id })} aria-haspopup="dialog" aria-controls={dialogId} aria-expanded={open} className="rounded border border-border px-2 py-1 text-[10px] text-accentForeground hover:border-accent">{t('provider.setup')}</button>
     {open && <div id={dialogId} role="dialog" aria-label={t('provider.setupNamed', { provider: provider.id })} onKeyDown={closeOnEscape} className="absolute right-0 top-full z-40 mt-2 w-72 rounded border border-accent bg-panel p-3 text-left shadow-2xl">
       <div className="flex items-center justify-between"><strong className="text-xs">{t('provider.setupNamed', { provider: provider.id })}</strong><button ref={closeRef} type="button" onClick={close} aria-label={t('provider.closeSetup', { provider: provider.id })} className="text-muted">×</button></div>
-      <p className="mt-2 text-xs text-muted">{provider.version ?? provider.detail ?? t('provider.notDetected')}</p>
-      {provider.authAlert && <p className="mt-2 whitespace-pre-line break-words text-xs text-amber-200">{provider.authAlert.message}</p>}
+      <p className="mt-2 text-xs text-muted">{provider.version ?? (provider.detail ? displayProviderDetail(provider.id, provider.detail, locale) : t('provider.notDetected'))}</p>
+      {provider.authAlert && <p className="mt-2 whitespace-pre-line break-words text-xs text-amber-200">{displayAuthAlertMessage(provider.authAlert.message, locale)}</p>}
       {provider.signInCommand && <div className="mt-3"><strong className="text-[11px] text-muted">{t('provider.signIn')}</strong><code className="mt-1 block select-all break-words rounded bg-canvas p-2 text-[11px] text-ink">{provider.signInCommand}</code><button type="button" aria-label={t('provider.copySignIn', { provider: provider.id })} onClick={() => void copy(provider.signInCommand!, 'sign-in')} className="mt-2 rounded border border-border px-2 py-1 text-xs">{copied === 'sign-in' ? t('provider.copied') : t('provider.copy')}</button></div>}
       {!provider.ok && <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" aria-label={t('provider.recheckNamed', { provider: provider.id })} disabled={installing || rechecking} onClick={() => void recheck()} className="rounded border border-accent px-2 py-1.5 text-xs text-accentForeground disabled:opacity-50">{rechecking ? t('provider.rechecking') : t('provider.retryDetection')}</button>

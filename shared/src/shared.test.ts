@@ -52,6 +52,8 @@ describe('shared schemas', () => {
     expect(node.errorReason).toBe('mock is not signed in.');
     expect(RunSnapshotSchema.parse({ runId: 'r', workspaceId: 'w', workflow: preset('pipeline'), task: 't', status: 'done', nodes: [node], gateDecisions: [], providerVersions: { mock: 'mock/0' }, createdAt: 1, endedAt: 2 }).providerVersions).toEqual({ mock: 'mock/0' });
     expect(WorkspaceSchema.parse({ id: 'w', name: 'W', path: '/tmp', isGit: true, verifyCommand: 'npm test', verifyTimeoutSec: 60 })).toMatchObject({ verifyCommand: 'npm test', verifyTimeoutSec: 60 });
+    expect(WorkspaceSchema.parse({ id: 'w', name: 'W', path: '/tmp', isGit: true, lastRun: { runId: 'r', workflowId: 'pipeline', workflowName: 'Pipeline: Implement → Test → Review', workflowBuiltin: true, status: 'done', at: 2 } }).lastRun)
+      .toMatchObject({ workflowId: 'pipeline', workflowBuiltin: true });
     expect(WorkspacePatchRequestSchema.parse({ verifyCommand: null, verifyTimeoutSec: null })).toEqual({ verifyCommand: null, verifyTimeoutSec: null });
     expect(StageSchema.parse({ id: 's', name: 'S', slots: [{ id: 'a', label: 'A', agent: { provider: 'mock', permission: 'safe' }, count: 1, promptTemplate: '' }] }).requireVerified).toBe(false);
   });

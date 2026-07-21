@@ -49,8 +49,12 @@ export function augmentedPathEnv(options: EnvironmentOptions = {}): NodeJS.Proce
     ? cachedPathAdditions
     : (platform === 'win32'
       ? [
+        environmentValue(env, 'LOCALAPPDATA')
+          ? win32.join(environmentValue(env, 'LOCALAPPDATA')!, 'Programs', 'OpenAI', 'Codex', 'bin')
+          : undefined,
         environmentValue(env, 'LOCALAPPDATA') ? win32.join(environmentValue(env, 'LOCALAPPDATA')!, 'Antigravity') : undefined,
         environmentValue(env, 'APPDATA') ? win32.join(environmentValue(env, 'APPDATA')!, 'npm') : undefined,
+        environmentValue(env, 'USERPROFILE') ? win32.join(environmentValue(env, 'USERPROFILE')!, '.local', 'bin') : undefined,
       ]
       : [`${options.homedir ?? homedir()}/.local/bin`, '/usr/local/bin', '/opt/homebrew/bin']).filter((addition): addition is string => addition !== undefined && exists(addition));
   if (cacheable && !cachedPathAdditions) cachedPathAdditions = [...additions];

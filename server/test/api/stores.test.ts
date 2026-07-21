@@ -96,6 +96,23 @@ describe.sequential('workflow store', () => {
 });
 
 describe.sequential('run store', () => {
+  it('persists additive workflow provenance in the workspace last-run summary', async () => {
+    const dataDir = temporaryDir('mat-run-provenance-');
+    const workspaceDir = temporaryDir('mat-run-provenance-repo-');
+    configureWorkspaceStore(dataDir);
+    configureRunStore(dataDir);
+    const workspace = await createWorkspace({ name: 'Repo', path: workspaceDir });
+    await saveRun(runSnapshot({
+      workspaceId: workspace.id,
+      workflow: workflow({ id: 'pipeline', name: 'Pipeline: Implement → Test → Review', builtin: true }),
+    }));
+    expect((await getWorkspace(workspace.id)).lastRun).toMatchObject({
+      workflowId: 'pipeline',
+      workflowName: 'Pipeline: Implement → Test → Review',
+      workflowBuiltin: true,
+    });
+  });
+
   it('atomically persists snapshots and lists newest-first with a createdAt cursor', async () => {
     const dataDir = temporaryDir('mat-runs-');
     configureWorkspaceStore(dataDir);

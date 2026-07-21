@@ -7,6 +7,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ApiClient } from '../api/client.js';
 import { matStore } from '../app/store.js';
+import { UiPreferencesProvider } from '../i18n/UiPreferences.js';
 import { ProviderSetupButton } from './ProviderSetup.js';
 import { SideDrawer } from './SideDrawer.js';
 
@@ -41,9 +42,22 @@ afterEach(() => {
     act(() => item.root.unmount());
     item.container.remove();
   }
+  localStorage.clear();
 });
 
 describe('ProviderSetupButton', () => {
+  it('shows the canonical missing-CLI guidance in Traditional Chinese without rewriting arbitrary errors', () => {
+    localStorage.setItem('mat-ui-preferences-v1', JSON.stringify({ language: 'zh-TW', theme: 'dark' }));
+    const codex: ProviderInfo = {
+      ...unavailable,
+      id: 'codex',
+      detail: '`codex` CLI not found on PATH — install it or remove this agent from the workflow.',
+    };
+    render(<UiPreferencesProvider><ProviderSetupButton provider={codex} api={api} /></UiPreferencesProvider>);
+    act(() => fireEvent.click(screen.getByRole('button', { name: '設定 codex' })));
+    expect(screen.getByText('`codex` CLI 不在 PATH 中。請先安裝它，或從工作流程移除此代理程式。')).toBeTruthy();
+  });
+
   it('hard-exempts mock even when passed impossible unavailable and auth state', () => {
     const mock: ProviderInfo = {
       id: 'mock', tier: 'rich', ok: false, installable: true, models: [], defaultModel: 'ok',

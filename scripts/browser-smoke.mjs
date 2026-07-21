@@ -15,6 +15,7 @@ let browser;
 let child;
 let dataDir;
 let workspaceDir;
+let localizedWorkspaceDir;
 let verifiedWorkspaceDir;
 let steerWorkspaceDir;
 
@@ -23,7 +24,7 @@ const overallDeadline = setTimeout(() => {
   void (async () => {
     try { child?.kill('SIGKILL'); } catch { /* The process may already have exited. */ }
     try { await browser?.close(); } catch { /* Continue emergency cleanup. */ }
-    await Promise.allSettled([dataDir, workspaceDir, verifiedWorkspaceDir, steerWorkspaceDir]
+    await Promise.allSettled([dataDir, workspaceDir, localizedWorkspaceDir, verifiedWorkspaceDir, steerWorkspaceDir]
       .filter(Boolean)
       .map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })));
     process.exit(1);
@@ -222,6 +223,7 @@ try {
   port = await getFreePort();
   dataDir = await mkdtemp(path.join(os.tmpdir(), 'mat-smoke-'));
   workspaceDir = await mkdtemp(path.join(os.tmpdir(), 'mat-smoke-workspace-'));
+  localizedWorkspaceDir = await mkdtemp(path.join(os.tmpdir(), 'mat-smoke-localized-'));
   verifiedWorkspaceDir = await mkdtemp(path.join(os.tmpdir(), 'mat-smoke-verified-'));
   steerWorkspaceDir = await mkdtemp(path.join(os.tmpdir(), 'mat-smoke-steer-'));
 
@@ -287,7 +289,7 @@ try {
 
   const selectWorkspace = async (name) => {
     await page.getByRole('button', { name: 'Projects', exact: true }).click();
-    const card = page.locator('#launchpad-projects article > button').filter({ hasText: name }).first();
+    const card = page.locator('#launchpad-projects article > button').filter({ has: page.getByText(name, { exact: true }) }).first();
     await card.waitFor({ state: 'visible', timeout: 10_000 });
     await card.click();
     await page.getByRole('button', { name: 'Launch', exact: true }).click();
@@ -348,6 +350,21 @@ try {
     await page.getByLabel('Language').selectOption('zh-TW');
     await page.getByText('健康狀態', { exact: true }).waitFor({ timeout: 5_000 });
     if (await page.locator('html').getAttribute('lang') !== 'zh-TW') throw new Error('Traditional Chinese selection did not update document language.');
+
+    await page.getByRole('button', { name: '專案', exact: true }).click();
+    await page.getByRole('button', { name: '新增工作區', exact: true }).click();
+    const addWorkspaceDialog = page.getByRole('dialog', { name: '新增工作區' });
+    await addWorkspaceDialog.getByLabel('名稱', { exact: true }).fill('繁中 Smoke');
+    await addWorkspaceDialog.getByLabel('絕對路徑', { exact: true }).fill(localizedWorkspaceDir);
+    await addWorkspaceDialog.getByRole('button', { name: '新增工作區', exact: true }).click();
+    const localizedWorkspace = page.locator('#launchpad-projects article > button').filter({ hasText: '繁中 Smoke' }).first();
+    await localizedWorkspace.waitFor({ state: 'visible', timeout: 10_000 });
+    await localizedWorkspace.click();
+    await page.getByRole('button', { name: '啟動', exact: true }).click();
+    await page.getByText(/規劃模式$/).waitFor({ timeout: 10_000 });
+    await page.getByText(/審查模式$/).waitFor({ timeout: 10_000 });
+    await page.getByText(/流程：實作 → 測試 → 審查$/).waitFor({ timeout: 10_000 });
+    if (await page.getByText('Planning Mode', { exact: true }).count() > 0) throw new Error('Built-in workflow names still leaked English in Traditional Chinese mode.');
 
     await page.getByLabel('介面主題').selectOption('light');
     if (await page.locator('html').getAttribute('data-theme') !== 'light') throw new Error('Daylight theme was not applied.');
@@ -595,7 +612,7 @@ try {
     cleanupFailure ??= error;
   }
   // Windows keeps transient locks on freshly used git/worktree dirs; retry removal.
-  for (const dir of [dataDir, workspaceDir, verifiedWorkspaceDir, steerWorkspaceDir]) {
+  for (const dir of [dataDir, workspaceDir, localizedWorkspaceDir, verifiedWorkspaceDir, steerWorkspaceDir]) {
     if (!dir) continue;
     try {
       await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

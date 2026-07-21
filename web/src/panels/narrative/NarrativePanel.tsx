@@ -4,13 +4,14 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useMatStore } from '../../app/store.js';
 import { Collapsible } from '../../components/Collapsible.js';
 import { PROVIDER_COLORS } from '../../components/AgentChip.js';
+import { displayIntegrityMessage, displayNodeLabel, displayToolPhase } from '../../i18n/displayText.js';
 import { useUiPreferences } from '../../i18n/UiPreferences.js';
 import { buildNarrativeItems, filterNarrativeItems, type NarrativeItem } from './narrativeLogic.js';
 
 const EMPTY_EVENTS: readonly AgentEvent[] = [];
 
 export function NarrativePanel({ loading = false, loadError, visible = true }: { loading?: boolean; loadError?: string; visible?: boolean }) {
-  const { t } = useUiPreferences();
+  const { locale, t } = useUiPreferences();
   const activeRunId = useMatStore((state) => state.activeRunId);
   const viewedRunId = useMatStore((state) => state.viewedRunId);
   const run = useMatStore((state) => viewedRunId ? state.runs[viewedRunId] : undefined);
@@ -30,7 +31,7 @@ export function NarrativePanel({ loading = false, loadError, visible = true }: {
   else if (liveSessionRunId.current !== viewedRunId) liveSessionRunId.current = undefined;
   const followableRun = viewedRunId !== undefined && (viewedRunId === activeRunId || liveSessionRunId.current === viewedRunId);
 
-  const projected = useMemo(() => run ? buildNarrativeItems(run, events) : [], [events, run]);
+  const projected = useMemo(() => run ? buildNarrativeItems(run, events, locale) : [], [events, locale, run]);
   const items = useMemo(() => filterNarrativeItems(projected, {
     nodeRunIds: filters.nodeRunIds,
     ...(focusedNodeRunId ? { focusedNodeRunId } : {}),
@@ -98,9 +99,9 @@ export function NarrativePanel({ loading = false, loadError, visible = true }: {
         <label className="min-w-0 flex-1"><span className="sr-only">{t('narrative.search')}</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('narrative.searchPlaceholder')} className="w-full rounded border border-border bg-canvas px-2 py-1.5 text-xs text-ink outline-none focus:border-accent" /></label>
         <button type="button" aria-pressed={showTechnical} onClick={() => setShowTechnical((value) => !value)} className={`shrink-0 rounded border px-2 py-1.5 text-[10px] ${showTechnical ? 'border-accentBorder bg-accentSoft/60 text-accentForeground' : 'border-border text-muted'}`}>{t('narrative.technical')}</button>
       </div>
-      {focusedNodeRunId && <div className="mt-2 flex items-center gap-2 rounded bg-sky-950/30 px-2 py-1 text-[11px] text-sky-200"><span className="truncate">{t('narrative.focused', { node: run.nodes.find((node) => node.nodeRunId === focusedNodeRunId)?.label ?? focusedNodeRunId })}</span><button type="button" onClick={() => focusNode(undefined)} className="ml-auto rounded px-1.5 py-0.5 hover:bg-sky-900">{t('narrative.showAll')}</button></div>}
+      {focusedNodeRunId && <div className="mt-2 flex items-center gap-2 rounded bg-sky-950/30 px-2 py-1 text-[11px] text-sky-200"><span className="truncate">{t('narrative.focused', { node: (() => { const node = run.nodes.find((candidate) => candidate.nodeRunId === focusedNodeRunId); return node ? displayNodeLabel(node, run.nodes, run.workflow, locale) : focusedNodeRunId; })() })}</span><button type="button" onClick={() => focusNode(undefined)} className="ml-auto rounded px-1.5 py-0.5 hover:bg-sky-900">{t('narrative.showAll')}</button></div>}
       {integrity?.status === 'recovering' && <div role="status" className="mt-2 rounded border border-amber-800 bg-amber-950/30 px-2 py-1.5 text-xs text-amber-200">{t('narrative.recovering', { from: integrity.expectedSeq ? t('narrative.fromEvent', { seq: integrity.expectedSeq }) : '' })}</div>}
-      {integrity?.status === 'incomplete' && <div role="alert" className="mt-2 flex items-center gap-2 rounded border border-red-800 bg-red-950/30 px-2 py-1.5 text-xs text-red-200"><span className="min-w-0 flex-1">{t('narrative.incomplete', { message: integrity.message ?? '' })}</span>{viewedRunId && <button type="button" onClick={() => retryRecovery(viewedRunId)} className="shrink-0 rounded border border-red-700 px-2 py-1">{t('narrative.retry')}</button>}</div>}
+      {integrity?.status === 'incomplete' && <div role="alert" className="mt-2 flex items-center gap-2 rounded border border-red-800 bg-red-950/30 px-2 py-1.5 text-xs text-red-200"><span className="min-w-0 flex-1">{t('narrative.incomplete', { message: integrity.message ? displayIntegrityMessage(integrity.message, locale) : '' })}</span>{viewedRunId && <button type="button" onClick={() => retryRecovery(viewedRunId)} className="shrink-0 rounded border border-red-700 px-2 py-1">{t('narrative.retry')}</button>}</div>}
       {loadError && <p role="alert" className="mt-2 text-xs text-red-300">{loadError}</p>}
     </header>
     {loading && events.length === 0 ? <div className="animate-pulse p-4 text-xs text-muted">{t('narrative.loading')}</div>
@@ -130,7 +131,7 @@ export function NarrativeRow({ item }: { item: NarrativeItem }) {
     error: 'border-red-800 bg-red-950/30', tool: 'border-amber-800 bg-amber-950/20', thinking: 'border-violet-800 bg-violet-950/20',
     prompt: 'border-sky-800 bg-sky-950/15', lifecycle: 'border-border bg-canvas/50', gap: 'border-red-800 bg-red-950/30',
   }[item.kind];
-  const content = item.kind === 'tool' ? <Collapsible summary={<span>{item.tool?.name ?? t('narrative.tool')} · {item.tool?.phase}</span>}><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-[11px] text-amber-100">{[item.tool?.input, item.tool?.output, item.text].filter(Boolean).join('\n\n')}</pre></Collapsible>
+  const content = item.kind === 'tool' ? <Collapsible summary={<span>{item.tool?.name ?? t('narrative.tool')} · {displayToolPhase(item.tool?.phase ?? 'use', locale)}</span>}><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-[11px] text-amber-100">{[item.tool?.input, item.tool?.output, item.text].filter(Boolean).join('\n\n')}</pre></Collapsible>
     : item.kind === 'thinking' ? <Collapsible summary={<p className="line-clamp-2 whitespace-pre-wrap text-violet-200">{item.text}</p>}><p className="mt-2 whitespace-pre-wrap break-words text-xs text-violet-100">{item.text}</p></Collapsible>
     : <p className={`whitespace-pre-wrap break-words ${item.kind === 'error' ? 'text-red-100' : item.kind === 'decision' ? 'text-emerald-100' : 'text-ink'}`}>{item.text}</p>;
   return <article data-narrative-key={item.key} data-node-run-id={actor?.nodeRunId ?? undefined} className={`rounded-lg border border-l-[3px] p-3 shadow-sm ${tone}`} style={{ borderLeftColor: providerColor }}>

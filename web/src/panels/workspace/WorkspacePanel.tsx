@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { apiClient, type ApiClient } from '../../api/client.js';
 import { ACTIVE_RUN_STATUSES, useMatStore } from '../../app/store.js';
 import { ModalDialog } from '../../components/ModalDialog.js';
@@ -7,8 +8,20 @@ import { isAbsolutePath, lastRunBadge, shortPath } from './logic.js';
 
 export interface WorkspacePanelProps { api?: ApiClient }
 
+function dialogErrorDetail(error: unknown): string | undefined {
+  const detail = error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
+        ? error.message
+        : undefined;
+  const clean = detail?.trim();
+  return clean ? clean.slice(0, 500) : undefined;
+}
+
 export function WorkspacePanel({ api = apiClient }: WorkspacePanelProps) {
-  const { t } = useUiPreferences();
+  const { locale, t } = useUiPreferences();
   const workspaces = useMatStore((state) => state.workspaces);
   const selected = useMatStore((state) => state.selectedWorkspaceId);
   const runs = useMatStore((state) => state.runs);
@@ -87,11 +100,12 @@ export function WorkspacePanel({ api = apiClient }: WorkspacePanelProps) {
   const browse = async () => {
     setFormError(undefined);
     try {
-      const { open } = await import('@tauri-apps/plugin-dialog');
-      const directory = await open({ directory: true, multiple: false });
+      const directory = await openDialog({ directory: true, multiple: false });
       if (typeof directory === 'string') setPath(directory);
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : t('workspace.browseFailed'));
+      const detail = dialogErrorDetail(error);
+      const summary = t('workspace.browseFailed');
+      setFormError(detail && detail !== summary ? `${summary} ${detail}` : summary);
     }
   };
 
@@ -125,7 +139,7 @@ export function WorkspacePanel({ api = apiClient }: WorkspacePanelProps) {
               <span className={`rounded-full border px-1.5 py-0.5 text-[10px] ${workspace.isGit ? 'border-emerald-800 text-emerald-300' : 'border-border text-muted'}`}>{workspace.isGit ? 'git' : t('workspace.folder')}</span>
             </span>
             <span className="mt-1 block truncate text-xs text-muted" title={workspace.path}>{shortPath(workspace.path)}</span>
-            {workspace.lastRun && <span className="mt-1 block truncate text-[11px] text-muted">{lastRunBadge(workspace.lastRun, now)}</span>}
+            {workspace.lastRun && <span className="mt-1 block truncate text-[11px] text-muted">{lastRunBadge(workspace.lastRun, now, locale)}</span>}
           </button>
           <div className="flex items-center justify-end gap-3 border-t border-border/70 px-2 py-1.5 text-right">
             <button type="button" className="text-[11px] text-muted hover:text-ink" onClick={() => openEdit(workspace.id)}>{t('workspace.edit')}</button>

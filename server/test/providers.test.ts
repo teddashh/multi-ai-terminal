@@ -63,4 +63,23 @@ describe('provider version probes', () => {
     clearVersionCache(command);
     await expect(probeVersion(command)).resolves.toEqual({ ok: false, detail: 'exit 3' });
   });
+
+  it('settles on CLI exit even when a background descendant holds the stdio pipes', async () => {
+    // Field failure shape behind the endless Windows codex/grok "timed out"
+    // probes: the CLI answers and exits, but a helper it spawned inherits
+    // stdout, so the probe never observed 'close' within any timeout.
+    const command = createFakeExecutable(root, 'pipe-holding-provider', `
+const { spawn } = require('node:child_process');
+spawn(process.execPath, ['-e', 'setTimeout(() => undefined, 20_000)'], {
+  stdio: ['ignore', 'inherit', 'inherit'], detached: true, windowsHide: true,
+}).unref();
+console.log('held-provider 3.2.1');
+`);
+    clearVersionCache(command);
+    const startedAt = Date.now();
+    await expect(probeVersion(command)).resolves.toEqual({ ok: true, version: 'held-provider 3.2.1' });
+    // Well under the 8s/15s probe timeout: the settle must come from exit,
+    // not from the descendant finally releasing the pipe at 20s.
+    expect(Date.now() - startedAt).toBeLessThan(providerVersionProbeTimeoutMs() - 1000);
+  }, 30_000);
 });

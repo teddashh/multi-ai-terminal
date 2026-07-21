@@ -1,5 +1,6 @@
 import type { AgentEvent, NodeRun, RunSnapshot } from '@mat/shared';
-import { displayNodeLabel } from '../../components/nodeLabel.js';
+import { displayNodeLabel, displayStageName } from '../../i18n/displayText.js';
+import type { UiLocale } from '../../i18n/UiPreferences.js';
 
 export type NarrativeKind = 'prompt' | 'message' | 'thinking' | 'tool' | 'decision' | 'verification' | 'error' | 'lifecycle' | 'gap';
 
@@ -42,7 +43,7 @@ export interface NarrativeFilterOptions {
   showTechnical?: boolean;
 }
 
-export function buildNarrativeItems(run: RunSnapshot, events: readonly AgentEvent[]): NarrativeItem[] {
+export function buildNarrativeItems(run: RunSnapshot, events: readonly AgentEvent[], locale: UiLocale = 'en'): NarrativeItem[] {
   const items: NarrativeItem[] = [];
   let priorSeq: number | undefined;
   for (const event of events) {
@@ -74,7 +75,7 @@ export function buildNarrativeItems(run: RunSnapshot, events: readonly AgentEven
       };
       continue;
     }
-    items.push(eventItem(run, event, kind));
+    items.push(eventItem(run, event, kind, locale));
   }
   return items;
 }
@@ -105,21 +106,22 @@ export function narrativeSearchText(item: NarrativeItem): string {
   ].filter((value): value is string => typeof value === 'string').join('\n');
 }
 
-export function resolveNarrativeActor(run: RunSnapshot, event: AgentEvent): NarrativeActor {
+export function resolveNarrativeActor(run: RunSnapshot, event: AgentEvent, locale: UiLocale = 'en'): NarrativeActor {
   const node = event.nodeRunId ? run.nodes.find((candidate) => candidate.nodeRunId === event.nodeRunId) : undefined;
   const stageId = event.stageId ?? node?.stageId ?? null;
-  const stageName = stageId ? run.workflow.stages.find((stage) => stage.id === stageId)?.name : undefined;
+  const stage = stageId ? run.workflow.stages.find((candidate) => candidate.id === stageId) : undefined;
+  const stageName = stage ? displayStageName(run.workflow, stage, locale) : undefined;
   if (!node) {
     return {
       nodeRunId: event.nodeRunId,
-      label: event.nodeRunId ?? (event.role === 'decision' ? 'Orchestrator decision' : 'Run'),
+      label: event.nodeRunId ?? (event.role === 'decision' ? (locale === 'zh-TW' ? '協調者決策' : 'Orchestrator decision') : (locale === 'zh-TW' ? '執行' : 'Run')),
       stageId,
       ...(stageName ? { stageName } : {}),
     };
   }
   return {
     nodeRunId: node.nodeRunId,
-    label: displayNodeLabel(node, run.nodes),
+    label: displayNodeLabel(node, run.nodes, run.workflow, locale),
     provider: node.agent.provider,
     ...(node.agent.model ? { model: node.agent.model } : {}),
     stageId,
@@ -139,8 +141,8 @@ function narrativeKind(event: AgentEvent): NarrativeKind {
   return 'lifecycle';
 }
 
-function eventItem(run: RunSnapshot, event: AgentEvent, kind: NarrativeKind): NarrativeItem {
-  const actor = resolveNarrativeActor(run, event);
+function eventItem(run: RunSnapshot, event: AgentEvent, kind: NarrativeKind, locale: UiLocale): NarrativeItem {
+  const actor = resolveNarrativeActor(run, event, locale);
   const detail = typeof event.data?.detail === 'string' ? event.data.detail : undefined;
   const tool = kind === 'tool' && event.tool ? {
     phase: event.kind === 'tool_result' ? 'result' as const : 'use' as const,

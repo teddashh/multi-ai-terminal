@@ -1,7 +1,8 @@
 import type { RunSnapshot } from '@mat/shared';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient } from '../api/client.js';
-import { displayNodeLabel } from '../components/nodeLabel.js';
+import { displayNodeLabel, displayNodeStatus, displayRunStatus, displayWorkflowName } from '../i18n/displayText.js';
+import type { UiLocale } from '../i18n/UiPreferences.js';
 import { NarrativePanel } from '../panels/narrative/NarrativePanel.js';
 import { loadReplayPages, StreamPanel } from '../panels/stream/StreamPanel.js';
 import { useUiPreferences } from '../i18n/UiPreferences.js';
@@ -12,6 +13,7 @@ type EvidenceView = 'conversation' | 'timeline';
 /** Owns run selection and replay loading so every evidence view observes the same run. */
 export function RunWorkspace() {
   const { locale, t } = useUiPreferences();
+  const requestFailed = t('common.requestFailed');
   const selectedWorkspaceId = useMatStore((state) => state.selectedWorkspaceId);
   const activeRunId = useMatStore((state) => state.activeRunId);
   const viewedRunId = useMatStore((state) => state.viewedRunId);
@@ -74,7 +76,7 @@ export function RunWorkspace() {
           isCurrent: () => replayGeneration.current === generation,
         });
       } catch (error) {
-        if (replayGeneration.current === generation) setReplayError(errorMessage(error));
+        if (replayGeneration.current === generation) setReplayError(errorMessage(error, requestFailed));
       } finally {
         if (replayGeneration.current === generation) setReplayLoading(false);
       }
@@ -105,7 +107,7 @@ export function RunWorkspace() {
       for (const run of page) upsertRun(run);
       setHistoryHasMore(page.length === 50);
     } catch (error) {
-      if (historyGeneration.current === generation) setHistoryError(errorMessage(error));
+      if (historyGeneration.current === generation) setHistoryError(errorMessage(error, requestFailed));
     } finally {
       if (historyGeneration.current === generation) setHistoryLoading(false);
     }
@@ -127,7 +129,7 @@ export function RunWorkspace() {
           {!viewedRunId && <option value="">{t('runWorkspace.noRuns')}</option>}
           {availableRuns.map((run) => <option key={run.runId} value={run.runId}>{formatRunOption(run, run.runId === activeRunId ? t('runWorkspace.live') : '', locale)}</option>)}
         </select>
-        {selectedRun && <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] ${viewingLiveSession ? 'border-sky-700 bg-sky-950/30 text-sky-200' : 'border-border text-muted'}`}>{selectedRun.runId === activeRunId ? t('runWorkspace.live') : viewingLiveSession ? t('runWorkspace.completed') : t('runWorkspace.replay')} · {selectedRun.status}</span>}
+        {selectedRun && <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] ${viewingLiveSession ? 'border-sky-700 bg-sky-950/30 text-sky-200' : 'border-border text-muted'}`}>{selectedRun.runId === activeRunId ? t('runWorkspace.live') : viewingLiveSession ? t('runWorkspace.completed') : t('runWorkspace.replay')} · {displayRunStatus(selectedRun.status, locale)}</span>}
         <button type="button" disabled={!selectedWorkspaceId || historyLoading} onClick={() => void loadMoreRuns()} className="shrink-0 rounded border border-border px-2 py-1 text-[10px] text-muted hover:text-ink disabled:opacity-40">{historyLoading ? t('runWorkspace.loading') : historyHasMore ? t('runWorkspace.moreRuns') : t('runWorkspace.olderRuns')}</button>
       </div>
       {selectedRun && <div className="mt-2 flex min-w-0 items-center gap-1 overflow-x-auto pb-0.5" aria-label={t('runWorkspace.nodeFocus')}>
@@ -136,8 +138,9 @@ export function RunWorkspace() {
         <NodePreset label={t('runWorkspace.attention')} active={sameMembers(nodeFilter, attentionNodes.map((node) => node.nodeRunId))} count={attentionNodes.length} disabled={attentionNodes.length === 0} onClick={() => applyNodePreset('attention')} tone="attention" />
         <span className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden="true" />
         {selectedRun.nodes.map((node) => {
-          const label = displayNodeLabel(node, selectedRun.nodes);
-          return <button type="button" key={node.nodeRunId} aria-pressed={nodeFilter.includes(node.nodeRunId)} onClick={() => { setNodeFilter([node.nodeRunId]); focusNode(node.nodeRunId); }} className={`max-w-40 shrink-0 truncate rounded-full border px-2 py-1 text-[10px] ${nodeFilter.includes(node.nodeRunId) ? 'border-accentBorder bg-accentSoft/70 text-accentForeground' : nodeNeedsAttention(node) ? 'border-red-900 text-red-300' : 'border-border text-muted hover:text-ink'}`} title={`${label} · ${node.status}`}>{label} · {node.status}</button>;
+          const label = displayNodeLabel(node, selectedRun.nodes, selectedRun.workflow, locale);
+          const status = displayNodeStatus(node.status, locale);
+          return <button type="button" key={node.nodeRunId} aria-pressed={nodeFilter.includes(node.nodeRunId)} onClick={() => { setNodeFilter([node.nodeRunId]); focusNode(node.nodeRunId); }} className={`max-w-40 shrink-0 truncate rounded-full border px-2 py-1 text-[10px] ${nodeFilter.includes(node.nodeRunId) ? 'border-accentBorder bg-accentSoft/70 text-accentForeground' : nodeNeedsAttention(node) ? 'border-red-900 text-red-300' : 'border-border text-muted hover:text-ink'}`} title={`${label} · ${status}`}>{label} · {status}</button>;
         })}
       </div>}
       {replayLoading && <p role="status" className="mt-2 text-[11px] text-sky-300">{t('runWorkspace.loadingReplay')}</p>}
@@ -152,7 +155,7 @@ export function RunWorkspace() {
       }}>
         <ViewTab id="conversation-tab" controls="conversation-panel" selected={view === 'conversation'} onClick={() => setView('conversation')}>{t('runWorkspace.conversation')}</ViewTab>
         <ViewTab id="timeline-tab" controls="timeline-panel" selected={view === 'timeline'} onClick={() => setView('timeline')}>{t('runWorkspace.timeline')}</ViewTab>
-        <span className="ml-auto text-[10px] text-muted">{selectedRun ? t('runWorkspace.agentCount', { count: selectedRun.nodes.length, workflow: selectedRun.workflow.name }) : runsLoading ? t('runWorkspace.loadingRuns') : t('runWorkspace.ready')}</span>
+        <span className="ml-auto text-[10px] text-muted">{selectedRun ? t('runWorkspace.agentCount', { count: selectedRun.nodes.length, workflow: displayWorkflowName(selectedRun.workflow, locale) }) : runsLoading ? t('runWorkspace.loadingRuns') : t('runWorkspace.ready')}</span>
       </div>
     </header>
     <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -179,10 +182,10 @@ function sameMembers(left: readonly string[], right: readonly string[]): boolean
   return right.length > 0 && left.length === right.length && right.every((value) => left.includes(value));
 }
 
-function formatRunOption(run: RunSnapshot, liveLabel: string, locale: string): string {
-  return `${liveLabel ? `${liveLabel} · ` : ''}${run.workflow.name} · ${run.status} · ${new Date(run.createdAt).toLocaleString(locale)}`;
+function formatRunOption(run: RunSnapshot, liveLabel: string, locale: UiLocale): string {
+  return `${liveLabel ? `${liveLabel} · ` : ''}${displayWorkflowName(run.workflow, locale)} · ${displayRunStatus(run.status, locale)} · ${new Date(run.createdAt).toLocaleString(locale)}`;
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'The request failed.';
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }

@@ -17,6 +17,7 @@ vi.mock('../panels/stream/StreamPanel.js', () => ({ StreamPanel: ({ embedded }: 
 vi.mock('../api/client.js', () => ({ apiClient: { getRuns: mocks.getRuns, getRun: mocks.getRun, getEvents: vi.fn() } }));
 
 import { matStore } from './store.js';
+import { UiPreferencesProvider } from '../i18n/UiPreferences.js';
 import { RunWorkspace } from './RunWorkspace.js';
 
 const workflow = {
@@ -51,6 +52,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   for (const item of mounted.splice(0)) { act(() => item.root.unmount()); item.container.remove(); }
+  localStorage.clear();
 });
 
 describe('RunWorkspace', () => {
@@ -90,6 +92,38 @@ describe('RunWorkspace', () => {
     expect(matStore.getState().filters.nodeRunIds).toEqual(['n1']);
     act(() => fireEvent.click(screen.getByRole('button', { name: /R2 · failed/ })));
     expect(matStore.getState().ui.focusedNodeRunId).toBe('n2');
+  });
+
+  it('localizes built-in run, node, and status chrome without changing task evidence', () => {
+    localStorage.setItem('mat-ui-preferences-v1', JSON.stringify({ language: 'zh-TW', theme: 'dark' }));
+    const pipelineWorkflow: RunSnapshot['workflow'] = {
+      ...workflow,
+      id: 'pipeline',
+      name: 'Pipeline: Implement → Test → Review',
+      description: 'English source description',
+      builtin: true,
+      stages: [{
+        ...workflow.stages[0]!, id: 'implement', name: 'Implement',
+        slots: [{
+          id: 'implementer', label: 'Implementer', count: 1,
+          agent: { provider: 'codex', model: 'gpt-test', permission: 'safe' },
+          promptTemplate: '{{task}}',
+        }],
+      }],
+    };
+    const localizedRun: RunSnapshot = {
+      ...liveRun,
+      workflow: pipelineWorkflow,
+      task: 'Keep this task verbatim',
+      nodes: [{ ...liveRun.nodes[0]!, stageId: 'implement', slotId: 'implementer', label: 'Implementer · codex' }],
+    };
+    matStore.setState({ runs: { live: localizedRun }, viewedRunId: 'live', activeRunId: 'live' });
+
+    renderWorkspace(<UiPreferencesProvider><RunWorkspace /></UiPreferencesProvider>);
+
+    expect(screen.getByRole('option', { name: /流程：實作 → 測試 → 審查 · 執行中/ })).toBeTruthy();
+    expect(screen.getByText('即時 · 執行中')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '實作者 · codex · 執行中' })).toBeTruthy();
   });
 
   it('clears an older-runs loading state when the workspace changes', async () => {

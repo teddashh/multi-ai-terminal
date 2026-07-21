@@ -72,6 +72,17 @@ describe('WorkspacePanel', () => {
     expect((screen.getByLabelText('Absolute path') as HTMLInputElement).value).toBe(String.raw`C:\projects\castle`);
   });
 
+  it('keeps a string rejection from Tauri visible for troubleshooting', async () => {
+    (window as Window & { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__ = {};
+    dialogMocks.open.mockRejectedValueOnce('plugin:dialog|open denied by ACL');
+    renderPanel(<WorkspacePanel />);
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Add workspace' })));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Browse…' })); });
+    expect(screen.getByRole('alert').textContent).toBe(
+      'Could not open the folder picker. plugin:dialog|open denied by ACL',
+    );
+  });
+
   it('renders workspace metadata, last-run time, git state, and a live pulse', () => {
     renderPanel(<WorkspacePanel />);
 

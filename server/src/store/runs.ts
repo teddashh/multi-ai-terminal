@@ -46,7 +46,9 @@ export async function saveRun(run: RunSnapshot): Promise<void> {
   });
   await updateWorkspaceLastRun(parsed.workspaceId, {
     runId: parsed.runId,
+    workflowId: parsed.workflow.id,
     workflowName: parsed.workflow.name,
+    workflowBuiltin: parsed.workflow.builtin === true,
     status: parsed.status,
     at: parsed.endedAt ?? parsed.createdAt,
   });

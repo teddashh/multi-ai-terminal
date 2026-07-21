@@ -124,7 +124,8 @@ function RailButton({ label, selected, controls, icon, onClick }: { label: strin
 }
 
 function Divider({ label, value, min, max, onPointerDown, onDelta }: { label: string; value: number; min: number; max: number; onPointerDown(event: ReactPointerEvent<HTMLDivElement>): void; onDelta(delta: number): void }) {
-  return <div role="separator" aria-label={label} tabIndex={0} aria-orientation="vertical" aria-valuemin={min} aria-valuemax={max} aria-valuenow={Math.round(value)} aria-valuetext={`${Math.round(value)} pixels`} onPointerDown={onPointerDown} onKeyDown={(event) => {
+  const { t } = useUiPreferences();
+  return <div role="separator" aria-label={label} tabIndex={0} aria-orientation="vertical" aria-valuemin={min} aria-valuemax={max} aria-valuenow={Math.round(value)} aria-valuetext={t('shell.resizePixels', { n: Math.round(value) })} onPointerDown={onPointerDown} onKeyDown={(event) => {
     if (event.key === 'ArrowLeft') { event.preventDefault(); onDelta(-10); }
     else if (event.key === 'ArrowRight') { event.preventDefault(); onDelta(10); }
   }} className="cursor-col-resize bg-canvas outline-none transition-colors hover:bg-accent focus:bg-accent" />;

@@ -9,7 +9,11 @@ export interface Workspace {
   defaultWorkflowId?: string;
   verifyCommand?: string;
   verifyTimeoutSec?: number;
-  lastRun?: { runId: string; workflowName: string; status: RunStatus; at: number };
+  lastRun?: {
+    runId: string; workflowName: string; status: RunStatus; at: number;
+    workflowId?: string;
+    workflowBuiltin?: boolean;
+  };
 }
 export interface RunCreateRequest {
   workspaceId: string;
@@ -31,7 +35,11 @@ export const WorkspaceSchema = z.object({
   defaultWorkflowId: z.string().optional(),
   verifyCommand: z.string().optional(),
   verifyTimeoutSec: z.number().int().positive().optional(),
-  lastRun: z.object({ runId: z.string(), workflowName: z.string(), status: RunStatusSchema, at: z.number().int().nonnegative() }).strict().optional(),
+  lastRun: z.object({
+    runId: z.string(), workflowName: z.string(), status: RunStatusSchema, at: z.number().int().nonnegative(),
+    workflowId: z.string().optional(),
+    workflowBuiltin: z.boolean().optional(),
+  }).strict().optional(),
 }).strict();
 export const RunCreateRequestSchema = z.object({
   workspaceId: z.string().min(1), workflowId: z.string().min(1), task: z.string().min(1), workflowOverride: WorkflowDefSchema.optional(),

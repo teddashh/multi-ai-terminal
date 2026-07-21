@@ -115,8 +115,55 @@ describe('health logic', () => {
   it('renders diagnostic guidance in Traditional Chinese without changing issue semantics', () => {
     const findings = healthFindings(healthyInput({ locale: 'zh-TW', run }));
     expect(findings.find((finding) => finding.id === 'server')?.title).toBe('本機伺服器可連線');
+    expect(findings.find((finding) => finding.id === 'server')?.detail).toBe('MAT 本機伺服器 0.1.9');
     expect(findings.find((finding) => finding.id === 'provider-codex')?.title).toBe('codex：最新 CLI 檢查已偵測到');
     expect(findings.find((finding) => finding.id === 'run-status')?.title).toBe('目前執行：失敗');
     expect(findings.filter((finding) => finding.issue)).toHaveLength(5);
+  });
+
+  it('uses natural Traditional Chinese for health concepts and canonical CLI guidance', () => {
+    const unavailable = providerFinding(provider({
+      id: 'codex', ok: false,
+      detail: '`codex` CLI not found on PATH — install it or remove this agent from the workflow.',
+    }), 'zh-TW');
+    expect(unavailable.detail).toContain('`codex` CLI 不在 PATH 中');
+    expect(unavailable.detail).toContain('從工作流程移除此代理程式');
+    expect(unavailable.detail).toContain('略過所有服務提供者的偵測快取');
+
+    const gitWorkspace = findingsByScope(healthFindings(healthyInput({
+      locale: 'zh-TW',
+      workspace: { ...workspace, isGit: true, verifyCommand: 'npm test' },
+    })), 'workspace');
+    const workspaceCopy = gitWorkspace.map((finding) => `${finding.title} ${finding.detail}`).join(' ');
+    expect(workspaceCopy).toContain('Git 工作樹隔離');
+    expect(workspaceCopy).toContain('Git 儲存庫');
+    expect(workspaceCopy).toContain('候選節點');
+    expect(workspaceCopy).toContain('修補內容');
+    expect(workspaceCopy).not.toMatch(/\b(?:worktree|repository|candidate|patch)\b/i);
+
+    const builtinRun: RunSnapshot = {
+      ...run,
+      workflow: {
+        ...run.workflow,
+        id: 'pipeline',
+        name: 'Pipeline: Implement → Test → Review',
+        description: 'Shortest production line: one implementer, one test writer, one reviewer, with verification and gates between handoffs.',
+        builtin: true,
+        stages: [{
+          ...run.workflow.stages[0]!, id: 'review', name: 'Review',
+          slots: [{
+            id: 'reviewer', label: 'Reviewer', count: 2,
+            agent: { provider: 'codex', permission: 'safe' }, promptTemplate: '{{task}}',
+          }],
+        }],
+      },
+      nodes: run.nodes.map((node) => ({ ...node, slotId: 'reviewer', label: `Reviewer · ${node.agent.provider}` })),
+    };
+    const runCopy = findingsByScope(healthFindings(healthyInput({ locale: 'zh-TW', run: builtinRun })), 'run')
+      .map((finding) => `${finding.title} ${finding.detail}`).join(' ');
+    expect(runCopy).toContain('審查者 · codex · #1：驗證失敗');
+    expect(runCopy).toContain('審查：關卡決策已降級');
+    expect(runCopy).toContain('協調者在較低的決策信心下繼續執行');
+    expect(runCopy).not.toMatch(/\b(?:Reviewer|gate|Orchestrator)\b/);
   });
 });

@@ -6,6 +6,7 @@ import { act, type ReactElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { matStore } from '../../app/store.js';
+import { UiPreferencesProvider } from '../../i18n/UiPreferences.js';
 import { WorkflowPanel } from './WorkflowPanel.js';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -86,9 +87,30 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const item of mounted.splice(0)) { act(() => item.root.unmount()); item.container.remove(); }
+  localStorage.clear();
 });
 
 describe('WorkflowPanel', () => {
+  it('renders built-in workflow, stage, effort, and permission chrome in Traditional Chinese', async () => {
+    localStorage.setItem('mat-ui-preferences-v1', JSON.stringify({ language: 'zh-TW', theme: 'dark' }));
+    matStore.setState({ workflows: [{
+      ...workflow,
+      name: 'Planning Mode',
+      description: 'Independent plans followed by a consolidated final review.',
+    }] });
+    renderPanel(<UiPreferencesProvider><WorkflowPanel /></UiPreferencesProvider>);
+
+    expect(await screen.findByRole('button', { name: /規劃模式/ })).toBeTruthy();
+    expect(screen.getAllByText('由多個代理程式獨立提出計畫，再彙整成最終審查結果。').length).toBeGreaterThan(0);
+    act(() => fireEvent.click(screen.getByRole('button', { name: '進階設定' })));
+    const drawer = screen.getByRole('dialog', { name: '進階設定・規劃模式' });
+    expect(within(drawer).getByRole('heading', { name: '圓桌討論' })).toBeTruthy();
+    act(() => fireEvent.click(within(drawer).getByRole('button', { name: /R1 codex gpt-test 高/ })));
+    const editor = within(drawer).getByRole('dialog', { name: '編輯 R1' });
+    expect((within(editor).getByLabelText('推理強度') as HTMLSelectElement).selectedOptions[0]?.textContent).toBe('高');
+    expect((within(editor).getByLabelText('權限') as HTMLSelectElement).selectedOptions[0]?.textContent).toBe('安全');
+  });
+
   it('starts with the workspace default in the simple Launchpad and reveals advanced controls only on request', async () => {
     renderPanel(<WorkflowPanel />);
 

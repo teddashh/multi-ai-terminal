@@ -2,12 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import { apiClient } from '../api/client.js';
 import { ReconnectingWsClient } from '../api/ws.js';
 import { HealthDrawer, healthIssueCount } from '../panels/health/index.js';
+import { displayRunStatus } from '../i18n/displayText.js';
 import { InterfacePreferences, useUiPreferences } from '../i18n/UiPreferences.js';
 import { AppShell } from './AppShell.js';
 import { ACTIVE_RUN_STATUSES, matStore, useMatStore } from './store.js';
 
+// Effect-scoped fallbacks stay stable English constants so the boot effect
+// never depends on the active locale; they are translated at render time.
+const BOOT_LOAD_FALLBACK = 'Could not load application data.';
+const RUNS_LOAD_FALLBACK = 'Could not load workspace runs.';
+
 export function App() {
-  const { t } = useUiPreferences();
+  const { locale, t } = useUiPreferences();
   const [bootError, setBootError] = useState<string>();
   const [pendingAbortRunId, setPendingAbortRunId] = useState<string>();
   const [healthOpen, setHealthOpen] = useState(false);
@@ -28,7 +34,7 @@ export function App() {
       const state = matStore.getState();
       state.setWorkspaces(workspaces); state.setWorkflows(workflows); state.setProviders(providers);
       if (!state.selectedWorkspaceId && workspaces[0]) state.setSelectedWorkspaceId(workspaces[0].id);
-    }).catch((error: unknown) => { if (live) setBootError(error instanceof Error ? error.message : 'Could not load application data.'); });
+    }).catch((error: unknown) => { if (live) setBootError(error instanceof Error ? error.message : BOOT_LOAD_FALLBACK); });
     ws.current = new ReconnectingWsClient({
       onMessage: (message) => matStore.getState().applyWsMsg(message),
       onStateChange: (state) => matStore.getState().setWsConnection(state),
@@ -70,7 +76,7 @@ export function App() {
       matStore.getState().setActiveRunId(undefined);
       matStore.getState().setViewedRunId(undefined);
       matStore.getState().setRunsLoading(false);
-      setBootError(error instanceof Error ? error.message : 'Could not load workspace runs.');
+      setBootError(error instanceof Error ? error.message : RUNS_LOAD_FALLBACK);
     });
     return () => { live = false; };
   }, [selectedWorkspaceId]);
@@ -104,13 +110,13 @@ export function App() {
       <span className="truncate text-xs text-muted">{selectedWorkspace?.name ?? t('app.noWorkspace')}</span>
       <div className="ml-auto flex shrink-0 items-center gap-2">
         <span className={`flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] ${wsConnection === 'open' ? 'border-emerald-900 text-emerald-300' : wsConnection === 'connecting' ? 'border-amber-900 text-amber-300' : 'border-border text-muted'}`}><span className={`h-1.5 w-1.5 rounded-full ${wsConnection === 'open' ? 'bg-emerald-400' : wsConnection === 'connecting' ? 'animate-pulse bg-amber-400' : 'bg-muted'}`} />{wsConnection === 'open' ? t('app.connected') : wsConnection === 'connecting' ? t('app.connecting') : t('app.offline')}</span>
-        {activeRun && <span className={`rounded-full border px-2 py-1 text-[11px] ${ACTIVE_RUN_STATUSES.has(activeRun.status) ? 'border-sky-800 bg-sky-950/40 text-sky-300' : 'border-border text-muted'}`}><span className={ACTIVE_RUN_STATUSES.has(activeRun.status) ? 'mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-sky-400' : ''} />{activeRun.status}</span>}
+        {activeRun && <span className={`rounded-full border px-2 py-1 text-[11px] ${ACTIVE_RUN_STATUSES.has(activeRun.status) ? 'border-sky-800 bg-sky-950/40 text-sky-300' : 'border-border text-muted'}`}><span className={ACTIVE_RUN_STATUSES.has(activeRun.status) ? 'mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-sky-400' : ''} />{displayRunStatus(activeRun.status, locale)}</span>}
         {activeRun && ACTIVE_RUN_STATUSES.has(activeRun.status) && <button type="button" disabled={pendingAbortRunId === activeRun.runId} onClick={() => void abort()} className="rounded border border-red-900 px-2 py-1 text-xs text-red-300 hover:bg-red-950 disabled:opacity-50">{pendingAbortRunId === activeRun.runId ? t('app.aborting') : t('app.abort')}</button>}
         <InterfacePreferences />
         <button type="button" aria-label={t('app.health')} onClick={() => setHealthOpen(true)} className={`flex items-center gap-1.5 rounded border px-2 py-1 text-xs ${healthIssues > 0 ? 'border-amber-800 bg-amber-950/20 text-amber-200' : 'border-border text-muted hover:text-ink'}`}>{t('app.health')}{healthIssues > 0 && <span title={t('app.healthIssues', { count: healthIssues })} className="grid min-w-4 place-items-center rounded-full bg-amber-700/70 px-1 text-[9px] text-white">{healthIssues}</span>}</button>
       </div>
     </header>
-    {bootError && <div role="alert" className="fixed left-1/2 top-12 z-50 -translate-x-1/2 rounded border border-red-900 bg-red-950 px-3 py-2 text-xs text-red-200">{bootError}</div>}
+    {bootError && <div role="alert" className="fixed left-1/2 top-12 z-50 -translate-x-1/2 rounded border border-red-900 bg-red-950 px-3 py-2 text-xs text-red-200">{bootError === BOOT_LOAD_FALLBACK ? t('app.bootLoadFailed') : bootError === RUNS_LOAD_FALLBACK ? t('app.runsLoadFailed') : bootError}</div>}
     <div className="min-h-0 min-w-0 flex-1 overflow-hidden"><AppShell /></div>
     <HealthDrawer open={healthOpen} onClose={() => setHealthOpen(false)} />
   </main>;

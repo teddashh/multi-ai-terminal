@@ -60,6 +60,8 @@ describe('RunPanel smoke', () => {
     const orchestrator = within(screen.getByTestId('orchestrator-group')).getByText(/Orchestrator · claude/);
     const firstCardLabel = container.querySelector('[data-node-run-id]')?.textContent;
     expect(firstCardLabel).toContain(orchestrator.textContent);
+    expect(container.textContent).not.toContain('codexcodex');
+    expect(container.textContent).not.toContain('claudeclaude');
     expect(screen.getByText('thinking')).toBeTruthy();
     expect(screen.getByText('attempt 2')).toBeTruthy();
     expect(screen.getByText(/30 tok/)).toBeTruthy();

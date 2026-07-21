@@ -4,7 +4,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { apiClient } from '../../api/client.js';
 import { ACTIVE_RUN_STATUSES, matStore, useMatStore } from '../../app/store.js';
 import { EventRow } from '../../components/EventRow.js';
-import { displayNodeLabel } from '../../components/nodeLabel.js';
+import { displayNodeLabel, displayRunStatus, displayWorkflowName } from '../../i18n/displayText.js';
+import type { UiLocale } from '../../i18n/UiPreferences.js';
 import { useUiPreferences } from '../../i18n/UiPreferences.js';
 import { filterStreamEvents, groupToolEvents, reduceFollowState, type FeedItem } from './streamLogic.js';
 
@@ -30,6 +31,7 @@ export interface StreamPanelProps {
 
 export function StreamPanel({ embedded = false, hydrating = false, visible = true }: StreamPanelProps = {}) {
   const { locale, t } = useUiPreferences();
+  const requestFailed = t('common.requestFailed');
   const activeRunId = useMatStore((state) => state.activeRunId);
   const viewedRunId = useMatStore((state) => state.viewedRunId);
   const selectedWorkspaceId = useMatStore((state) => state.selectedWorkspaceId);
@@ -125,7 +127,7 @@ export function StreamPanel({ embedded = false, hydrating = false, visible = tru
         setHistory(uniqueRuns(page));
         setHistoryHasMore(page.length === 50);
       })
-      .catch((caught) => { if (historyGenerationRef.current === generation) setError(errorMessage(caught)); })
+      .catch((caught) => { if (historyGenerationRef.current === generation) setError(errorMessage(caught, requestFailed)); })
       .finally(() => {
         if (historyGenerationRef.current !== generation) return;
         historyLoadingRef.current = false;
@@ -148,7 +150,7 @@ export function StreamPanel({ embedded = false, hydrating = false, visible = tru
       setHistory(uniqueRuns([...history, ...page]));
       setHistoryHasMore(page.length === 50);
     } catch (caught) {
-      if (historyGenerationRef.current === generation) setError(errorMessage(caught));
+      if (historyGenerationRef.current === generation) setError(errorMessage(caught, requestFailed));
     } finally {
       if (historyGenerationRef.current === generation) {
         historyLoadingRef.current = false;
@@ -195,7 +197,7 @@ export function StreamPanel({ embedded = false, hydrating = false, visible = tru
           isCurrent: () => replayGenerationRef.current === generation,
         });
       } catch (caught) {
-        if (replayGenerationRef.current === generation) setError(errorMessage(caught));
+        if (replayGenerationRef.current === generation) setError(errorMessage(caught, requestFailed));
       } finally {
         if (replayGenerationRef.current === generation) setReplayLoading(false);
       }
@@ -276,20 +278,20 @@ export function StreamPanel({ embedded = false, hydrating = false, visible = tru
           <label className="sr-only" htmlFor="stream-run-selector">{t('stream.selectRun')}</label>
           <select id="stream-run-selector" value={effectiveRunId ?? ''} onChange={(event) => { if (event.target.value) void selectRun(event.target.value); }} className="max-w-48 rounded border border-border bg-canvas px-2 py-1 text-xs text-ink">
             {!effectiveRunId && <option value="">{t('stream.noRuns')}</option>}
-            {availableRuns.map((run) => <option key={run.runId} value={run.runId}>{ACTIVE_RUN_STATUSES.has(run.status) ? `${t('stream.live')} · ` : ''}{run.workflow.name} · {run.status} · {formatRunDate(run.createdAt, locale)}</option>)}
+            {availableRuns.map((run) => <option key={run.runId} value={run.runId}>{ACTIVE_RUN_STATUSES.has(run.status) ? `${t('stream.live')} · ` : ''}{displayWorkflowName(run.workflow, locale)} · {displayRunStatus(run.status, locale)} · {formatRunDate(run.createdAt, locale)}</option>)}
           </select>
           {historyHasMore && <button type="button" disabled={historyLoading} onClick={() => void loadMoreHistory()} className="rounded border border-border px-2 py-1 text-[10px] text-muted disabled:opacity-50">{historyLoading ? t('stream.loading') : t('stream.moreRuns')}</button>}
         </>}
       </div>
       {selectedRun && <div className="mb-2 flex gap-1 overflow-x-auto pb-1" aria-label={t('stream.nodeFilters')}>
         <button type="button" aria-pressed={filters.nodeRunIds.length === 0} onClick={() => setNodeFilter([])} className={`shrink-0 rounded-full border px-2 py-1 text-[10px] ${filters.nodeRunIds.length === 0 ? 'border-sky-600 text-sky-200' : 'border-border text-muted'}`}>{t('stream.allNodes')}</button>
-        {selectedRun.nodes.map((node) => <button type="button" key={node.nodeRunId} aria-pressed={filters.nodeRunIds.includes(node.nodeRunId)} onClick={() => toggleNode(node.nodeRunId)} className={`max-w-32 shrink-0 truncate rounded-full border px-2 py-1 text-[10px] ${filters.nodeRunIds.includes(node.nodeRunId) ? 'border-sky-600 bg-sky-950/30 text-sky-200' : 'border-border text-muted'}`}>{displayNodeLabel(node, selectedRun.nodes)}</button>)}
+        {selectedRun.nodes.map((node) => <button type="button" key={node.nodeRunId} aria-pressed={filters.nodeRunIds.includes(node.nodeRunId)} onClick={() => toggleNode(node.nodeRunId)} className={`max-w-32 shrink-0 truncate rounded-full border px-2 py-1 text-[10px] ${filters.nodeRunIds.includes(node.nodeRunId) ? 'border-sky-600 bg-sky-950/30 text-sky-200' : 'border-border text-muted'}`}>{displayNodeLabel(node, selectedRun.nodes, selectedRun.workflow, locale)}</button>)}
       </div>}
       <div className="flex flex-wrap items-center gap-1.5">
         {(Object.keys(ROLE_LABEL_KEYS) as EventRole[]).map((role) => <button type="button" key={role} aria-pressed={filters.roles.includes(role)} onClick={() => toggleRole(role)} className={`rounded border px-2 py-1 text-[10px] ${filters.roles.includes(role) ? ROLE_STYLE[role] : 'border-border text-muted/60'}`}>{t(ROLE_LABEL_KEYS[role])}</button>)}
         <label className="ml-auto min-w-28 flex-1 sm:max-w-52"><span className="sr-only">{t('stream.search')}</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('stream.search')} className="w-full rounded border border-border bg-canvas px-2 py-1 text-xs text-ink outline-none focus:border-accent" /></label>
       </div>
-      {focusedNodeRunId && <div className="mt-2 flex items-center gap-2 rounded bg-sky-950/30 px-2 py-1 text-[11px] text-sky-200"><span className="truncate">{t('stream.focused', { node: focusedNodeLabel(selectedRun, focusedNodeRunId) })}</span><button type="button" onClick={() => focusNode(undefined)} className="ml-auto rounded px-1.5 py-0.5 hover:bg-sky-900">{t('stream.clear')}</button></div>}
+      {focusedNodeRunId && <div className="mt-2 flex items-center gap-2 rounded bg-sky-950/30 px-2 py-1 text-[11px] text-sky-200"><span className="truncate">{t('stream.focused', { node: focusedNodeLabel(selectedRun, focusedNodeRunId, locale) })}</span><button type="button" onClick={() => focusNode(undefined)} className="ml-auto rounded px-1.5 py-0.5 hover:bg-sky-900">{t('stream.clear')}</button></div>}
       {hydrating && <p role="status" className="mt-2 text-xs text-sky-300">{t('stream.loadingEvidence')}</p>}
       {evidenceGaps.length > 0 && <div role="alert" className="mt-2 rounded border border-red-900 bg-red-950/30 px-2 py-1.5 text-xs text-red-200">{t('stream.evidenceGap', { unit: t(evidenceGaps.length === 1 ? 'stream.gap' : 'stream.gaps'), ranges: evidenceGaps.slice(0, 3).map((gap) => `#${gap.fromSeq}–${gap.toSeq}`).join(', '), more: evidenceGaps.length > 3 ? t('stream.moreGap', { count: evidenceGaps.length - 3 }) : '' })}</div>}
       {error && <p role="alert" className="mt-2 text-xs text-red-300">{error}</p>}
@@ -323,8 +325,9 @@ export function findEventGaps(events: readonly AgentEvent[]): Array<{ fromSeq: n
 }
 
 function FeedItemRow({ item }: { item: FeedItem }) {
+  const { locale } = useUiPreferences();
   if (item.events.length === 1) return <EventRow event={item.events[0]!} {...(item.duplicateCount ? { duplicateCount: item.duplicateCount } : {})} />;
-  return <div className="my-1 overflow-hidden rounded border border-amber-700/60 bg-amber-950/10" data-tool-call-id={item.toolCallId} aria-label={`Tool call ${item.toolCallId ?? ''}`}>
+  return <div className="my-1 overflow-hidden rounded border border-amber-700/60 bg-amber-950/10" data-tool-call-id={item.toolCallId} aria-label={`${locale === 'zh-TW' ? '工具呼叫' : 'Tool call'} ${item.toolCallId ?? ''}`}>
     {item.events.map((event) => <EventRow key={event.id} event={event} />)}
   </div>;
 }
@@ -367,15 +370,15 @@ function uniqueRuns(runs: RunSnapshot[]): RunSnapshot[] {
   return runs.filter((run) => !seen.has(run.runId) && Boolean(seen.add(run.runId)));
 }
 
-function focusedNodeLabel(run: RunSnapshot | undefined, nodeRunId: string): string {
+function focusedNodeLabel(run: RunSnapshot | undefined, nodeRunId: string, locale: UiLocale): string {
   const node = run?.nodes.find((candidate) => candidate.nodeRunId === nodeRunId);
-  return node && run ? displayNodeLabel(node, run.nodes) : nodeRunId;
+  return node && run ? displayNodeLabel(node, run.nodes, run.workflow, locale) : nodeRunId;
 }
 
 function formatRunDate(timestamp: number, locale?: string): string {
   return new Date(timestamp).toLocaleDateString(locale, { month: 'short', day: 'numeric' });
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'The request failed.';
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }

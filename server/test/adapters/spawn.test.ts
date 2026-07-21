@@ -66,12 +66,17 @@ describe('spawnManaged', () => {
   it('augments Windows PATH case-insensitively from injected platform and environment values', () => {
     const local = String.raw`C:\Users\Tester\AppData\Local`;
     const roaming = String.raw`C:\Users\Tester\AppData\Roaming`;
-    const existing = new Set([String.raw`C:\Users\Tester\AppData\Local\Antigravity`, String.raw`C:\Users\Tester\AppData\Roaming\npm`]);
     const env = augmentedPathEnv({
-      platform: 'win32', delimiter: ';', env: { Path: String.raw`C:\Windows;c:\users\tester\appdata\roaming\NPM`, LOCALAPPDATA: local, APPDATA: roaming },
-      exists: (path) => existing.has(path),
+      platform: 'win32', delimiter: ';', env: { Path: String.raw`C:\Windows;c:\users\tester\appdata\roaming\NPM`, LOCALAPPDATA: local, APPDATA: roaming, USERPROFILE: String.raw`C:\Users\Tester` },
+      exists: () => true,
     });
-    expect(env.Path?.split(';')).toEqual([String.raw`C:\Windows`, String.raw`c:\users\tester\appdata\roaming\NPM`, String.raw`C:\Users\Tester\AppData\Local\Antigravity`]);
+    expect(env.Path?.split(';')).toEqual([
+      String.raw`C:\Windows`,
+      String.raw`c:\users\tester\appdata\roaming\NPM`,
+      String.raw`C:\Users\Tester\AppData\Local\Programs\OpenAI\Codex\bin`,
+      String.raw`C:\Users\Tester\AppData\Local\Antigravity`,
+      String.raw`C:\Users\Tester\.local\bin`,
+    ]);
   }, 30_000);
 
   it('preserves the Windows PATH key casing and delimiter without Unix additions', () => {
