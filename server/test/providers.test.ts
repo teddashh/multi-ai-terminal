@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { clearVersionCache, probeVersion, providerVersionCacheTtlMs, providerVersionProbeTimeoutMs } from '../src/adapters/base.js';
-import { providerInstallPlan, providerInstallTimeoutMs } from '../src/providers/install.js';
+import { providerInstallPlan, providerInstallTimeoutMs, providerUpdatePlan } from '../src/providers/install.js';
 import { configureDataDir } from '../src/store/dataDir.js';
 import { createFakeExecutable } from './helpers/fakeExecutable.js';
 
@@ -31,6 +31,15 @@ describe('provider install recipes', () => {
   it('allows the slower Antigravity installer more time without changing other recipes', () => {
     expect(providerInstallTimeoutMs('agy')).toBe(600_000);
     expect(providerInstallTimeoutMs('codex')).toBe(300_000);
+  });
+
+  it('updates claude via its own updater and everything else via the install recipe', () => {
+    expect(providerUpdatePlan('claude', 'linux')).toEqual({ recipe: { command: 'claude', args: ['update'] } });
+    expect(providerUpdatePlan('claude', 'win32')).toEqual({ recipe: { command: 'claude', args: ['update'] } });
+    expect(providerUpdatePlan('codex', 'linux')).toEqual(providerInstallPlan('codex', 'linux'));
+    expect(providerUpdatePlan('agy', 'win32')).toEqual(providerInstallPlan('agy', 'win32'));
+    expect(providerUpdatePlan('agy', 'linux').recipe).toBeUndefined();
+    expect(providerUpdatePlan('mock', 'linux')).toEqual({});
   });
 });
 

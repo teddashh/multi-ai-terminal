@@ -12,6 +12,7 @@ import {
   displayPermission,
   displayProviderDetail,
   displayRunStatus,
+  displaySignInMessage,
   displaySlotLabel,
   displayStageName,
   displaySteerMode,
@@ -154,5 +155,21 @@ describe('localized display text', () => {
     expect(displayIntegrityMessage('Could not recover event 42 from persisted evidence.', 'zh-TW')).toBe('無法從持久化證據復原事件 42。');
     expect(displayIntegrityMessage('unexpected message', 'zh-TW')).toBe('unexpected message');
     expect(displayIntegrityMessage(sync, 'en')).toBe(sync);
+  });
+
+  it('translates the canonical sign-in strings and keeps CLI status text verbatim', () => {
+    expect(displaySignInMessage('Another sign-in is already in progress.', 'zh-TW')).toBe('另一個登入程序正在進行中。');
+    expect(displaySignInMessage('In-app sign-in is not available for this provider.', 'zh-TW')).toBe('此服務提供者不支援從 MAT 內登入。');
+    expect(displaySignInMessage('The sign-in command did not produce a login URL.', 'zh-TW')).toBe('登入指令沒有輸出登入連結。');
+    expect(displaySignInMessage('The sign-in was cancelled.', 'zh-TW')).toBe('已取消登入。');
+    expect(displaySignInMessage('The CLI rejected the sign-in.', 'zh-TW')).toBe('CLI 拒絕了這次登入。');
+    expect(displaySignInMessage('The sign-in timed out before completing.', 'zh-TW')).toBe('登入在完成前逾時。');
+    expect(displaySignInMessage('The CLI still reports it is not signed in.', 'zh-TW')).toBe('CLI 仍回報尚未登入。');
+    expect(displaySignInMessage('Signed in.', 'zh-TW')).toBe('已登入。');
+    expect(displaySignInMessage('Unknown sign-in session.', 'zh-TW')).toBe('找不到這個登入工作階段。');
+    expect(displaySignInMessage('The sign-in ended with exit 7 before completing.', 'zh-TW')).toBe('登入以代碼 7 結束，未能完成。');
+    expect(displaySignInMessage('The sign-in ended with exit null before completing.', 'zh-TW')).toBe('登入以代碼 null 結束，未能完成。');
+    expect(displaySignInMessage('Logged in using ChatGPT', 'zh-TW')).toBe('Logged in using ChatGPT');
+    expect(displaySignInMessage('Signed in.', 'en')).toBe('Signed in.');
   });
 });

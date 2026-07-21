@@ -1,4 +1,4 @@
-import type { AgentEvent, ApplyPatchResponse, ProviderInfo, ProviderInstallResponse, RetryStageRequest, RunCreateRequest, RunSnapshot, SteerRequest, WorkflowDef, Workspace } from '@mat/shared';
+import type { AgentEvent, ApplyPatchResponse, ProviderInfo, ProviderInstallResponse, ProviderSignInCodeResponse, ProviderSignInStartResponse, ProviderSignInStatusResponse, RetryStageRequest, RunCreateRequest, RunSnapshot, SteerRequest, WorkflowDef, Workspace } from '@mat/shared';
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string, readonly code = 'HTTP_ERROR') { super(message); }
@@ -16,6 +16,11 @@ export class ApiClient {
   getProviders(): Promise<ProviderInfo[]> { return this.request('/api/providers'); }
   refreshProviders(): Promise<ProviderInfo[]> { return this.request('/api/providers/refresh', { method: 'POST' }); }
   installProvider(id: string): Promise<ProviderInstallResponse> { return this.request(`/api/providers/${encodeURIComponent(id)}/install`, { method: 'POST' }); }
+  updateProvider(id: string): Promise<ProviderInstallResponse> { return this.request(`/api/providers/${encodeURIComponent(id)}/update`, { method: 'POST' }); }
+  startSignIn(id: string): Promise<ProviderSignInStartResponse> { return this.request(`/api/providers/${encodeURIComponent(id)}/signin/start`, { method: 'POST' }); }
+  signInStatus(id: string, loginId: string): Promise<ProviderSignInStatusResponse> { return this.request(`/api/providers/${encodeURIComponent(id)}/signin/status${queryString({ loginId })}`); }
+  submitSignInCode(id: string, loginId: string, code: string): Promise<ProviderSignInCodeResponse> { return this.request(`/api/providers/${encodeURIComponent(id)}/signin/code`, { method: 'POST', body: { loginId, code } }); }
+  cancelSignIn(id: string, loginId: string): Promise<{ ok: boolean; error?: string }> { return this.request(`/api/providers/${encodeURIComponent(id)}/signin/cancel`, { method: 'POST', body: { loginId } }); }
   getWorkspaces(): Promise<Workspace[]> { return this.request('/api/workspaces'); }
   getWorkspace(id: string): Promise<Workspace> { return this.request(`/api/workspaces/${encodeURIComponent(id)}`); }
   createWorkspace(value: { name: string; path: string; defaultWorkflowId?: string; verifyCommand?: string; verifyTimeoutSec?: number }): Promise<Workspace> { return this.request('/api/workspaces', { method: 'POST', body: value }); }

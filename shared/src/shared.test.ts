@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { AgentEventSchema, NodeRunSchema, ProviderInfoSchema, RunSnapshotSchema, StageSchema, SteerMessageSchema, SteerRequestSchema, WorkflowDefSchema, WorkspacePatchRequestSchema, WorkspaceSchema, applyWorkflowDefaults } from './index.js';
+import { AgentEventSchema, NodeRunSchema, ProviderInfoSchema, ProviderSignInCancelRequestSchema, ProviderSignInCodeRequestSchema, RunSnapshotSchema, StageSchema, SteerMessageSchema, SteerRequestSchema, WorkflowDefSchema, WorkspacePatchRequestSchema, WorkspaceSchema, applyWorkflowDefaults } from './index.js';
 
 describe('shared schemas', () => {
   it('round-trips an event', () => {
@@ -64,6 +64,23 @@ describe('shared schemas', () => {
     expect(ProviderInfoSchema.safeParse({ ...provider, extra: true }).success).toBe(false);
     const { authAlert: _alert, signInCommand: _command, ...legacy } = provider;
     expect(ProviderInfoSchema.parse(legacy)).toEqual(legacy);
+  });
+
+  it('keeps in-app sign-in and update additions optional and strict', () => {
+    const base = { id: 'codex', tier: 'rich', ok: true, installable: true, models: ['gpt'], defaultModel: 'gpt' };
+    const withSignIn = { ...base, signIn: { mode: 'device', replacesExistingLogin: true }, updatable: true };
+    expect(ProviderInfoSchema.parse(withSignIn)).toEqual(withSignIn);
+    expect(ProviderInfoSchema.parse({ ...base, signIn: { mode: 'paste-code' } }).signIn).toEqual({ mode: 'paste-code' });
+    expect(ProviderInfoSchema.parse(base)).toEqual(base);
+    expect(ProviderInfoSchema.safeParse({ ...base, signIn: { mode: 'telepathy' } }).success).toBe(false);
+    expect(ProviderInfoSchema.safeParse({ ...base, signIn: { mode: 'device', extra: true } }).success).toBe(false);
+
+    expect(ProviderSignInCodeRequestSchema.parse({ loginId: 'L1', code: 'AUTH-1234' })).toEqual({ loginId: 'L1', code: 'AUTH-1234' });
+    expect(ProviderSignInCodeRequestSchema.safeParse({ loginId: 'L1', code: '' }).success).toBe(false);
+    expect(ProviderSignInCodeRequestSchema.safeParse({ loginId: 'L1', code: 'x'.repeat(513) }).success).toBe(false);
+    expect(ProviderSignInCodeRequestSchema.safeParse({ loginId: 'L1', code: 'x', shell: 'rm' }).success).toBe(false);
+    expect(ProviderSignInCancelRequestSchema.parse({ loginId: 'L1' })).toEqual({ loginId: 'L1' });
+    expect(ProviderSignInCancelRequestSchema.safeParse({}).success).toBe(false);
   });
 
   it('enforces the per-stage fan-out cap', () => {

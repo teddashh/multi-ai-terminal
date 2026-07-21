@@ -13,7 +13,10 @@ import { SideDrawer } from './SideDrawer.js';
 
 vi.mock('zustand', () => ({ useStore: (store: { getState(): unknown }, selector: (state: never) => unknown) => selector(store.getState() as never) }));
 
-const apiMocks = { installProvider: vi.fn(), getProviders: vi.fn(), refreshProviders: vi.fn() };
+const apiMocks = {
+  installProvider: vi.fn(), getProviders: vi.fn(), refreshProviders: vi.fn(), updateProvider: vi.fn(),
+  startSignIn: vi.fn(), signInStatus: vi.fn(), submitSignInCode: vi.fn(), cancelSignIn: vi.fn(),
+};
 const api = apiMocks as unknown as ApiClient;
 const mounted: Array<{ container: HTMLDivElement; root: Root }> = [];
 
@@ -177,5 +180,137 @@ describe('ProviderSetupButton', () => {
     await waitFor(() => expect(screen.getByText(/installed and detected/)).toBeTruthy());
     expect(screen.queryByText('refresh disconnected')).toBeNull();
     expect(matStore.getState().providers[0]?.ok).toBe(true);
+  });
+});
+
+const claudeNeedsLogin: ProviderInfo = {
+  id: 'claude', tier: 'rich', ok: true, version: 'claude 3.0.0', installable: true,
+  models: ['claude'], defaultModel: 'claude',
+  authAlert: { message: 'claude is not signed in.', at: 1, runId: 'run' },
+  signIn: { mode: 'paste-code' }, updatable: true,
+};
+
+const codexNeedsLogin: ProviderInfo = {
+  id: 'codex', tier: 'rich', ok: true, version: 'codex 0.9.0', installable: true,
+  models: ['gpt'], defaultModel: 'gpt',
+  authAlert: { message: 'codex is not signed in.', at: 1, runId: 'run' },
+  signIn: { mode: 'device', replacesExistingLogin: true },
+};
+
+describe('ProviderSetupButton sign-in wizard', () => {
+  it('runs the paste-code ceremony: URL, pasted code, success notice, refresh', async () => {
+    apiMocks.startSignIn.mockResolvedValueOnce({ ok: true, loginId: 'L1', mode: 'paste-code', url: 'https://claude.ai/oauth/authorize?flow=cli' });
+    apiMocks.submitSignInCode.mockResolvedValueOnce({ ok: true, statusDetail: 'Signed in.' });
+    render(<ProviderSetupButton provider={claudeNeedsLogin} api={api} />);
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Setup claude' })));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in to claude' }));
+      await Promise.resolve();
+    });
+    expect(apiMocks.startSignIn).toHaveBeenCalledWith('claude');
+    await waitFor(() => expect(screen.getByText('https://claude.ai/oauth/authorize?flow=cli')).toBeTruthy());
+    expect(screen.getByRole('button', { name: 'Copy link' })).toBeTruthy();
+
+    act(() => fireEvent.change(screen.getByLabelText(/paste the code shown in the browser/), { target: { value: ' AUTH-1234 ' } }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Submit code' }));
+      await Promise.resolve();
+    });
+
+    expect(apiMocks.submitSignInCode).toHaveBeenCalledWith('claude', 'L1', 'AUTH-1234');
+    await waitFor(() => expect(screen.getByText(/claude is signed in\./)).toBeTruthy());
+    expect(apiMocks.refreshProviders).toHaveBeenCalled();
+  });
+
+  it('warns about the codex clobber, shows the device code, and completes on its own polling', async () => {
+    apiMocks.startSignIn.mockResolvedValueOnce({ ok: true, loginId: 'L2', mode: 'device', url: 'https://auth.openai.com/codex/device', userCode: 'JKB2-U3B4T' });
+    apiMocks.signInStatus.mockResolvedValue({ phase: 'succeeded', statusDetail: 'Logged in using ChatGPT' });
+    render(<ProviderSetupButton provider={codexNeedsLogin} api={api} />);
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Setup codex' })));
+
+    expect(screen.getByText(/immediately signs the current codex login out/)).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in to codex' }));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByText(/codex is signed in\. Logged in using ChatGPT/)).toBeTruthy());
+    expect(apiMocks.signInStatus).toHaveBeenCalledWith('codex', 'L2');
+    expect(apiMocks.refreshProviders).toHaveBeenCalled();
+  });
+
+  it('shows the sign-in URL and one-time code while a device ceremony is pending', async () => {
+    apiMocks.startSignIn.mockResolvedValueOnce({ ok: true, loginId: 'L3', mode: 'device', url: 'https://auth.openai.com/codex/device', userCode: 'JKB2-U3B4T' });
+    apiMocks.signInStatus.mockResolvedValue({ phase: 'pending', url: 'https://auth.openai.com/codex/device', userCode: 'JKB2-U3B4T' });
+    apiMocks.cancelSignIn.mockResolvedValue({ ok: true });
+    render(<ProviderSetupButton provider={codexNeedsLogin} api={api} />);
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Setup codex' })));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in to codex' }));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByText('JKB2-U3B4T')).toBeTruthy());
+    expect(screen.getByText('https://auth.openai.com/codex/device')).toBeTruthy();
+    expect(screen.getByText(/Waiting for you to approve in the browser/)).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel sign-in' }));
+      await Promise.resolve();
+    });
+    expect(apiMocks.cancelSignIn).toHaveBeenCalledWith('codex', 'L3');
+    expect(screen.getByRole('button', { name: 'Sign in to codex' })).toBeTruthy();
+  });
+
+  it('translates canonical sign-in errors in Traditional Chinese', async () => {
+    localStorage.setItem('mat-ui-preferences-v1', JSON.stringify({ language: 'zh-TW', theme: 'dark' }));
+    apiMocks.startSignIn.mockResolvedValueOnce({ ok: false, error: 'Another sign-in is already in progress.' });
+    render(<UiPreferencesProvider><ProviderSetupButton provider={claudeNeedsLogin} api={api} /></UiPreferencesProvider>);
+    act(() => fireEvent.click(screen.getByRole('button', { name: '設定 claude' })));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '登入 claude' }));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.getByText('另一個登入程序正在進行中。')).toBeTruthy());
+    expect(screen.getByRole('button', { name: '再試一次' })).toBeTruthy();
+  });
+
+  it('offers Update CLI for a healthy updatable provider and reports the refreshed version', async () => {
+    const { detail: _detail, ...detected } = unavailable;
+    const healthy: ProviderInfo = { ...detected, ok: true, version: 'grok 1.0.0', updatable: true };
+    const updated = { ...healthy, version: 'grok 2.0.0' };
+    apiMocks.updateProvider.mockResolvedValueOnce({ ok: true, exitCode: 0, provider: updated });
+    apiMocks.refreshProviders.mockResolvedValueOnce([updated]);
+    matStore.setState({ providers: [healthy] });
+    render(<ProviderSetupButton provider={healthy} api={api} />);
+
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Setup grok' })));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Update the grok CLI' }));
+      await Promise.resolve();
+    });
+
+    expect(apiMocks.updateProvider).toHaveBeenCalledWith('grok');
+    await waitFor(() => expect(screen.getByText(/grok is up to date and ready · grok 2\.0\.0/)).toBeTruthy());
+    expect(matStore.getState().providers[0]?.version).toBe('grok 2.0.0');
+  });
+
+  it('keeps the update failure log visible when the updater exits nonzero', async () => {
+    const { detail: _detail, ...detected } = unavailable;
+    const healthy: ProviderInfo = { ...detected, ok: true, version: 'grok 1.0.0', updatable: true };
+    apiMocks.updateProvider.mockResolvedValueOnce({ ok: false, exitCode: 3, logTail: 'npm ERR! tarball corrupted', provider: healthy });
+    apiMocks.refreshProviders.mockResolvedValueOnce([healthy]);
+    matStore.setState({ providers: [healthy] });
+    render(<ProviderSetupButton provider={healthy} api={api} />);
+
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Setup grok' })));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Update the grok CLI' }));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByText('The updater exited with code 3.')).toBeTruthy());
+    expect(screen.getByText(/npm ERR! tarball corrupted/)).toBeTruthy();
   });
 });

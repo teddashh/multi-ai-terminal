@@ -9,6 +9,8 @@ export interface SpawnProcessOptions {
   args: string[];
   cwd: string;
   stdin?: string;
+  /** Keep stdin piped and open for later writes instead of ignore/auto-end. */
+  stdinOpen?: boolean;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
   onTimeout?: () => void;
@@ -149,7 +151,7 @@ export function spawnManaged(options: SpawnProcessOptions): ManagedProcess {
     detached: !windows,
     windowsHide: windows,
     env: sanitizedEnvironment({ ...baseEnv, ...options.env }),
-    stdio: [options.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+    stdio: [options.stdin === undefined && options.stdinOpen !== true ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     shell: options.shell ?? false,
   });
 

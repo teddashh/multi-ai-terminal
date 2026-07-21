@@ -1,5 +1,7 @@
 import { existsSync } from 'node:fs';
 import {
+  ProviderSignInCancelRequestSchema,
+  ProviderSignInCodeRequestSchema,
   RetryStageRequestSchema,
   SteerRequestSchema,
   RunCreateRequestSchema,
@@ -27,7 +29,8 @@ import * as runManager from '../engine/runManager.js';
 import { buildDebugBundle, readTail } from '../engine/debugBundle.js';
 import { buildRunReport } from '../engine/report.js';
 import { redactEnvironmentValues } from '../redact.js';
-import { providerInstallPlan, providerInstallTimeoutMs, type ProviderInstallPlan } from '../providers/install.js';
+import { providerInstallPlan, providerInstallTimeoutMs, providerUpdatePlan, type ProviderInstallPlan } from '../providers/install.js';
+import { cancelSignIn, signInStatus, startSignIn, submitSignInCode } from '../providers/signin.js';
 import { clearAugmentedPathCache, spawnManaged, type ManagedProcess } from '../spawn.js';
 import { readEventsAfter } from '../store/eventLog.js';
 import {
@@ -73,9 +76,16 @@ export interface ApiRouteDependencies {
   providers(): ReturnType<typeof listProviders>;
   providerInstall: {
     plan(providerId: ProviderId): ProviderInstallPlan;
+    updatePlan(providerId: ProviderId): ProviderInstallPlan;
     spawn: typeof spawnManaged;
     clearVersionCache(command?: string): void;
     clearPathCache(): void;
+  };
+  providerSignIn: {
+    start: typeof startSignIn;
+    status: typeof signInStatus;
+    submitCode: typeof submitSignInCode;
+    cancel: typeof cancelSignIn;
   };
   report: typeof buildRunReport;
   workspaces: {
@@ -101,7 +111,8 @@ export interface ApiRouteDependencies {
 
 const defaultDependencies: ApiRouteDependencies = {
   providers: listProviders,
-  providerInstall: { plan: providerInstallPlan, spawn: spawnManaged, clearVersionCache, clearPathCache: clearAugmentedPathCache },
+  providerInstall: { plan: providerInstallPlan, updatePlan: providerUpdatePlan, spawn: spawnManaged, clearVersionCache, clearPathCache: clearAugmentedPathCache },
+  providerSignIn: { start: startSignIn, status: signInStatus, submitCode: submitSignInCode, cancel: cancelSignIn },
   report: buildRunReport,
   workspaces: { list: listWorkspaces, get: getWorkspace, create: createWorkspace, update: updateWorkspace, delete: deleteWorkspace },
   workflows: { list: listWorkflows, create: createWorkflow, update: updateWorkflow, delete: deleteWorkflow, duplicate: duplicateWorkflow },
@@ -132,16 +143,8 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
     dependencies.providerInstall.clearVersionCache();
     return dependencies.providers();
   }));
-  app.post('/api/providers/:id/install', wrap(async (request, reply) => {
-    const id = parseId(request);
-    const providers = await dependencies.providers();
-    const current = providers.find((provider) => provider.id === id);
-    if (!current) throw apiError(404, 'NOT_FOUND', `Provider not found: ${id}`);
-    if (current.ok) throw apiError(409, 'CONFLICT', `${id} is already installed`);
-    if (runningInstalls.has(current.id)) throw apiError(409, 'CONFLICT', `${id} installation is already running`);
-    const plan = dependencies.providerInstall.plan(current.id);
+  const runProviderRecipe = async (current: ProviderInfo, plan: ProviderInstallPlan, kind: 'install' | 'update', reply: FastifyReply): Promise<FastifyReply> => {
     if (!plan.recipe) return reply.send({ ok: false, ...(plan.manualCommand ? { manualCommand: plan.manualCommand } : {}) });
-
     runningInstalls.add(current.id);
     const startedAt = Date.now();
     let exitCode: number | null = null;
@@ -174,11 +177,52 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
       const provider = (await dependencies.providers()).find((candidate) => candidate.id === current.id) ?? current;
       const logTail = redactEnvironmentValues(output.subarray(Math.max(0, output.length - 8 * 1024)).toString('utf8'));
       const safeProvider = provider.detail === undefined ? provider : { ...provider, detail: redactEnvironmentValues(provider.detail) };
-      diag(null, 'install', { providerId: current.id, exitCode, durationMs: Math.max(0, Date.now() - startedAt) });
+      diag(null, kind, { providerId: current.id, exitCode, durationMs: Math.max(0, Date.now() - startedAt) });
       return reply.send({ ok: exitCode === 0 && provider.ok, exitCode, logTail, provider: safeProvider });
     } finally {
       runningInstalls.delete(current.id);
     }
+  };
+  app.post('/api/providers/:id/install', wrap(async (request, reply) => {
+    const id = parseId(request);
+    const providers = await dependencies.providers();
+    const current = providers.find((provider) => provider.id === id);
+    if (!current) throw apiError(404, 'NOT_FOUND', `Provider not found: ${id}`);
+    if (current.ok) throw apiError(409, 'CONFLICT', `${id} is already installed`);
+    if (runningInstalls.has(current.id)) throw apiError(409, 'CONFLICT', `${id} installation is already running`);
+    return runProviderRecipe(current, dependencies.providerInstall.plan(current.id), 'install', reply);
+  }));
+  app.post('/api/providers/:id/update', wrap(async (request, reply) => {
+    const id = parseId(request);
+    const providers = await dependencies.providers();
+    const current = providers.find((provider) => provider.id === id);
+    if (!current) throw apiError(404, 'NOT_FOUND', `Provider not found: ${id}`);
+    if (current.id === 'mock') throw apiError(409, 'CONFLICT', 'mock has no CLI to update');
+    if (!current.ok) throw apiError(409, 'CONFLICT', `${id} is not installed; use install instead`);
+    if (runningInstalls.has(current.id)) throw apiError(409, 'CONFLICT', `${id} installation is already running`);
+    return runProviderRecipe(current, dependencies.providerInstall.updatePlan(current.id), 'update', reply);
+  }));
+  const SignInStatusQuerySchema = z.object({ loginId: z.string().min(1) }).strict();
+  app.post('/api/providers/:id/signin/start', wrap(async (request) => {
+    const id = parseId(request);
+    const providers = await dependencies.providers();
+    if (!providers.some((provider) => provider.id === id)) throw apiError(404, 'NOT_FOUND', `Provider not found: ${id}`);
+    return dependencies.providerSignIn.start(id as ProviderId);
+  }));
+  app.get('/api/providers/:id/signin/status', wrap(async (request) => {
+    parseId(request);
+    const query = SignInStatusQuerySchema.parse(request.query);
+    return dependencies.providerSignIn.status(query.loginId);
+  }));
+  app.post('/api/providers/:id/signin/code', wrap(async (request) => {
+    parseId(request);
+    const body = ProviderSignInCodeRequestSchema.parse(request.body);
+    return dependencies.providerSignIn.submitCode(body.loginId, body.code);
+  }));
+  app.post('/api/providers/:id/signin/cancel', wrap(async (request) => {
+    parseId(request);
+    const body = ProviderSignInCancelRequestSchema.parse(request.body);
+    return dependencies.providerSignIn.cancel(body.loginId);
   }));
   app.post('/api/client-log', wrap(async (request, reply) => {
     const body = ClientLogSchema.parse(request.body);

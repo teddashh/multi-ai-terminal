@@ -24,3 +24,12 @@ export function providerInstallTimeoutMs(providerId: ProviderId): number {
   // first install. The npm recipes normally complete within the original cap.
   return providerId === 'agy' ? 10 * 60 * 1000 : 5 * 60 * 1000;
 }
+
+export function providerUpdatePlan(providerId: ProviderId, platform: NodeJS.Platform = process.platform): ProviderInstallPlan {
+  // claude ships its own updater that detects how it was installed (npm or the
+  // native installer); prefer it over blindly reinstalling one method.
+  if (providerId === 'claude') return { recipe: { command: 'claude', args: ['update'] } };
+  // The npm recipes install @latest, so rerunning them is the update. winget
+  // likewise upgrades an already-installed Antigravity to the newest version.
+  return providerInstallPlan(providerId, platform);
+}

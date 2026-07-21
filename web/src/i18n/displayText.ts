@@ -215,6 +215,30 @@ export function displayNodeError(text: string, locale: UiLocale): string {
   return displayAuthAlertMessage(text, locale);
 }
 
+const SIGNIN_ZH_TW: Readonly<Record<string, string>> = {
+  'Another sign-in is already in progress.': '另一個登入程序正在進行中。',
+  'In-app sign-in is not available for this provider.': '此服務提供者不支援從 MAT 內登入。',
+  'The sign-in command did not produce a login URL.': '登入指令沒有輸出登入連結。',
+  'The sign-in was cancelled.': '已取消登入。',
+  'The CLI rejected the sign-in.': 'CLI 拒絕了這次登入。',
+  'The sign-in timed out before completing.': '登入在完成前逾時。',
+  'The CLI still reports it is not signed in.': 'CLI 仍回報尚未登入。',
+  'Signed in.': '已登入。',
+  'Unknown sign-in session.': '找不到這個登入工作階段。',
+};
+const SIGNIN_EXIT_ERROR = /^The sign-in ended with exit (-?\d+|null) before completing\.$/;
+
+/** Translate the server's canonical sign-in strings; CLI-reported status text
+ * (e.g. a status probe's own words) stays verbatim. */
+export function displaySignInMessage(message: string, locale: UiLocale): string {
+  if (locale !== 'zh-TW') return message;
+  const canonical = SIGNIN_ZH_TW[message];
+  if (canonical) return canonical;
+  const exit = SIGNIN_EXIT_ERROR.exec(message);
+  if (exit) return `登入以代碼 ${exit[1]} 結束，未能完成。`;
+  return message;
+}
+
 const INTEGRITY_SYNC_MESSAGE = 'Evidence synchronization did not complete. Retry to catch up.';
 const INTEGRITY_RECOVERY_MESSAGE = 'Evidence recovery did not complete. Retry to recover missing events.';
 const INTEGRITY_EVENT_MESSAGE = /^Could not recover event (\d+) from persisted evidence\.$/;
