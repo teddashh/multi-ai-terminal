@@ -49,6 +49,7 @@ export interface GateDecision {
   rationale: string;
   raw?: string;
   degraded?: boolean;
+  verificationSummary?: { passed: number; failed: number; skipped: number };
   ts: number;
 }
 export interface SteerMessage {
@@ -58,8 +59,16 @@ export interface SteerMessage {
   interruptedStageId?: string | null;
   steerStageId?: string;
 }
+export interface RunWorkspaceSnapshot {
+  name: string;
+  path: string;
+  isGit: boolean;
+  verifyCommand?: string;
+  verifyTimeoutSec?: number;
+}
 export interface RunSnapshot {
   runId: string; workspaceId: string;
+  workspaceSnapshot?: RunWorkspaceSnapshot;
   workflow: WorkflowDef;
   task: string; status: RunStatus;
   currentStageId?: string;
@@ -100,7 +109,11 @@ export const GateDecisionSchema = z.object({
   stageId: z.string().min(1), gateAttempt: z.number().int().positive(),
   action: z.enum(['advance', 'retry', 'abort']), retryNodeRunIds: z.array(z.string()).optional(),
   promptAddendum: z.string().optional(), contextForNext: z.string().optional(), rationale: z.string(),
-  raw: z.string().optional(), degraded: z.boolean().optional(), ts: z.number().int().nonnegative(),
+  raw: z.string().optional(), degraded: z.boolean().optional(),
+  verificationSummary: z.object({
+    passed: z.number().int().nonnegative(), failed: z.number().int().nonnegative(), skipped: z.number().int().nonnegative(),
+  }).strict().optional(),
+  ts: z.number().int().nonnegative(),
 }).strict();
 export const SteerMessageSchema = z.object({
   steerId: z.string().min(1), text: z.string().min(1).max(4000), mode: z.enum(['interrupt', 'queue']),
@@ -108,8 +121,12 @@ export const SteerMessageSchema = z.object({
   createdAt: z.number().int().nonnegative(), appliedAt: z.number().int().nonnegative().optional(),
   interruptedStageId: z.string().nullable().optional(), steerStageId: z.string().optional(),
 }).strict();
+export const RunWorkspaceSnapshotSchema = z.object({
+  name: z.string().min(1), path: z.string().min(1), isGit: z.boolean(),
+  verifyCommand: z.string().optional(), verifyTimeoutSec: z.number().int().positive().optional(),
+}).strict();
 export const RunSnapshotSchema = z.object({
-  runId: z.string().min(1), workspaceId: z.string().min(1), workflow: WorkflowDefSchema,
+  runId: z.string().min(1), workspaceId: z.string().min(1), workspaceSnapshot: RunWorkspaceSnapshotSchema.optional(), workflow: WorkflowDefSchema,
   task: z.string(), status: RunStatusSchema, currentStageId: z.string().optional(),
   nodes: z.array(NodeRunSchema), gateDecisions: z.array(GateDecisionSchema),
   steers: z.array(SteerMessageSchema).optional(),

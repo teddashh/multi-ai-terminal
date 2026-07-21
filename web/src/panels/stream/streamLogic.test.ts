@@ -9,15 +9,14 @@ const event = (seq: number, overrides: Partial<AgentEvent> = {}): AgentEvent => 
 const allRoles: EventRole[] = ['user', 'agent', 'tool', 'thinking', 'system', 'decision'];
 
 describe('stream pipeline', () => {
-  it('merges consecutive chunks before applying focus, role, and node filters', () => {
+  it('preserves raw consecutive chunks while applying focus, role, and node filters', () => {
     const result = filterStreamEvents([
       event(1, { role: 'thinking', kind: 'thinking', text: 'plan ' }),
       event(2, { role: 'thinking', kind: 'thinking', text: 'carefully' }),
       event(3, { nodeRunId: 's1.b.0', text: 'other' }),
       event(4, { role: 'system', kind: 'status', text: 'done' }),
     ], { nodeRunIds: ['s1.a.0'], focusedNodeRunId: 's1.a.0', roles: allRoles.filter((role) => role !== 'system') });
-    expect(result).toHaveLength(1);
-    expect(result[0]?.text).toBe('plan carefully');
+    expect(result.map((item) => item.text)).toEqual(['plan ', 'carefully']);
   });
 
   it('searches text and tool payloads while retaining both halves of a matched tool call', () => {
@@ -48,8 +47,18 @@ describe('stream pipeline', () => {
     ]);
     expect(grouped).toHaveLength(3);
     expect(grouped[0]).toMatchObject({ duplicateCount: 2, events: [expect.objectContaining({ id: 'e1' })] });
+    expect(grouped[0]?.sourceEvents?.map((event) => event.id)).toEqual(['e1', 'e2']);
     expect(grouped[1]?.duplicateCount).toBeUndefined();
     expect(grouped[2]?.duplicateCount).toBeUndefined();
+  });
+
+  it('does not move a delayed tool result ahead of intervening evidence', () => {
+    const toolUse = event(1, { role: 'tool', kind: 'tool_use', tool: { name: 'shell', toolCallId: 'call-1', input: 'npm test' } });
+    const intervening = event(2, { text: 'another agent spoke', nodeRunId: 's1.b.0' });
+    const toolResult = event(3, { role: 'tool', kind: 'tool_result', tool: { name: 'shell', toolCallId: 'call-1', output: 'PASS' } });
+    const grouped = groupToolEvents([toolUse, intervening, toolResult]);
+    expect(grouped.flatMap((item) => item.events).map((item) => item.id)).toEqual(['e1', 'e2', 'e3']);
+    expect(grouped).toHaveLength(3);
   });
 });
 

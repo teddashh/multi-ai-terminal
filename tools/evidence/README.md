@@ -11,10 +11,10 @@ Independent black-box verifiers, deliberately separate from the vitest suites. E
 
 ## Running
 
-Against the working tree (after `npm run build`):
+Run the complete suite against the working tree (after `npm run build`):
 
 ```sh
-node tools/evidence/repro-v019.mjs
+npm run evidence
 ```
 
 Against an extracted release (deb example):
@@ -23,8 +23,18 @@ Against an extracted release (deb example):
 dpkg-deb -x Multi-AI.Terminal_<version>_amd64.deb extracted
 MAT_ROOT="extracted/usr/lib/Multi-AI Terminal" \
 MAT_EXPECT_VERSION=<version> \
-node tools/evidence/repro-v019.mjs
+npm run evidence
 ```
+
+`run-all.mjs` runs every instrument and reports a final per-script summary. A
+single instrument can still be run directly while developing it. `repro-v018`
+uses an isolated PATH with deterministic `agy` and failing-`grok` stubs, so its
+result does not depend on real provider CLIs installed on the host.
+
+The complete suite currently targets Linux/POSIX because its release-acceptance
+path verifies an extracted `.deb` and v018 uses executable stubs. Windows CI
+continues to exercise the same product boundaries through Vitest and the real
+browser smoke; it does not run `npm run evidence`.
 
 Environment:
 

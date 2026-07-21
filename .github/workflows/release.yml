@@ -60,7 +60,18 @@ jobs:
           workspaces: desktop/src-tauri
 
       - run: npm ci
+      - name: Verify tag and synchronized versions
+        env:
+          MAT_EXPECT_TAG: ${{ env.RELEASE_TAG }}
+        run: npm run verify:version
       - run: npm run build
+      - name: Verify release source and bundled-server contracts
+        if: runner.os == 'Linux'
+        run: |
+          npm test
+          npm run typecheck
+          npm run evidence
+          npm run smoke:browser
       - run: node scripts/bundle-desktop.mjs
 
       - uses: tauri-apps/tauri-action@v0
@@ -71,5 +82,5 @@ jobs:
           args: --bundles ${{ matrix.bundles }}
           tagName: ${{ env.RELEASE_TAG }}
           releaseName: Multi-AI Terminal ${{ env.RELEASE_TAG }}
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false

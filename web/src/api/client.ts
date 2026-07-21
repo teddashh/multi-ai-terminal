@@ -37,6 +37,7 @@ export class ApiClient {
   retryStage(id: string, stageId: string, value: RetryStageRequest = {}): Promise<RunSnapshot> { return this.request(`/api/runs/${encodeURIComponent(id)}/stages/${encodeURIComponent(stageId)}/retry`, { method: 'POST', body: value }); }
   steerRun(id: string, value: SteerRequest): Promise<RunSnapshot> { return this.request(`/api/runs/${encodeURIComponent(id)}/steer`, { method: 'POST', body: value }); }
   clientLog(value: { level: 'error'|'warn'; message: string; stack?: string; url?: string }): Promise<void> { return this.request('/api/client-log', { method: 'POST', body: value }); }
+  getServerLog(): Promise<string> { return this.request('/api/debug/server-log', { response: 'text' }); }
   applyPatch(id: string, nodeRunId: string): Promise<ApplyPatchResponse> { return this.request(`/api/runs/${encodeURIComponent(id)}/nodes/${encodeURIComponent(nodeRunId)}/apply-patch`, { method: 'POST' }); }
   deleteRun(id: string): Promise<void> { return this.request(`/api/runs/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
 

@@ -107,7 +107,10 @@ export function buildRunReport(run: RunSnapshot, workspace: Workspace, events: A
     const stage = run.workflow.stages.find((candidate) => candidate.id === decision.stageId)?.name
       ?? run.steers?.find((steer) => steer.steerStageId === decision.stageId)?.steerStageId
       ?? decision.stageId;
-    lines.push(`- **${stage}** — ${decision.action}${decision.degraded ? ' (degraded)' : ''}: ${decision.rationale}`);
+    const verification = decision.verificationSummary
+      ? ` [verification: ${decision.verificationSummary.passed} passed / ${decision.verificationSummary.failed} failed / ${decision.verificationSummary.skipped} skipped]`
+      : '';
+    lines.push(`- **${stage}** — ${decision.action}${decision.degraded ? ' (degraded)' : ''}: ${decision.rationale}${verification}`);
     if (decision.contextForNext) lines.push(`  > ${truncate(decision.contextForNext, 600).replaceAll('\n', '\n  > ')}`);
   }
 

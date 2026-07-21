@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { buildRunReport } from '../../src/engine/report.js';
 
 const dirs: string[] = [];
-afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 3 }))));
+afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }))));
 
 describe('run report', () => {
   it('renders deterministic evidence, handoffs, degraded gates, and failure logs', () => {
@@ -26,7 +26,10 @@ describe('run report', () => {
         verification: { status: 'failed', command: 'npm test', exitCode: 1, durationMs: 50, outputTail: 'assertion failed' },
         handoff: { priorNodeRunIds: ['implement.i.0'], orchestratorContext: true, retryAddendum: false },
       }],
-      gateDecisions: [{ stageId: 'review', gateAttempt: 2, action: 'advance', degraded: true, rationale: 'budget exhausted', contextForNext: 'Fix tests', ts: 3500 }],
+      gateDecisions: [{
+        stageId: 'review', gateAttempt: 2, action: 'advance', degraded: true, rationale: 'budget exhausted', contextForNext: 'Fix tests',
+        verificationSummary: { passed: 0, failed: 1, skipped: 0 }, ts: 3500,
+      }],
       providerVersions: { mock: 'mock/0' },
     };
     const workspace: Workspace = { id: 'w', name: 'Repo', path: dir, isGit: true };
@@ -38,6 +41,7 @@ describe('run report', () => {
     expect(report).toContain('degraded at stage Review');
     expect(report).toContain('Handoff: ← implement.i.0 + orchestrator context');
     expect(report).toContain('## Gate decisions');
+    expect(report).toContain('[verification: 0 passed / 1 failed / 0 skipped]');
     expect(report).toContain('## Verification logs');
     expect(report).toContain('assertion failed');
     expect(report).toContain('tool calls 1');

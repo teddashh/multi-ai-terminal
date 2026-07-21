@@ -7,6 +7,7 @@ import { spawnManaged } from '../spawn.js';
 import { appendEvent } from '../store/eventLog.js';
 import { runDirectory } from './worktree.js';
 import { diag } from '../diag.js';
+import { redactEnvironmentValues } from '../redact.js';
 
 const OUTPUT_TAIL_LIMIT = 2000;
 
@@ -34,7 +35,7 @@ function emitResult(node: NodeRun, runId: string, result: VerificationResult): v
     kind,
     text,
     data: { detail: 'verify-result', verification: result },
-  });
+  }, { trustedData: true });
 }
 
 async function writeLog(path: string, content: string): Promise<void> {
@@ -47,6 +48,9 @@ async function writeLog(path: string, content: string): Promise<void> {
 export async function verifyCandidate(node: NodeRun, workspace: Workspace, runId: string): Promise<NodeRun['verification']> {
   const command = workspace.verifyCommand?.trim();
   if (!command) return { status: 'skipped', reason: 'no-verify-command' };
+  // Execute the configured command verbatim, but never persist an environment
+  // value that may have been interpolated into the command or its output.
+  const persistedCommand = redactEnvironmentValues(command);
   if (node.status !== 'done') {
     const result: VerificationResult = { status: 'skipped', reason: 'node-not-done' };
     emitResult(node, runId, result);
@@ -65,7 +69,7 @@ export async function verifyCandidate(node: NodeRun, workspace: Workspace, runId
       emitResult(node, runId, result);
       return result;
     }
-    const result: VerificationResult = { status: 'error', reason: humanizeError(error) };
+    const result: VerificationResult = { status: 'error', reason: redactEnvironmentValues(humanizeError(error)) };
     emitResult(node, runId, result);
     return result;
   }
@@ -77,13 +81,13 @@ export async function verifyCandidate(node: NodeRun, workspace: Workspace, runId
     attempt: node.attempt,
     role: 'system',
     kind: 'status',
-    text: `Verification started: ${command}`,
+    text: `Verification started: ${persistedCommand}`,
     data: { detail: 'verify-start' },
-  });
+  }, { trustedData: true });
 
   const startedAt = Date.now();
   const timeoutSec = workspace.verifyTimeoutSec ?? 600;
-  diag(runId, 'verify-start', { nodeRunId: node.nodeRunId, attempt: node.attempt, command, cwd: node.cwd, timeoutSec });
+  diag(runId, 'verify-start', { nodeRunId: node.nodeRunId, attempt: node.attempt, command: persistedCommand, cwd: node.cwd, timeoutSec });
   const logFile = join(runDirectory(runId), 'artifacts', `${node.nodeRunId}.a${node.attempt}.verify.log`);
   let output = '';
   let timedOut = false;
@@ -116,12 +120,13 @@ export async function verifyCandidate(node: NodeRun, workspace: Workspace, runId
       managed.child.once('close', (code) => finish({ code, error: code === null ? runtimeError : undefined }));
     });
     const durationMs = Math.max(0, Date.now() - startedAt);
-    await writeLog(logFile, output);
-    const common = { command, exitCode: outcome.code, durationMs, outputTail: tail(output), logFile };
+    const persistedOutput = redactEnvironmentValues(output);
+    await writeLog(logFile, persistedOutput);
+    const common = { command: persistedCommand, exitCode: outcome.code, durationMs, outputTail: tail(persistedOutput), logFile };
     const result: VerificationResult = timedOut
       ? { status: 'error', ...common, reason: 'timeout' }
       : outcome.error
-        ? { status: 'error', ...common, reason: humanizeError(outcome.error) }
+        ? { status: 'error', ...common, reason: redactEnvironmentValues(humanizeError(outcome.error)) }
         : outcome.code === 0
           ? { status: 'passed', ...common }
           : { status: 'failed', ...common };
@@ -133,10 +138,11 @@ export async function verifyCandidate(node: NodeRun, workspace: Workspace, runId
     return result;
   } catch (error) {
     const durationMs = Math.max(0, Date.now() - startedAt);
-    try { await writeLog(logFile, output); } catch { /* The execution error remains the primary evidence. */ }
+    const persistedOutput = redactEnvironmentValues(output);
+    try { await writeLog(logFile, persistedOutput); } catch { /* The execution error remains the primary evidence. */ }
     const result: VerificationResult = {
-      status: 'error', command, exitCode: null, durationMs, outputTail: tail(output),
-      reason: timedOut ? 'timeout' : humanizeError(error), logFile,
+      status: 'error', command: persistedCommand, exitCode: null, durationMs, outputTail: tail(persistedOutput),
+      reason: timedOut ? 'timeout' : redactEnvironmentValues(humanizeError(error)), logFile,
     };
     emitResult(node, runId, result);
     diag(runId, 'verify-result', {

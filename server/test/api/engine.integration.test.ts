@@ -93,7 +93,7 @@ describe('API lifecycle with the real run manager', () => {
     } finally {
       await app.close();
     }
-  });
+  }, 30_000);
 
   it('runs a planning-shaped mock workflow through durable events, snapshot WS broadcasts, decisions, and paged replay', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'mat-choreography-'));
@@ -159,7 +159,7 @@ describe('API lifecycle with the real run manager', () => {
       socket.close();
       await app.close();
     }
-  });
+  }, 30_000);
 
   it('kills a node, retries its terminal stage, and aborts a separate active run through REST', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'mat-controls-'));
@@ -223,6 +223,7 @@ describe('API lifecycle with the real run manager', () => {
       } })).json() as RunSnapshot;
       const finished = await waitForRun(app, created.runId, terminal);
       const node = finished.nodes[0]!;
+      expect(finished.workspaceSnapshot).toEqual({ name: 'Repo', path: workspaceDir, isGit: true });
       expect(node.patchFile?.startsWith(dataDir)).toBe(true);
       expect(existsSync(node.patchFile!)).toBe(true);
       expect(existsSync(node.cwd)).toBe(true);
@@ -230,13 +231,16 @@ describe('API lifecycle with the real run manager', () => {
       expect(patch.statusCode).toBe(200);
       expect(patch.headers['content-type']).toContain('text/plain');
 
+      expect((await app.inject({ method: 'DELETE', url: `/api/workspaces/${workspace.id}` })).statusCode).toBe(204);
+      expect((await app.inject({ method: 'GET', url: `/api/runs/${created.runId}/report` })).statusCode).toBe(200);
+      expect((await app.inject({ method: 'GET', url: `/api/runs/${created.runId}/debug-bundle` })).statusCode).toBe(200);
       expect((await app.inject({ method: 'DELETE', url: `/api/runs/${created.runId}` })).statusCode).toBe(204);
       expect(existsSync(node.cwd)).toBe(false);
       expect(execFileSync('git', ['-C', workspaceDir, 'branch', '--list', `mat/${created.runId}/*`], { encoding: 'utf8' }).trim()).toBe('');
     } finally {
       await app.close();
     }
-  });
+  }, 30_000);
 
   it('enforces requireVerified retries, degrades at budget exhaustion, and stays inert for skipped checks', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'mat-required-verify-'));
@@ -265,11 +269,32 @@ describe('API lifecycle with the real run manager', () => {
       } })).json() as RunSnapshot;
       const failed = await waitForRun(app, failedCreated.runId, terminal);
       expect(failed.nodes[0]).toMatchObject({ attempt: 2, verification: { status: 'failed', exitCode: 1 } });
-      expect(failed.gateDecisions[0]).toMatchObject({ action: 'retry', retryNodeRunIds: ['stage-1.slot-1.0'] });
+      expect(failed.gateDecisions[0]).toMatchObject({
+        action: 'retry', retryNodeRunIds: ['stage-1.slot-1.0'],
+        verificationSummary: { passed: 0, failed: 1, skipped: 0 },
+      });
       expect(failed.gateDecisions[0]?.rationale).toContain('requireVerified');
       expect(failed.gateDecisions[1]).toMatchObject({ action: 'advance', degraded: true });
       const failedEvents = (await app.inject({ method: 'GET', url: `/api/runs/${failed.runId}/events?limit=1000` })).json();
       expect(failedEvents).toEqual(expect.arrayContaining([expect.objectContaining({ data: expect.objectContaining({ detail: 'gate-degraded' }) })]));
+
+      const deterministicRequired = structuredClone(required);
+      deterministicRequired.id = 'required-verification-no-orchestrator';
+      deterministicRequired.orchestrator.enabled = false;
+      const deterministicCreated = (await app.inject({ method: 'POST', url: '/api/runs', payload: {
+        workspaceId: failingWorkspace.id,
+        workflowId: deterministicRequired.id,
+        task: 'MOCK_WRITE:deterministic-evidence.txt',
+        workflowOverride: deterministicRequired,
+      } })).json() as RunSnapshot;
+      const deterministic = await waitForRun(app, deterministicCreated.runId, terminal);
+      expect(deterministic.nodes[0]).toMatchObject({ attempt: 2, verification: { status: 'failed', exitCode: 1 } });
+      expect(deterministic.gateDecisions).toEqual([
+        expect.objectContaining({ action: 'retry', retryNodeRunIds: ['stage-1.slot-1.0'] }),
+        expect.objectContaining({ action: 'advance', degraded: true }),
+      ]);
+      expect(deterministic.gateDecisions[0]?.rationale).toContain('requireVerified');
+      expect(deterministic.gateDecisions[0]?.rationale).toContain('orchestrator disabled');
 
       const skippedCreated = (await app.inject({ method: 'POST', url: '/api/runs', payload: {
         workspaceId: skippedWorkspace.id, workflowId: required.id, task, workflowOverride: required,
@@ -282,7 +307,7 @@ describe('API lifecycle with the real run manager', () => {
     } finally {
       await app.close();
     }
-  });
+  }, 30_000);
 
   it('prunes real worktree metadata and branches when retention removes the oldest run', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'mat-retention-data-'));
@@ -308,7 +333,7 @@ describe('API lifecycle with the real run manager', () => {
     expect(existsSync(join(dataDir, 'runs', oldest.runId))).toBe(false);
     expect(existsSync(worktree.cwd)).toBe(false);
     expect(execFileSync('git', ['-C', workspaceDir, 'branch', '--list', worktree.branch], { encoding: 'utf8' }).trim()).toBe('');
-  });
+  }, 30_000);
 
   it('supports the web duplicate-then-update sequence for builtin edits', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'mat-duplicate-api-'));

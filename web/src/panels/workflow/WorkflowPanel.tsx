@@ -11,8 +11,10 @@ import {
 import type { AgentBinding, ProviderInfo, Slot, Stage, WorkflowDef } from '@mat/shared';
 import { useEffect, useRef, useState } from 'react';
 import { apiClient, type ApiClient } from '../../api/client.js';
-import { ACTIVE_RUN_STATUSES, useMatStore } from '../../app/store.js';
+import { ACTIVE_RUN_STATUSES, matStore, useMatStore } from '../../app/store.js';
 import { AgentChip } from '../../components/AgentChip.js';
+import { ProviderSetupButton } from '../../components/ProviderSetup.js';
+import { SideDrawer } from '../../components/SideDrawer.js';
 import {
   appendSlotWithProviderDefaults,
   cloneWorkflow,
@@ -37,6 +39,7 @@ export function WorkflowPanel({ api = apiClient }: WorkflowPanelProps) {
   const setWorkflows = useMatStore((state) => state.setWorkflows);
   const upsertRun = useMatStore((state) => state.upsertRun);
   const setActiveRunId = useMatStore((state) => state.setActiveRunId);
+  const setViewedRunId = useMatStore((state) => state.setViewedRunId);
   const selectedWorkspace = workspaces.find((workspace) => workspace.id === selectedWorkspaceId);
   const [workflowId, setWorkflowId] = useState('');
   const [openSlot, setOpenSlot] = useState<string>();
@@ -46,12 +49,20 @@ export function WorkflowPanel({ api = apiClient }: WorkflowPanelProps) {
   const [actionPending, setActionPending] = useState(false);
   const [fallbackStage, setFallbackStage] = useState('');
   const [fallbackProvider, setFallbackProvider] = useState('');
+  const [customizing, setCustomizing] = useState(false);
   const lastWorkspaceId = useRef<string>();
   const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor));
 
   useEffect(() => {
     const workspaceChanged = lastWorkspaceId.current !== selectedWorkspaceId;
     lastWorkspaceId.current = selectedWorkspaceId;
+    if (workspaceChanged) {
+      setTask('');
+      setOpenSlot(undefined);
+      setOrchestratorOpen(false);
+      setActionError(undefined);
+      setCustomizing(false);
+    }
     const preferred = selectedWorkspace?.defaultWorkflowId;
     setWorkflowId((current) => {
       if (workspaceChanged) return workflows.some((workflow) => workflow.id === preferred) ? preferred! : (workflows[0]?.id ?? '');
@@ -66,6 +77,7 @@ export function WorkflowPanel({ api = apiClient }: WorkflowPanelProps) {
   const unavailableBindings = workflow ? unavailableProviderBindings(workflow, providers) : [];
   const providerPreflightError = unavailableBindings.length > 0 ? unavailableBindings.join('\n') : undefined;
   const authWarnings = workflow ? workflowAuthWarnings(workflow, providers) : [];
+  const verificationWarnings = workflow ? workflowVerificationWarnings(workflow, selectedWorkspace?.verifyCommand) : [];
 
   useEffect(() => {
     if (!workflow) return;
@@ -125,63 +137,88 @@ export function WorkflowPanel({ api = apiClient }: WorkflowPanelProps) {
   const startRun = async () => {
     if (!selectedWorkspaceId || !baseWorkflow || !task.trim() || activeRun || invalidStage || runsLoading) return;
     if (providerPreflightError) { setActionError(providerPreflightError); return; }
+    const requestedWorkspaceId = selectedWorkspaceId;
     setActionPending(true); setActionError(undefined);
     try {
-      const run = await api.createRun(createRunRequest(selectedWorkspaceId, baseWorkflow, task, edits));
-      upsertRun(run); setActiveRunId(run.runId);
-    } catch (error) { setActionError(error instanceof Error ? error.message : 'Could not start run.'); }
+      const run = await api.createRun(createRunRequest(requestedWorkspaceId, baseWorkflow, task, edits));
+      upsertRun(run);
+      if (matStore.getState().selectedWorkspaceId === requestedWorkspaceId) {
+        setActiveRunId(run.runId); setViewedRunId(run.runId);
+      }
+    } catch (error) {
+      if (matStore.getState().selectedWorkspaceId === requestedWorkspaceId) {
+        setActionError(error instanceof Error ? error.message : 'Could not start run.');
+      }
+    }
     finally { setActionPending(false); }
   };
 
-  if (!selectedWorkspaceId) return <section className="h-full p-3"><h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Workflow</h2><p className="text-xs text-muted">Select a workspace to configure a workflow.</p></section>;
+  if (!selectedWorkspaceId) return <section className="h-full p-4"><h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Launchpad</h2><p className="text-xs text-muted">Select a workspace to configure and start a workflow.</p></section>;
+
+  const readiness = workflow ? workflowReadiness(workflow, providers) : { ready: 0, required: 0 };
+  const boundProviders = workflow ? providersForWorkflow(workflow).map((id) => providers.find((provider) => provider.id === id)).filter((provider): provider is ProviderInfo => provider !== undefined) : [];
 
   return <DndContext sensors={sensors} onDragEnd={onDragEnd}>
-    <section aria-labelledby="workflow-heading" className="h-full overflow-auto p-3">
-      <h2 id="workflow-heading" className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted">Workflow</h2>
-      <label className="block text-xs text-muted">Mode
-        <select aria-label="Workflow" value={workflowId} onChange={(event) => { setWorkflowId(event.target.value); setOpenSlot(undefined); setOrchestratorOpen(false); }} className="mt-1 w-full rounded border border-border bg-zinc-950 px-2 py-2 text-sm text-ink">
-          {workflows.map((item) => <option key={item.id} value={item.id}>{item.builtin ? '⭐ ' : ''}{item.name}{item.id === selectedWorkspace?.defaultWorkflowId ? ' (default)' : ''}</option>)}
-        </select>
-      </label>
-
-      {!workflow && <p className="mt-3 text-xs text-muted">No workflows available.</p>}
-      {workflow && <>
-        <p className="mt-2 text-xs text-muted">{workflow.description}</p>
-        {baseWorkflow?.builtin && edits[baseWorkflow.id] && <div className="mt-3 rounded border border-amber-800 bg-amber-950/30 p-2 text-xs text-amber-200"><span>editing a copy — Duplicate to save</span><button type="button" disabled={actionPending} onClick={() => void duplicateBuiltin()} className="ml-2 rounded border border-amber-700 px-2 py-1 font-medium hover:bg-amber-900 disabled:opacity-50">Duplicate</button></div>}
-        {!baseWorkflow?.builtin && edits[workflow.id] && <div className="mt-3 flex items-center justify-between rounded border border-border bg-zinc-900 p-2 text-xs"><span className="text-muted">Unsaved workflow edits</span><button type="button" disabled={actionPending} onClick={() => void saveCustom()} className="rounded border border-accent px-2 py-1 text-violet-200 disabled:opacity-50">Save changes</button></div>}
-
-        <div className="mt-3 space-y-3">
-          {workflow.stages.map((stage) => <StageEditor key={stage.id} stage={stage} providers={providers} openSlot={openSlot} onOpenSlot={(id) => setOpenSlot((current) => current === id ? undefined : id)} onUpdate={(update) => updateStage(stage.id, update)} />)}
-        </div>
-
-        <section aria-labelledby="run-box-heading" className="mt-4 rounded border border-border bg-zinc-900/50 p-3">
-          <h3 id="run-box-heading" className="text-xs font-semibold uppercase tracking-wide text-muted">Run task</h3>
-          <textarea aria-label="Task" value={task} onChange={(event) => setTask(event.target.value)} rows={5} placeholder="Describe the work for this workflow…" className="mt-2 w-full resize-y rounded border border-border bg-zinc-950 px-2 py-2 text-sm text-ink outline-none focus:border-accent" />
-          <div className="relative mt-2 rounded border border-border bg-zinc-950/60 p-2">
-            <label className="flex items-center justify-between gap-2 text-xs"><span className="text-muted">Orchestrator</span><input type="checkbox" checked={workflow.orchestrator.enabled} onChange={(event) => commit((copy) => { copy.orchestrator.enabled = event.target.checked; })} /></label>
-            <button type="button" onClick={() => setOrchestratorOpen((value) => !value)} className="mt-2 w-full rounded bg-zinc-900 px-2 py-1.5 text-left text-xs hover:bg-zinc-800" aria-expanded={orchestratorOpen}>{bindingSummary(workflow.orchestrator.agent)}</button>
-            {orchestratorOpen && <BindingEditor title="Orchestrator binding" binding={workflow.orchestrator.agent} providers={providers} onChange={(agent) => commit((copy) => { copy.orchestrator.agent = agent; })} onClose={() => setOrchestratorOpen(false)} />}
-          </div>
-          {activeRun && <p className="mt-2 text-xs text-amber-300">A {activeRun.status} run already exists in this workspace.</p>}
-          {invalidStage && <p className="mt-2 text-xs text-red-300">{invalidStage.name} must contain 1–12 agents.</p>}
-          {providerPreflightError && <p className="mt-2 whitespace-pre-line text-xs text-red-300">{providerPreflightError}</p>}
-          {authWarnings.length > 0 && <p className="mt-2 text-xs text-amber-300" role="status">Sign-in warning: {authWarnings.join(' · ')}</p>}
-          <button type="button" onClick={() => void startRun()} disabled={!task.trim() || !!activeRun || !!invalidStage || !!providerPreflightError || actionPending || runsLoading} className="mt-3 w-full rounded bg-accent px-3 py-2 text-sm font-semibold text-zinc-950 disabled:cursor-not-allowed disabled:opacity-40">{actionPending || runsLoading ? 'Working…' : 'Start'}</button>
-        </section>
-
-        <section aria-labelledby="agent-palette-heading" className="mt-4 rounded border border-border bg-zinc-950/60 p-3">
-          <h3 id="agent-palette-heading" className="text-xs font-semibold uppercase tracking-wide text-muted">Agent palette</h3>
-          <p className="mt-1 text-[11px] text-muted">Drag a provider onto a stage, or use the add-agent controls.</p>
-          <div className="mt-2 flex flex-wrap gap-2">{providers.map((provider) => <PaletteAgent key={provider.id} provider={provider} api={api} />)}</div>
-          {providers.length === 0 && <p className="mt-2 text-xs text-muted">Provider discovery pending.</p>}
-          <div className="mt-3 grid grid-cols-[1fr_1fr_auto] gap-2">
-            <select aria-label="Stage for new agent" value={fallbackStage} onChange={(event) => setFallbackStage(event.target.value)} className="min-w-0 rounded border border-border bg-zinc-950 px-2 py-1.5 text-xs"><option value="">Stage</option>{workflow.stages.map((stage) => <option key={stage.id} value={stage.id} disabled={stageAgentCount(stage) >= MAX_STAGE_AGENTS}>{stage.name}</option>)}</select>
-            <select aria-label="Provider for new agent" value={fallbackProvider} onChange={(event) => setFallbackProvider(event.target.value)} className="min-w-0 rounded border border-border bg-zinc-950 px-2 py-1.5 text-xs"><option value="">Provider</option>{providers.map((provider) => <option key={provider.id} value={provider.id} disabled={!provider.ok}>{provider.id}{provider.ok ? '' : ' (unavailable)'}</option>)}</select>
-            <button type="button" onClick={() => appendProvider(fallbackStage, fallbackProvider)} disabled={!fallbackStage || !fallbackProvider} className="rounded border border-accent px-2 py-1.5 text-xs text-violet-200 disabled:opacity-40">+ add agent</button>
+    <section aria-labelledby="workflow-heading" className="flex h-full min-h-0 flex-col">
+      <header className="shrink-0 border-b border-border px-4 py-3">
+        <div className="flex items-center justify-between gap-2"><div className="min-w-0"><h2 id="workflow-heading" className="text-xs font-semibold uppercase tracking-wider text-muted">Launchpad</h2><p className="mt-1 truncate text-sm font-medium text-ink">{selectedWorkspace?.name}</p></div>{workflow && <button type="button" aria-haspopup="dialog" aria-expanded={customizing} onClick={() => setCustomizing(true)} className="shrink-0 rounded border border-border px-2 py-1 text-[11px] text-violet-200 hover:border-accent">Customize</button>}</div>
+      </header>
+      <div className="min-h-0 flex-1 overflow-auto p-3">
+        <section aria-labelledby="workflow-mode-heading">
+          <div className="mb-2 flex items-center justify-between"><h3 id="workflow-mode-heading" className="text-[11px] font-semibold uppercase tracking-wide text-muted">Choose a mode</h3><span className="text-[10px] text-muted">{workflows.length} available</span></div>
+          <div className="grid grid-cols-2 gap-2" role="group" aria-label="Workflow">
+            {workflows.map((item) => {
+              const selected = item.id === workflowId;
+              const itemReadiness = workflowReadiness(edits[item.id] ?? item, providers);
+              return <button key={item.id} type="button" aria-pressed={selected} onClick={() => { setWorkflowId(item.id); setOpenSlot(undefined); setOrchestratorOpen(false); }} className={`min-h-24 rounded-lg border p-2.5 text-left transition-colors ${selected ? 'border-accent bg-violet-950/30' : 'border-border bg-zinc-900/40 hover:border-zinc-600'}`}>
+                <span className="flex items-start gap-1.5"><span className="min-w-0 flex-1 text-sm font-semibold text-ink">{item.builtin ? '✦ ' : ''}{item.name}</span>{item.id === selectedWorkspace?.defaultWorkflowId && <span className="rounded bg-zinc-800 px-1 py-0.5 text-[9px] text-muted">default</span>}</span>
+                <span className="mt-1 line-clamp-2 text-[10px] leading-4 text-muted">{item.description || `${item.stages.length} stage workflow`}</span>
+                <span className={`mt-2 inline-flex rounded-full border px-1.5 py-0.5 text-[9px] ${itemReadiness.ready === itemReadiness.required ? 'border-emerald-800 text-emerald-300' : 'border-amber-800 text-amber-300'}`}>Available {itemReadiness.ready}/{itemReadiness.required}</span>
+              </button>;
+            })}
           </div>
         </section>
-      </>}
-      {actionError && <p role="alert" className="mt-3 rounded border border-red-900 bg-red-950/40 p-2 text-xs text-red-300">{actionError}</p>}
+
+        {!workflow && <p className="mt-4 text-xs text-muted">No workflows available.</p>}
+        {workflow && <>
+          <section aria-labelledby="run-box-heading" className="mt-4 rounded-lg border border-border bg-zinc-900/45 p-3">
+            <div className="flex items-center justify-between gap-2"><h3 id="run-box-heading" className="text-xs font-semibold uppercase tracking-wide text-muted">Run task</h3><span className={`rounded-full border px-2 py-0.5 text-[10px] ${readiness.ready === readiness.required ? 'border-emerald-800 text-emerald-300' : 'border-amber-800 text-amber-300'}`}>{readiness.ready === readiness.required ? 'Ready' : 'Needs setup'} · {readiness.ready}/{readiness.required}</span></div>
+            <p className="mt-1 text-[11px] text-muted">{workflow.description}</p>
+            <textarea aria-label="Task" value={task} onChange={(event) => setTask(event.target.value)} rows={6} placeholder="What should the agents accomplish?" className="mt-3 w-full resize-y rounded border border-border bg-zinc-950 px-3 py-2 text-sm text-ink outline-none focus:border-accent" />
+
+            <div className="mt-3 space-y-1.5" aria-label="Provider readiness">
+              {boundProviders.map((provider) => <div key={provider.id} className="flex items-center gap-2 rounded border border-border/80 bg-zinc-950/60 px-2 py-1.5">
+                <span className={`h-2 w-2 rounded-full ${!provider.ok ? 'bg-red-400' : provider.authAlert ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                <span className="text-xs font-medium text-ink">{provider.id}</span>
+                <span className="min-w-0 flex-1 truncate text-[10px] text-muted">{provider.id === 'mock' ? 'Deterministic test provider' : !provider.ok ? (provider.detail ?? 'Unavailable') : provider.authAlert ? 'Recent authentication failure' : `CLI detected${provider.version ? ` · ${provider.version}` : ''}`}</span>
+                <ProviderSetupButton provider={provider} api={api} />
+              </div>)}
+              {boundProviders.length === 0 && <p className="text-[11px] text-muted">Provider discovery is still loading.</p>}
+            </div>
+
+            {activeRun && <p className="mt-2 text-xs text-amber-300">A {activeRun.status} run already exists in this workspace.</p>}
+            {invalidStage && <p className="mt-2 text-xs text-red-300">{invalidStage.name} must contain 1–12 agents.</p>}
+            {providerPreflightError && <p className="mt-2 whitespace-pre-line text-xs text-red-300">{providerPreflightError}</p>}
+            {verificationWarnings.length > 0 && <div className="mt-2 rounded border border-amber-800 bg-amber-950/30 p-2 text-xs text-amber-200" role="status"><strong>Verification readiness warning</strong><ul className="mt-1 list-inside list-disc space-y-0.5">{verificationWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div>}
+            {authWarnings.length > 0 && <p className="mt-2 text-xs text-amber-300" role="status">Sign-in warning: {authWarnings.join(' · ')}</p>}
+            {baseWorkflow?.builtin && edits[baseWorkflow.id] && <p className="mt-2 text-[11px] text-amber-200">Customized for this run · duplicate it to save permanently.</p>}
+            {!baseWorkflow?.builtin && edits[workflow.id] && <p className="mt-2 text-[11px] text-amber-200">This custom workflow has unsaved changes.</p>}
+            <button type="button" onClick={() => void startRun()} disabled={!task.trim() || !!activeRun || !!invalidStage || !!providerPreflightError || actionPending || runsLoading} className="mt-3 w-full rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-zinc-950 shadow-lg shadow-violet-950/30 hover:bg-violet-300 disabled:cursor-not-allowed disabled:opacity-40">{actionPending || runsLoading ? 'Working…' : 'Start'}</button>
+          </section>
+          {actionError && <p role="alert" className="mt-3 rounded border border-red-900 bg-red-950/40 p-2 text-xs text-red-300">{actionError}</p>}
+        </>}
+      </div>
+
+      <SideDrawer open={customizing && workflow !== undefined} title={workflow ? `Customize · ${workflow.name}` : 'Customize workflow'} onClose={() => setCustomizing(false)} widthClassName="max-w-2xl">
+        {workflow && <>
+          <p className="text-sm text-muted">Advanced stage, model, isolation, gate and orchestrator settings. These changes affect the next run only unless you save a custom workflow.</p>
+          {baseWorkflow?.builtin && edits[baseWorkflow.id] && <div className="mt-3 flex items-center justify-between gap-2 rounded border border-amber-800 bg-amber-950/30 p-2 text-xs text-amber-200"><span>Editing a run-scoped copy</span><button type="button" disabled={actionPending} onClick={() => void duplicateBuiltin()} className="rounded border border-amber-700 px-2 py-1 font-medium hover:bg-amber-900 disabled:opacity-50">Duplicate to save</button></div>}
+          {!baseWorkflow?.builtin && edits[workflow.id] && <div className="mt-3 flex items-center justify-between rounded border border-border bg-zinc-900 p-2 text-xs"><span className="text-muted">Unsaved workflow edits</span><button type="button" disabled={actionPending} onClick={() => void saveCustom()} className="rounded border border-accent px-2 py-1 text-violet-200 disabled:opacity-50">Save changes</button></div>}
+          <section className="mt-4"><h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Stages</h3><div className="space-y-3">{workflow.stages.map((stage) => <StageEditor key={stage.id} stage={stage} providers={providers} openSlot={openSlot} onOpenSlot={(id) => setOpenSlot((current) => current === id ? undefined : id)} onUpdate={(update) => updateStage(stage.id, update)} />)}</div></section>
+          <section className="relative mt-4 rounded border border-border bg-zinc-950/60 p-3"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Orchestrator</h3><label className="mt-2 flex items-center justify-between gap-2 text-xs"><span className="text-muted">Enabled</span><input type="checkbox" checked={workflow.orchestrator.enabled} onChange={(event) => commit((copy) => { copy.orchestrator.enabled = event.target.checked; })} /></label><button type="button" onClick={() => setOrchestratorOpen((value) => !value)} className="mt-2 w-full rounded bg-zinc-900 px-2 py-1.5 text-left text-xs hover:bg-zinc-800" aria-expanded={orchestratorOpen}>{bindingSummary(workflow.orchestrator.agent)}</button>{orchestratorOpen && <BindingEditor title="Orchestrator binding" binding={workflow.orchestrator.agent} providers={providers} onChange={(agent) => commit((copy) => { copy.orchestrator.agent = agent; })} onClose={() => setOrchestratorOpen(false)} />}</section>
+          <section aria-labelledby="agent-palette-heading" className="mt-4 rounded border border-border bg-zinc-950/60 p-3"><h3 id="agent-palette-heading" className="text-xs font-semibold uppercase tracking-wide text-muted">Agent palette</h3><p className="mt-1 text-[11px] text-muted">Drag a provider onto a stage, or use the accessible add-agent controls.</p><div className="mt-2 flex flex-wrap gap-2">{providers.map((provider) => <PaletteAgent key={provider.id} provider={provider} api={api} />)}</div><div className="mt-3 grid grid-cols-[1fr_1fr_auto] gap-2"><select aria-label="Stage for new agent" value={fallbackStage} onChange={(event) => setFallbackStage(event.target.value)} className="min-w-0 rounded border border-border bg-zinc-950 px-2 py-1.5 text-xs"><option value="">Stage</option>{workflow.stages.map((stage) => <option key={stage.id} value={stage.id} disabled={stageAgentCount(stage) >= MAX_STAGE_AGENTS}>{stage.name}</option>)}</select><select aria-label="Provider for new agent" value={fallbackProvider} onChange={(event) => setFallbackProvider(event.target.value)} className="min-w-0 rounded border border-border bg-zinc-950 px-2 py-1.5 text-xs"><option value="">Provider</option>{providers.map((provider) => <option key={provider.id} value={provider.id} disabled={!provider.ok}>{provider.id}{provider.ok ? '' : ' (unavailable)'}</option>)}</select><button type="button" onClick={() => appendProvider(fallbackStage, fallbackProvider)} disabled={!fallbackStage || !fallbackProvider} className="rounded border border-accent px-2 py-1.5 text-xs text-violet-200 disabled:opacity-40">+ add agent</button></div></section>
+        </>}
+      </SideDrawer>
     </section>
   </DndContext>;
 }
@@ -267,39 +304,10 @@ function ModelEditor({ model, models, onChange }: { model: string | undefined; m
 
 function PaletteAgent({ provider, api }: { provider: ProviderInfo; api: ApiClient }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: `provider-${provider.id}`, data: { providerId: provider.id }, disabled: !provider.ok });
-  const setProviders = useMatStore((state) => state.setProviders);
-  const [setupOpen, setSetupOpen] = useState(false);
-  const [installing, setInstalling] = useState(false);
-  const [installError, setInstallError] = useState<string>();
-  const [logTail, setLogTail] = useState<string>();
-  const [copied, setCopied] = useState<'install' | 'sign-in'>();
   const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
   const unavailable = provider.detail ? `Unavailable: ${provider.detail}` : 'Provider unavailable';
-  const install = async () => {
-    setInstalling(true); setInstallError(undefined); setLogTail(undefined);
-    try {
-      const result = await api.installProvider(provider.id);
-      if (!result.ok && result.logTail) setLogTail(result.logTail);
-      setProviders(await api.getProviders());
-      if (result.ok) setSetupOpen(false);
-    } catch (error) { setInstallError(error instanceof Error ? error.message : 'Provider setup failed.'); }
-    finally { setInstalling(false); }
-  };
-  const copy = async (value: string, kind: 'install' | 'sign-in') => {
-    try { await navigator.clipboard.writeText(value); setCopied(kind); setInstallError(undefined); }
-    catch { setInstallError('Could not copy the command.'); }
-  };
   const title = provider.authAlert?.message ?? (provider.ok ? `Drag ${provider.id} to a stage${provider.version ? ` · ${provider.version}` : ''}` : unavailable);
-  return <span title={title} className="relative inline-flex items-center gap-1"><button ref={setNodeRef} type="button" style={style} {...listeners} {...attributes} disabled={!provider.ok} aria-label={`${provider.id} provider${provider.ok ? '' : ` unavailable: ${provider.detail ?? 'not detected'}`}${provider.authAlert ? ' authentication required' : ''}`} className={`rounded-full text-left ${provider.ok ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed grayscale opacity-40'} ${provider.authAlert && provider.ok ? 'ring-1 ring-amber-500' : ''} ${isDragging ? 'z-50 opacity-70' : ''}`}><AgentChip agent={{ provider: provider.id, model: provider.defaultModel, permission: 'auto' }} /></button>{provider.authAlert && <span className="rounded border border-amber-700 bg-amber-950/50 px-1 py-0.5 text-[9px] font-medium text-amber-300">auth</span>}{provider.version && <span className="max-w-24 truncate text-[10px] text-muted">{provider.version}</span>}{(!provider.ok || provider.authAlert !== undefined) && <button type="button" onClick={() => setSetupOpen((value) => !value)} aria-expanded={setupOpen} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-violet-200 hover:border-accent">Setup</button>}{setupOpen && <div role="dialog" aria-label={`Setup ${provider.id}`} className="absolute left-0 top-full z-40 mt-2 w-72 rounded border border-accent bg-panel p-3 shadow-2xl">
-    <div className="flex items-center justify-between"><strong className="text-xs">Setup {provider.id}</strong><button type="button" onClick={() => setSetupOpen(false)} aria-label={`Close ${provider.id} setup`} className="text-muted">×</button></div>
-    <p className="mt-2 text-xs text-muted">{provider.version ?? provider.detail ?? 'Provider not detected.'}</p>
-    {provider.authAlert && <p className="mt-2 whitespace-pre-line break-words text-xs text-amber-200">{provider.authAlert.message}</p>}
-    {provider.signInCommand && <div className="mt-3"><strong className="text-[11px] text-muted">Sign in</strong><code className="mt-1 block select-all break-words rounded bg-zinc-950 p-2 text-[11px] text-ink">{provider.signInCommand}</code><button type="button" onClick={() => void copy(provider.signInCommand!, 'sign-in')} className="mt-2 rounded border border-border px-2 py-1 text-xs">{copied === 'sign-in' ? 'Copied' : 'Copy'}</button></div>}
-    {!provider.ok && provider.installable && <button type="button" disabled={installing} onClick={() => void install()} className="mt-3 rounded bg-accent px-2 py-1.5 text-xs font-medium text-zinc-950 disabled:opacity-50">{installing ? 'Installing…' : 'Install'}</button>}
-    {!provider.ok && !provider.installable && provider.manualCommand && <div className="mt-3"><code className="block select-all break-all rounded bg-zinc-950 p-2 text-[11px] text-ink">{provider.manualCommand}</code><button type="button" onClick={() => void copy(provider.manualCommand!, 'install')} className="mt-2 rounded border border-border px-2 py-1 text-xs">{copied === 'install' ? 'Copied' : 'Copy'}</button></div>}
-    {installError && <p role="alert" className="mt-2 text-xs text-red-300">{installError}</p>}
-    {logTail && <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-zinc-950 p-2 text-[10px] text-red-200">{logTail}</pre>}
-  </div>}</span>;
+  return <span title={title} className="relative inline-flex items-center gap-1"><button ref={setNodeRef} type="button" style={style} {...listeners} {...attributes} disabled={!provider.ok} aria-label={`${provider.id} provider${provider.ok ? '' : ` unavailable: ${provider.detail ?? 'not detected'}`}${provider.authAlert ? ' authentication required' : ''}`} className={`rounded-full text-left ${provider.ok ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed grayscale opacity-40'} ${provider.authAlert && provider.ok ? 'ring-1 ring-amber-500' : ''} ${isDragging ? 'z-50 opacity-70' : ''}`}><AgentChip agent={{ provider: provider.id, model: provider.defaultModel, permission: 'auto' }} /></button>{provider.authAlert && <span className="rounded border border-amber-700 bg-amber-950/50 px-1 py-0.5 text-[9px] font-medium text-amber-300">auth</span>}{provider.version && <span className="max-w-24 truncate text-[10px] text-muted">{provider.version}</span>}<ProviderSetupButton provider={provider} api={api} /></span>;
 }
 
 function bindingSummary(binding: AgentBinding): string {
@@ -312,14 +320,36 @@ export function unavailableProviderBindings(workflow: WorkflowDef, providers: re
   if (workflow.orchestrator.enabled) bindings.push({ label: 'Orchestrator', provider: workflow.orchestrator.agent.provider });
   return bindings.flatMap(({ label, provider }) => {
     const availability = byId.get(provider);
-    return availability?.ok === false
-      ? [`${label} · ${provider} unavailable: ${availability.detail || 'not detected'}`]
-      : [];
+    return availability?.ok === true ? [] : [`${label} · ${provider} unavailable: ${availability?.detail || 'not detected'}`];
   });
+}
+
+export function workflowReadiness(workflow: WorkflowDef, providers: readonly ProviderInfo[]): { ready: number; required: number } {
+  const availability = new Map(providers.map((provider) => [provider.id, provider.ok]));
+  const bindings = workflow.stages.flatMap((stage) => stage.slots.flatMap((slot) => Array.from({ length: slot.count }, () => slot.agent.provider)));
+  if (workflow.orchestrator.enabled) bindings.push(workflow.orchestrator.agent.provider);
+  return { ready: bindings.filter((provider) => availability.get(provider) === true).length, required: bindings.length };
+}
+
+function providersForWorkflow(workflow: WorkflowDef): Array<ProviderInfo['id']> {
+  const ids = new Set<ProviderInfo['id']>(workflow.stages.flatMap((stage) => stage.slots.map((slot) => slot.agent.provider)));
+  if (workflow.orchestrator.enabled) ids.add(workflow.orchestrator.agent.provider);
+  return [...ids];
 }
 
 function workflowAuthWarnings(workflow: WorkflowDef, providers: readonly ProviderInfo[]): string[] {
   const used = new Set(workflow.stages.flatMap((stage) => stage.slots.map((slot) => slot.agent.provider)));
   if (workflow.orchestrator.enabled) used.add(workflow.orchestrator.agent.provider);
   return providers.filter((provider) => used.has(provider.id) && provider.authAlert).map((provider) => provider.authAlert!.message.split('\n', 1)[0]!);
+}
+
+export function workflowVerificationWarnings(workflow: WorkflowDef, verifyCommand?: string): string[] {
+  return workflow.stages.flatMap((stage) => {
+    if (!stage.requireVerified) return [];
+    const warnings: string[] = [];
+    if (!stage.gate) warnings.push(`${stage.name}: “require verified” needs an enabled gate; the policy will not run.`);
+    if (stage.isolation !== 'worktree') warnings.push(`${stage.name}: “require verified” needs worktree isolation; verification will be skipped.`);
+    if (!verifyCommand?.trim()) warnings.push(`${stage.name}: “require verified” needs a workspace verify command; verification will be skipped.`);
+    return warnings;
+  });
 }

@@ -3,6 +3,7 @@ import type { ChildProcess } from 'node:child_process';
 import { spawnManaged } from '../spawn.js';
 import { diag } from '../diag.js';
 import { signInCommand } from '../providers/auth.js';
+import { redactEnvironmentValues } from '../redact.js';
 
 export interface ResolvedNodeSpec {
   binding: AgentBinding; promptText: string; cwd: string;
@@ -34,6 +35,20 @@ const AUTH_PATTERNS = [
   /invalid api key/i,
 ];
 
+const SAFE_AUTH_INSTRUCTIONS: Readonly<Record<string, readonly string[]>> = {
+  codex: ['codex logout && codex login', 'codex login'],
+  grok: ['grok login --device-code', 'grok login'],
+};
+
+function safeAuthInstruction(provider: string, text: string): string | undefined {
+  const allowed = SAFE_AUTH_INSTRUCTIONS[provider];
+  if (!allowed) return undefined;
+  const candidates = text.split(/\r?\n/).map((line) => line.trim().replace(/^run:\s*/i, '').replace(/^`([^`]+)`[.!]?$/, '$1'));
+  // Return our canonical copy, never CLI-controlled text. Extra arguments are
+  // rejected because a pairing code or token can otherwise look like a flag.
+  return allowed.find((instruction) => candidates.some((candidate) => candidate.toLowerCase() === instruction.toLowerCase()));
+}
+
 export function detectAuthFailure(provider: string, text: string): string | undefined {
   if (provider === 'mock') return undefined;
   const tail = text.slice(-4096);
@@ -42,20 +57,8 @@ export function detectAuthFailure(provider: string, text: string): string | unde
   if (!command) return undefined;
   const expired = /refresh(?:_| )token|401 Unauthorized/i.test(tail);
   const message = `${provider}${expired ? ' sign-in expired.' : ' is not signed in.'}\nFix: ${command}`;
-  const instruction = tail.split(/\r?\n/).map((line) => line.trim()).filter((line) => {
-    if (!line || !/run:|login|api.?key/i.test(line)) return false;
-    if (/api.?key\s*[:=]\s*\S+/i.test(line)) return false;
-    return /run:|login|(?:set|export|use|provide).{0,80}api.?key/i.test(line);
-  }).sort((left, right) => instructionScore(right, provider) - instructionScore(left, provider))[0]?.slice(0, 200);
-  return instruction ? `${message}\n${instruction}` : message;
-}
-
-function instructionScore(line: string, provider: string): number {
-  return (new RegExp(`\\b${provider}\\s+login\\b`, 'i').test(line) ? 8 : 0)
-    + (/--device-code/i.test(line) ? 4 : 0)
-    + (/\blogin\b/i.test(line) ? 2 : 0)
-    + (/api.?key/i.test(line) ? 1 : 0)
-    - (/^run:\s*$/i.test(line) ? 8 : 0);
+  const instruction = safeAuthInstruction(provider, tail);
+  return redactEnvironmentValues(instruction ? `${message}\n${instruction}` : message);
 }
 
 interface ExtractedError {
@@ -222,12 +225,17 @@ export function probeVersion(command: string): Promise<{ ok: boolean; version?: 
     const finish = (result: { ok: boolean; version?: string; detail?: string }): void => {
       if (settled) return;
       settled = true;
+      const safeResult = {
+        ...result,
+        ...(result.version !== undefined ? { version: redactEnvironmentValues(result.version) } : {}),
+        ...(result.detail !== undefined ? { detail: redactEnvironmentValues(result.detail) } : {}),
+      };
       diag(null, 'probe', {
-        command, ok: result.ok,
-        ...(result.version ? { version: result.version } : {}),
-        ...(!result.ok && result.detail ? { detail: result.detail } : {}),
+        command, ok: safeResult.ok,
+        ...(safeResult.version ? { version: safeResult.version } : {}),
+        ...(!safeResult.ok && safeResult.detail ? { detail: safeResult.detail } : {}),
       });
-      resolve(result);
+      resolve(safeResult);
     };
     let managed: ReturnType<typeof spawnManaged>;
     try {

@@ -36,7 +36,10 @@ export async function evaluateGate(
   }
 
   const node = orchestratorNode(run);
-  node.attempt = gateAttempt;
+  // gateAttempt is scoped to one stage for GateDecision compatibility. Node
+  // attempts are run-global so lifecycle events and raw/orchestrator.aN.jsonl
+  // identify exactly one gate invocation across multi-stage runs.
+  node.attempt = run.gateDecisions.length + 1;
   node.status = 'queued';
   node.agent = structuredClone(run.workflow.orchestrator.agent);
   const deadline = Date.now() + run.workflow.orchestrator.gateTimeoutSec * 1000;

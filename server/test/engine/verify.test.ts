@@ -42,6 +42,24 @@ describe('candidate verification', () => {
     expect(readEventsAfter('run-fail', 0, 20).at(-1)).toMatchObject({ kind: 'error', data: { detail: 'verify-result' } });
   });
 
+  it('redacts environment values from verification results, events, and full logs', async () => {
+    const sentinel = 'verify-env-sentinel-cf8d91';
+    const prior = process.env.MAT_TEST_VERIFY_SECRET;
+    process.env.MAT_TEST_VERIFY_SECRET = sentinel;
+    try {
+      const command = 'node -e "process.stderr.write(process.env.MAT_TEST_VERIFY_SECRET);process.exit(1)"';
+      const result = await verifyCandidate(candidate(), workspace({ verifyCommand: command }), 'run-redacted');
+      const log = await readFile(result?.logFile ?? '', 'utf8');
+      const persisted = JSON.stringify({ result, events: readEventsAfter('run-redacted', 0, 20), log });
+      expect(result).toMatchObject({ status: 'failed', command, outputTail: '[REDACTED_ENV]' });
+      expect(persisted).not.toContain(sentinel);
+      expect(persisted).toContain('[REDACTED_ENV]');
+    } finally {
+      if (prior === undefined) delete process.env.MAT_TEST_VERIFY_SECRET;
+      else process.env.MAT_TEST_VERIFY_SECRET = prior;
+    }
+  }, 30_000);
+
   it('turns timeout into an error and kills the process tree', async () => {
     const result = await verifyCandidate(candidate(), workspace({ verifyCommand: 'node -e "setInterval(() => {}, 1000)"', verifyTimeoutSec: 0.05 }), 'run-timeout');
     expect(result).toMatchObject({ status: 'error', reason: 'timeout' });

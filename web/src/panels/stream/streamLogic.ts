@@ -1,5 +1,4 @@
 import type { AgentEvent, EventRole } from '@mat/shared';
-import { mergeConsecutiveEvents } from '../../components/EventRow.js';
 
 export interface StreamFilterOptions {
   nodeRunIds: readonly string[];
@@ -9,7 +8,9 @@ export interface StreamFilterOptions {
 }
 
 export function filterStreamEvents(events: readonly AgentEvent[], options: StreamFilterOptions): AgentEvent[] {
-  const filtered = mergeConsecutiveEvents(events).filter((event) => {
+  // Timeline is the raw evidence view. Narrative owns readable continuation
+  // grouping; retaining each event here preserves exact id/seq provenance.
+  const filtered = events.filter((event) => {
     if (!options.roles.includes(event.role)) return false;
     if (options.focusedNodeRunId && event.nodeRunId !== options.focusedNodeRunId) return false;
     if (options.nodeRunIds.length > 0 && (!event.nodeRunId || !options.nodeRunIds.includes(event.nodeRunId))) return false;
@@ -41,6 +42,7 @@ function toolMatchKey(event: AgentEvent): string | undefined {
 export interface FeedItem {
   key: string;
   events: AgentEvent[];
+  sourceEvents?: AgentEvent[];
   toolCallId?: string;
   duplicateCount?: number;
 }
@@ -48,22 +50,31 @@ export interface FeedItem {
 export function groupToolEvents(events: readonly AgentEvent[]): FeedItem[] {
   const items: FeedItem[] = [];
   const toolUses = new Map<string, number>();
-  const duplicateUsers = new Map<string, { index: number; nodeRunIds: Set<string> }>();
+  let adjacentDuplicateUsers: { key: string; index: number; nodeRunIds: Set<string>; lastSeq: number } | undefined;
   for (const event of events) {
     if (event.role === 'user' && event.nodeRunId) {
-      const duplicateKey = `${event.attempt}\0${event.text}`;
-      const prior = duplicateUsers.get(duplicateKey);
-      if (prior && !prior.nodeRunIds.has(event.nodeRunId)) {
+      const duplicateKey = `${event.stageId ?? ''}\0${event.attempt}\0${event.text}`;
+      const prior = adjacentDuplicateUsers;
+      if (prior && prior.key === duplicateKey && event.seq === prior.lastSeq + 1 && !prior.nodeRunIds.has(event.nodeRunId)) {
         prior.nodeRunIds.add(event.nodeRunId);
-        items[prior.index]!.duplicateCount = prior.nodeRunIds.size;
+        prior.lastSeq = event.seq;
+        const item = items[prior.index]!;
+        item.sourceEvents = [...(item.sourceEvents ?? item.events), event];
+        item.duplicateCount = prior.nodeRunIds.size;
         continue;
       }
-      if (!prior) duplicateUsers.set(duplicateKey, { index: items.length, nodeRunIds: new Set([event.nodeRunId]) });
+      adjacentDuplicateUsers = { key: duplicateKey, index: items.length, nodeRunIds: new Set([event.nodeRunId]), lastSeq: event.seq };
+    } else {
+      adjacentDuplicateUsers = undefined;
     }
     const matchKey = toolMatchKey(event);
     if (event.kind === 'tool_result' && matchKey) {
       const useIndex = toolUses.get(matchKey);
-      if (useIndex !== undefined) {
+      toolUses.delete(matchKey);
+      // Keep the evidence timeline monotonic. Pulling a later result back across
+      // intervening events makes those events appear after evidence that actually
+      // occurred later; only adjacent halves may render as one card.
+      if (useIndex !== undefined && useIndex === items.length - 1) {
         items[useIndex]!.events.push(event);
         continue;
       }

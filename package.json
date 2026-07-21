@@ -1,6 +1,6 @@
 {
   "name": "multi-ai-terminal",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -17,10 +17,12 @@
     "desktop:bundle": "node scripts/bundle-desktop.mjs",
     "desktop:build": "npm run build && npm run desktop:bundle && cd desktop/src-tauri && npx tauri build",
     "desktop:dev": "npm run build && npm run desktop:bundle && cd desktop/src-tauri && npx tauri dev",
+    "evidence": "node tools/evidence/run-all.mjs",
     "smoke:browser": "node scripts/browser-smoke.mjs",
     "test": "vitest run",
     "start": "node server/dist/index.js",
-    "typecheck": "npm run typecheck -w @mat/shared && npm run typecheck -w @mat/server && npm run typecheck -w @mat/web"
+    "typecheck": "npm run typecheck -w @mat/shared && npm run typecheck -w @mat/server && npm run typecheck -w @mat/web",
+    "verify:version": "node scripts/verify-version.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",

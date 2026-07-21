@@ -26,7 +26,7 @@ afterEach(async () => {
   await app.close();
   clearAllAuthAlerts();
   vi.restoreAllMocks();
-  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 3 })));
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })));
 });
 
 describe('health endpoint', () => {
@@ -49,6 +49,7 @@ describe('workspace and workflow routes', () => {
     const id = created.json().id as string;
     expect((await app.inject({ method: 'GET', url: `/api/workspaces/${id}` })).json()).toMatchObject({ name: 'Temp' });
     expect((await app.inject({ method: 'PATCH', url: `/api/workspaces/${id}`, payload: { name: 'Changed' } })).json()).toMatchObject({ name: 'Changed' });
+    dependencies.runs.list = async () => [];
     expect((await app.inject({ method: 'DELETE', url: `/api/workspaces/${id}` })).statusCode).toBe(204);
   });
 
@@ -60,6 +61,25 @@ describe('workspace and workflow routes', () => {
     expect(cleared.statusCode).toBe(200);
     expect(cleared.json().verifyCommand).toBeUndefined();
     expect(cleared.json().verifyTimeoutSec).toBeUndefined();
+  });
+
+  it('rejects deleting a workspace while one of its runs is active', async () => {
+    const created = await app.inject({ method: 'POST', url: '/api/workspaces', payload: { name: 'Active', path: tmpdir() } });
+    const id = created.json().id as string;
+    dependencies.runs.list = async () => [runSnapshot({ workspaceId: id, status: 'running', endedAt: undefined })];
+    const response = await app.inject({ method: 'DELETE', url: `/api/workspaces/${id}` });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ error: { code: 'CONFLICT', message: expect.stringContaining('active run') } });
+    expect((await app.inject({ method: 'GET', url: `/api/workspaces/${id}` })).statusCode).toBe(200);
+  });
+
+  it('preserves legacy run evidence by requiring it to be deleted before its workspace', async () => {
+    const created = await app.inject({ method: 'POST', url: '/api/workspaces', payload: { name: 'Legacy', path: tmpdir() } });
+    const id = created.json().id as string;
+    dependencies.runs.list = async () => [runSnapshot({ workspaceId: id, status: 'done', endedAt: 2 })];
+    const response = await app.inject({ method: 'DELETE', url: `/api/workspaces/${id}` });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ error: { code: 'CONFLICT', message: expect.stringContaining('legacy run without embedded provenance') } });
   });
 
   it('surfaces builtin mutation conflicts and duplicates workflows', async () => {
@@ -169,6 +189,24 @@ describe('run routes', () => {
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-type']).toContain('text/markdown');
     expect(response.body).toContain('# Run report — Custom');
+  });
+
+  it('uses immutable workspace provenance for evidence after the workspace is deleted', async () => {
+    const created = await app.inject({ method: 'POST', url: '/api/workspaces', payload: { name: 'Mutable name', path: tmpdir() } });
+    const id = created.json().id as string;
+    const snapshot = runSnapshot({
+      workspaceId: id,
+      workspaceSnapshot: { name: 'Original name', path: '/original/workspace', isGit: true, verifyCommand: 'npm test', verifyTimeoutSec: 60 },
+    });
+    dependencies.runs.get = async () => snapshot;
+    dependencies.runs.list = async () => [snapshot];
+    dependencies.report = vi.fn((_run, workspace) => `# ${workspace.name}\n${workspace.path}\n`);
+
+    expect((await app.inject({ method: 'DELETE', url: `/api/workspaces/${id}` })).statusCode).toBe(204);
+    const response = await app.inject({ method: 'GET', url: '/api/runs/run-1/report' });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe('# Original name\n/original/workspace\n');
+    expect(dependencies.report).toHaveBeenCalledWith(snapshot, expect.objectContaining({ id, name: 'Original name', path: '/original/workspace' }), expect.any(Array));
   });
 
   it('validates event cursors and forwards afterSeq paging', async () => {

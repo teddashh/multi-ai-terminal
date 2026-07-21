@@ -1,5 +1,5 @@
 import { mkdtempSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +8,7 @@ import type { AgentEvent, RunSnapshot, WorkflowDef, Workspace } from '@mat/share
 const state = vi.hoisted(() => ({
   runs: new Map<string, RunSnapshot>(),
   workspace: { id: 'ws', name: 'Workspace', path: process.cwd(), isGit: false } as Workspace,
+  workspaceMissing: false,
   replies: [] as string[],
   active: 0,
   maxActive: 0,
@@ -26,7 +27,10 @@ vi.mock('../../src/store/runs.js', () => ({
   deleteRun: async (runId: string) => { state.runs.delete(runId); },
 }));
 vi.mock('../../src/store/workspaces.js', () => ({
-  getWorkspace: async () => structuredClone(state.workspace),
+  getWorkspace: async () => {
+    if (state.workspaceMissing) throw new Error('workspace deleted');
+    return structuredClone(state.workspace);
+  },
   listWorkspaces: async () => [structuredClone(state.workspace)],
 }));
 vi.mock('../../src/store/workflows.js', () => ({ listWorkflows: async () => [] }));
@@ -100,7 +104,9 @@ beforeEach(() => {
   state.active = 0;
   state.maxActive = 0;
   state.kills = 0;
+  state.workspace.path = process.cwd();
   state.workspace.isGit = false;
+  state.workspaceMissing = false;
   const dir = mkdtempSync(join(tmpdir(), 'mat-run-')); dirs.push(dir);
   process.env.MAT_DATA_DIR = dir;
   configureEventLog(dir);
@@ -113,7 +119,7 @@ afterEach(async () => {
   process.env.PATH = oldPath;
   delete process.env.MAT_TEST_GIT_LOG;
   delete process.env.MAT_TEST_GIT_MARKER;
-  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })));
 });
 
 async function start(def: WorkflowDef): Promise<{ run: RunSnapshot; events: AgentEvent[] }> {
@@ -130,10 +136,18 @@ describe('run manager and stage state machine', () => {
     );
     const { run, events } = await start(workflow());
     expect(run.status).toBe('done');
+    expect(run.workspaceSnapshot).toEqual({ name: 'Workspace', path: state.workspace.path, isGit: false });
     expect(state.maxActive).toBeLessThanOrEqual(2);
     expect(run.nodes.filter((node) => node.stageId === 'round').map((node) => node.status)).toEqual(['done', 'done', 'done']);
     expect(run.gateDecisions).toHaveLength(2);
-    expect(events.filter((event) => event.kind === 'decision').every((event) => event.stageId === null && event.nodeRunId === 'orchestrator')).toBe(true);
+    const decisionEvents = events.filter((event) => event.kind === 'decision');
+    expect(decisionEvents.every((event) => event.stageId === null && event.nodeRunId === 'orchestrator')).toBe(true);
+    expect(decisionEvents.map((event) => event.attempt)).toEqual([1, 2]);
+    expect(events.filter((event) => event.nodeRunId === 'orchestrator' && event.role === 'user').map((event) => event.attempt)).toEqual([1, 2]);
+    expect((await readdir(join(process.env.MAT_DATA_DIR!, 'runs', run.runId, 'raw'))).filter((name) => name.startsWith('orchestrator.')).sort()).toEqual([
+      'orchestrator.a1.jsonl',
+      'orchestrator.a2.jsonl',
+    ]);
     const finalPrompt = events.find((event) => event.role === 'user' && event.stageId === 'final');
     expect(finalPrompt?.text).toContain('RESULT: TASK=Build it');
     expect(finalPrompt?.text).toContain('carry this');
@@ -200,6 +214,24 @@ describe('run manager and stage state machine', () => {
     expect(run?.status).toBe('aborted');
     expect(run?.nodes[0]?.status).toBe('killed');
   });
+
+  it('retries against immutable workspace provenance after the workspace record changes or is deleted', async () => {
+    const def = workflow({ orchestrator: false, twoStages: false });
+    def.stages[0]!.slots[0]!.count = 1;
+    const { run } = await start(def);
+    const originalPath = run.workspaceSnapshot?.path;
+    expect(originalPath).toBe(process.cwd());
+
+    state.workspace.path = '/mutated/workspace';
+    state.workspaceMissing = true;
+    await retryStage(run.runId, 'round', {});
+    const retried = await waitForRun(
+      () => state.runs.get(run.runId),
+      (candidate) => candidate.status === 'done' && candidate.nodes[0]?.attempt === 2,
+      30_000,
+    );
+    expect(retried.nodes[0]?.cwd).toBe(originalPath);
+  }, 30_000);
 
   it('kills a queued node durably and never dispatches it later', async () => {
     const def = workflow({ candidateModel: 'slow', orchestrator: false, twoStages: false });
@@ -349,13 +381,16 @@ process.exit(1);
     state.workspace.isGit = true;
     const def = workflow({ orchestrator: false, twoStages: false });
     state.runs.set('patch-run', {
-      runId: 'patch-run', workspaceId: 'ws', workflow: def, task: 'patch', status: 'done', currentStageId: 'round', createdAt: 1, endedAt: 2, gateDecisions: [],
+      runId: 'patch-run', workspaceId: 'ws', workspaceSnapshot: { name: 'Original', path: '/snapshot/workspace', isGit: true }, workflow: def, task: 'patch', status: 'done', currentStageId: 'round', createdAt: 1, endedAt: 2, gateDecisions: [],
       nodes: [{ nodeRunId: 'round.candidate.0', stageId: 'round', slotId: 'candidate', instanceIndex: 0, agent: binding('ok'), label: 'Candidate', status: 'done', attempt: 1, cwd: state.workspace.path, patchFile }],
     });
+    state.workspace.path = '/mutated/workspace';
+    state.workspaceMissing = true;
 
     const [first, second] = await Promise.all([applyPatch('patch-run', 'round.candidate.0'), applyPatch('patch-run', 'round.candidate.0')]);
     expect([first.ok, second.ok].sort()).toEqual([false, true]);
     const calls = (await readFile(log, 'utf8')).trim().split('\n');
+    expect(calls.every((line) => line.startsWith('-C /snapshot/workspace '))).toBe(true);
     expect(calls.filter((line) => line.includes('apply --check --3way'))).toHaveLength(2);
     expect(calls.filter((line) => line.includes('apply --3way --binary') && !line.includes('--check'))).toHaveLength(1);
   });

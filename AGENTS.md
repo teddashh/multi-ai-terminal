@@ -5,7 +5,7 @@
 ## Hard rules
 
 - Provider installs run only from an explicit user click via the fixed recipes in `server/src/providers/install.ts`; user input never reaches a command line; nothing is downloaded implicitly.
-- Never log environment-variable values anywhere (diag, errors, bundles, transcripts).
+- Never log values read from the environment (diag, errors, bundles, transcripts); use the source-aware sink policy in `server/src/redact.ts`, preserving only trusted engine/protocol structure.
 - The `mock` provider stays exempt from real-provider behaviors (spawn stagger, auth alerts) — tests and `tools/evidence/` instruments depend on it.
 - `shared/` zod schemas evolve additively only (new fields optional). `server/src/version.ts` must match `server/package.json`.
 - Keep the real-browser smoke in CI; jsdom hid a four-release black screen.
@@ -13,9 +13,9 @@
 
 ## Commands
 
-- Build: `npm run build` · Test: `npm test` · Types: `npm run typecheck`
+- Versions: `npm run verify:version` · Build: `npm run build` · Test: `npm test` · Types: `npm run typecheck`
 - Browser smoke: `CHROME_PATH=<chromium> npm run smoke:browser`
-- Release verifiers: `node tools/evidence/repro-v019.mjs` (see `tools/evidence/README.md`)
+- Evidence/release verifiers after build: `npm run evidence` (see `tools/evidence/README.md`)
 
 ## Tests must pass on Windows CI
 

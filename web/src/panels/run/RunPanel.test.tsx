@@ -6,9 +6,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('zustand', () => ({ useStore: (store: { getState(): unknown }, selector: (state: never) => unknown) => selector(store.getState() as never) }));
-const apiMocks = vi.hoisted(() => ({ steerRun: vi.fn(), getDebugBundle: vi.fn() }));
+const apiMocks = vi.hoisted(() => ({ steerRun: vi.fn(), getDebugBundle: vi.fn(), getReport: vi.fn(), getPatch: vi.fn() }));
 vi.mock('../../api/client.js', () => ({
-  apiClient: { getRuns: vi.fn().mockResolvedValue([]), getWorkspaces: vi.fn().mockResolvedValue([]), steerRun: apiMocks.steerRun, getDebugBundle: apiMocks.getDebugBundle },
+  apiClient: { getRuns: vi.fn().mockResolvedValue([]), getWorkspaces: vi.fn().mockResolvedValue([]), steerRun: apiMocks.steerRun, getDebugBundle: apiMocks.getDebugBundle, getReport: apiMocks.getReport, getPatch: apiMocks.getPatch },
 }));
 
 import { matStore } from '../../app/store.js';
@@ -48,7 +48,9 @@ function renderWithWorkspaceReact(ui: ReactElement) {
 beforeEach(() => {
   apiMocks.steerRun.mockReset().mockResolvedValue(run);
   apiMocks.getDebugBundle.mockReset().mockResolvedValue(new Blob(['zip']));
-  matStore.setState({ activeRunId: 'r1', runs: { r1: run }, events: { r1: events }, filters: { nodeRunIds: [], roles: ['user', 'agent', 'tool', 'thinking', 'system', 'decision'], follow: true }, ui: { focusedNodeRunId: undefined } });
+  apiMocks.getReport.mockReset().mockResolvedValue('# report');
+  apiMocks.getPatch.mockReset().mockResolvedValue('diff --git a/file b/file');
+  matStore.setState({ activeRunId: 'r1', viewedRunId: 'r1', runs: { r1: run }, events: { r1: events }, filters: { nodeRunIds: [], roles: ['user', 'agent', 'tool', 'thinking', 'system', 'decision'], follow: true }, ui: { focusedNodeRunId: undefined } });
 });
 afterEach(() => { for (const item of mounted.splice(0)) { act(() => item.root.unmount()); item.container.remove(); } });
 
@@ -67,6 +69,20 @@ describe('RunPanel smoke', () => {
     expect(screen.getByText(/1 upstream node/)).toBeTruthy();
     expect(screen.getByText('Seed prompt')).toBeTruthy();
     expect(screen.getByText('1 passed / 0 failed / 0 skipped')).toBeTruthy();
+  });
+
+  it('keeps a gate verification summary immutable after later node retries', () => {
+    const historical = {
+      ...run,
+      gateDecisions: [{
+        ...run.gateDecisions[0]!,
+        verificationSummary: { passed: 0, failed: 1, skipped: 0 },
+      }],
+    };
+    matStore.setState({ runs: { r1: historical } });
+    renderWithWorkspaceReact(<RunPanel />);
+    expect(screen.getByText('0 passed / 1 failed / 0 skipped')).toBeTruthy();
+    expect(screen.queryByText('1 passed / 0 failed / 0 skipped')).toBeNull();
   });
 
   it('submits the default interrupt mode and renders steer groups with review decisions', async () => {
@@ -96,10 +112,41 @@ describe('RunPanel smoke', () => {
     const reason = container.querySelector('p[title*="codex sign-in expired"]')!;
     expect(reason.getAttribute('title')).toBe('codex sign-in expired.\nFix: codex logout && codex login');
     expect(reason.textContent).toBe('codex sign-in expired.\nFix: codex logout && codex login');
-    expect(reason.className).toContain('line-clamp-3');
+    expect(reason.className).not.toContain('line-clamp');
     expect(reason.className).toContain('whitespace-pre-line');
     expect(reason.className).toContain('text-amber-200');
     expect(screen.queryByText('exit 1')).toBeNull();
+  });
+
+  it('keeps terminal run evidence actions available without a live subscription', () => {
+    matStore.setState({ activeRunId: undefined, viewedRunId: 'r1', runs: { r1: { ...run, status: 'done', endedAt: Date.now() } } });
+    renderWithWorkspaceReact(<RunPanel />);
+    expect(screen.getByRole('button', { name: 'Report' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Debug' })).toBeTruthy();
+    expect(screen.getByText(/R1 · codex/)).toBeTruthy();
+    expect(screen.getByText(/1 upstream node/)).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'View patch' }).some((button) => !(button as HTMLButtonElement).disabled)).toBe(true);
+  });
+
+  it('uses the selected historical run for Report, Debug, and patch while a different run stays live', async () => {
+    const historical = { ...run, runId: 'r2', task: 'Historical evidence', status: 'done' as const, endedAt: Date.now() };
+    matStore.setState({ activeRunId: 'r1', viewedRunId: 'r2', runs: { r1: run, r2: historical }, events: { r1: events, r2: [] } });
+    renderWithWorkspaceReact(<RunPanel />);
+    expect(screen.getByText('Historical evidence')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Report' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Debug' })).toBeTruthy();
+    const patchButton = screen.getAllByRole('button', { name: 'View patch' }).find((button) => !(button as HTMLButtonElement).disabled);
+    expect(patchButton).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Report' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Debug' }));
+      fireEvent.click(patchButton!);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(apiMocks.getReport).toHaveBeenCalledWith('r2'));
+    expect(apiMocks.getDebugBundle).toHaveBeenCalledWith('r2');
+    expect(apiMocks.getPatch).toHaveBeenCalledWith('r2', 'round.r1.0');
+    expect(matStore.getState().activeRunId).toBe('r1');
   });
 
   it('downloads the debug bundle from the Debug button', async () => {

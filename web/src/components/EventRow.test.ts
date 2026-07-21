@@ -13,6 +13,14 @@ describe('mergeConsecutiveEvents', () => {
   it('does not mutate source events', () => {
     const source = [event(1, { text: 'a' }), event(2, { text: 'b' })]; mergeConsecutiveEvents(source); expect(source[0]?.text).toBe('a');
   });
+  it('merges three or more adjacent continuation chunks', () => {
+    expect(mergeConsecutiveEvents([event(1), event(2), event(3)]).map((item) => item.text)).toEqual(['123']);
+  });
+  it('does not merge adjacent parallel tool calls with different identities', () => {
+    const first = event(1, { role: 'tool', kind: 'tool_use', tool: { name: 'shell', toolCallId: 'call-1', input: 'one' } });
+    const second = event(2, { role: 'tool', kind: 'tool_use', tool: { name: 'shell', toolCallId: 'call-2', input: 'two' } });
+    expect(mergeConsecutiveEvents([first, second]).map((item) => item.tool?.toolCallId)).toEqual(['call-1', 'call-2']);
+  });
   it('keeps verification failure text readable in the collapsed summary', () => {
     const failure = event(3, {
       role: 'system', kind: 'error', text: `Verification failed (exit 1): ${'x'.repeat(300)}`,

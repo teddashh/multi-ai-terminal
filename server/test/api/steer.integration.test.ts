@@ -43,7 +43,7 @@ async function waitForRun(app: Awaited<ReturnType<typeof buildServer>>, runId: s
   }
 }
 
-async function setup(twoStages = false, workflowOverride = steerWorkflow(twoStages)) {
+async function setup(twoStages = false, workflowOverride = steerWorkflow(twoStages), task = 'MOCK_WRITE:evidence.txt') {
   const dataDir = mkdtempSync(join(tmpdir(), 'mat-steer-data-'));
   const workspace = mkdtempSync(join(tmpdir(), 'mat-steer-workspace-'));
   dirs.push(dataDir, workspace);
@@ -54,7 +54,7 @@ async function setup(twoStages = false, workflowOverride = steerWorkflow(twoStag
     name: 'Steer', path: workspace, verifyCommand: 'node -e "require(\'node:fs\').existsSync(\'evidence.txt\')||process.exit(1)"',
   } })).json();
   const created = (await app.inject({ method: 'POST', url: '/api/runs', payload: {
-    workspaceId: createdWorkspace.id, workflowId: 'steer-test', task: 'MOCK_WRITE:evidence.txt', workflowOverride,
+    workspaceId: createdWorkspace.id, workflowId: 'steer-test', task, workflowOverride,
   } })).json() as RunSnapshot;
   return { app, dataDir, created };
 }
@@ -76,6 +76,36 @@ describe('steering integration', () => {
       expect(events).toContainEqual(expect.objectContaining({ role: 'user', data: expect.objectContaining({ detail: 'steer' }) }));
       expect(events).toContainEqual(expect.objectContaining({ nodeRunId: 'one.agent.0', data: expect.objectContaining({ detail: 'steer' }) }));
       expect(events.find((event) => event.nodeRunId === 'one.agent.0' && event.attempt === 2 && event.role === 'user')?.text).toContain('adjust the implementation');
+    } finally { await app.close(); }
+  }, 30_000);
+
+  it('retries only the node ids selected by an orchestrated steer review', async () => {
+    const workflow = steerWorkflow();
+    workflow.maxParallel = 2;
+    workflow.stages[0]!.slots[0]!.count = 2;
+    workflow.orchestrator = { enabled: true, agent: { provider: 'mock', model: 'ok', permission: 'safe' }, gateTimeoutSec: 5 };
+    const task = [
+      'MOCK_WRITE:evidence.txt',
+      'MOCK_REPLY: ```json',
+      '{"action":"retry","retryNodeRunIds":["one.agent.0"],"promptAddendum":"target zero only","rationale":"one candidate is enough"}',
+      '```',
+    ].join('\n');
+    const { app, created } = await setup(false, workflow, task);
+    try {
+      await waitForRun(app, created.runId, (run) =>
+        run.nodes.filter((node) => node.stageId === 'one' && node.status === 'running').length === 2,
+      );
+      const response = await app.inject({ method: 'POST', url: `/api/runs/${created.runId}/steer`, payload: { text: 'review only candidate zero' } });
+      expect(response.statusCode, response.body).toBe(200);
+      const finished = await waitForRun(app, created.runId, (run) => run.status === 'done');
+      expect(finished.gateDecisions.find((decision) => decision.stageId === 'steer-1')).toMatchObject({
+        action: 'retry',
+        retryNodeRunIds: ['one.agent.0'],
+      });
+      expect(finished.nodes.find((node) => node.nodeRunId === 'one.agent.0')).toMatchObject({ status: 'done', attempt: 2 });
+      expect(finished.nodes.find((node) => node.nodeRunId === 'one.agent.1')).toMatchObject({ status: 'killed', attempt: 1 });
+      const events = (await app.inject({ method: 'GET', url: `/api/runs/${created.runId}/events?limit=10000` })).json() as AgentEvent[];
+      expect(events.some((event) => event.nodeRunId === 'one.agent.1' && event.attempt === 2)).toBe(false);
     } finally { await app.close(); }
   }, 30_000);
 

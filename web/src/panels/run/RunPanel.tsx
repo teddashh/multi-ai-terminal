@@ -1,8 +1,8 @@
 import type { AgentEvent, ApplyPatchResponse, GateDecision, NodeRun, RunSnapshot, Stage } from '@mat/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { apiClient } from '../../api/client.js';
-import { useMatStore } from '../../app/store.js';
-import { AgentChip, Collapsible, ModalDialog, PROVIDER_COLORS, mergeConsecutiveEvents } from '../../components/index.js';
+import { matStore, useMatStore } from '../../app/store.js';
+import { AgentChip, Collapsible, displayNodeLabel, ModalDialog, PROVIDER_COLORS } from '../../components/index.js';
 import { canComposeSteer, canRetryStage, decisionDisplay, elapsedForNode, formatElapsed, nodeDisplayStatus, steerGroups, verificationSummary, type NodeDisplayStatus } from './runLogic.js';
 
 const STATUS_STYLE: Record<NodeDisplayStatus, string> = {
@@ -16,6 +16,7 @@ const STATUS_STYLE: Record<NodeDisplayStatus, string> = {
 };
 
 interface PatchDialogState {
+  runId: string;
   node: NodeRun;
   loading: boolean;
   applying: boolean;
@@ -29,9 +30,9 @@ interface PatchDialogState {
 const EMPTY_EVENTS: readonly AgentEvent[] = [];
 
 export function RunPanel() {
-  const activeRunId = useMatStore((state) => state.activeRunId);
-  const run = useMatStore((state) => activeRunId ? state.runs[activeRunId] : undefined);
-  const events = useMatStore((state) => (activeRunId ? state.events[activeRunId] : undefined) ?? EMPTY_EVENTS);
+  const viewedRunId = useMatStore((state) => state.viewedRunId);
+  const run = useMatStore((state) => viewedRunId ? state.runs[viewedRunId] : undefined);
+  const events = useMatStore((state) => (viewedRunId ? state.events[viewedRunId] : undefined) ?? EMPTY_EVENTS);
   const focusNode = useMatStore((state) => state.focusNode);
   const upsertRun = useMatStore((state) => state.upsertRun);
   const [now, setNow] = useState(Date.now());
@@ -47,6 +48,18 @@ export function RunPanel() {
   const [debugging, setDebugging] = useState(false);
 
   useEffect(() => {
+    setKillConfirmation(undefined);
+    setRetryStage(undefined);
+    setRetryAddendum('');
+    setPatchDialog(undefined);
+    setActionError(undefined);
+    setReport(undefined);
+    setSteerText('');
+    setSteering(false);
+    setDebugging(false);
+  }, [viewedRunId]);
+
+  useEffect(() => {
     if (!run?.nodes.some((node) => node.startedAt !== undefined && node.endedAt === undefined)) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
@@ -54,7 +67,7 @@ export function RunPanel() {
 
   const latestByNode = useMemo(() => {
     const result = new Map<string, AgentEvent>();
-    for (const event of mergeConsecutiveEvents(events)) if (event.nodeRunId) result.set(event.nodeRunId, event);
+    for (const event of events) if (event.nodeRunId) result.set(event.nodeRunId, event);
     return result;
   }, [events]);
   const seedByNode = useMemo(() => {
@@ -83,19 +96,22 @@ export function RunPanel() {
     catch (error) { setActionError(errorMessage(error)); }
   };
   const openPatch = (node: NodeRun) => {
-    setPatchDialog({ node, loading: true, applying: false });
-    void apiClient.getPatch(run.runId, node.nodeRunId)
-      .then((content) => setPatchDialog((current) => current?.node.nodeRunId === node.nodeRunId ? { ...current, loading: false, content } : current))
-      .catch((error) => setPatchDialog((current) => current?.node.nodeRunId === node.nodeRunId ? { ...current, loading: false, error: errorMessage(error) } : current));
+    const patchRunId = run.runId;
+    setPatchDialog({ runId: patchRunId, node, loading: true, applying: false });
+    void apiClient.getPatch(patchRunId, node.nodeRunId)
+      .then((content) => setPatchDialog((current) => current?.runId === patchRunId && current.node.nodeRunId === node.nodeRunId ? { ...current, loading: false, content } : current))
+      .catch((error) => setPatchDialog((current) => current?.runId === patchRunId && current.node.nodeRunId === node.nodeRunId ? { ...current, loading: false, error: errorMessage(error) } : current));
   };
   const applyPatch = async () => {
     if (!patchDialog) return;
-    setPatchDialog({ node: patchDialog.node, loading: patchDialog.loading, applying: true, ...(patchDialog.content !== undefined ? { content: patchDialog.content } : {}) });
+    const patchRunId = patchDialog.runId;
+    const patchNodeRunId = patchDialog.node.nodeRunId;
+    setPatchDialog({ runId: patchRunId, node: patchDialog.node, loading: patchDialog.loading, applying: true, ...(patchDialog.content !== undefined ? { content: patchDialog.content } : {}) });
     try {
-      const result = await apiClient.applyPatch(run.runId, patchDialog.node.nodeRunId);
-      setPatchDialog((current) => current ? { ...current, applying: false, result } : current);
+      const result = await apiClient.applyPatch(patchRunId, patchNodeRunId);
+      setPatchDialog((current) => current?.runId === patchRunId && current.node.nodeRunId === patchNodeRunId ? { ...current, applying: false, result } : current);
     } catch (error) {
-      setPatchDialog((current) => current ? { ...current, applying: false, error: errorMessage(error) } : current);
+      setPatchDialog((current) => current?.runId === patchRunId && current.node.nodeRunId === patchNodeRunId ? { ...current, applying: false, error: errorMessage(error) } : current);
     }
   };
   const submitRetry = async () => {
@@ -107,10 +123,11 @@ export function RunPanel() {
     } catch (error) { setActionError(errorMessage(error)); }
   };
   const openReport = () => {
+    const reportRunId = run.runId;
     setReport({ loading: true });
-    void apiClient.getReport(run.runId)
-      .then((content) => setReport({ loading: false, content }))
-      .catch((error) => setReport({ loading: false, error: errorMessage(error) }));
+    void apiClient.getReport(reportRunId)
+      .then((content) => { if (matStore.getState().viewedRunId === reportRunId) setReport({ loading: false, content }); })
+      .catch((error) => { if (matStore.getState().viewedRunId === reportRunId) setReport({ loading: false, error: errorMessage(error) }); });
   };
   const downloadReport = () => {
     if (!report?.content) return;
@@ -126,18 +143,24 @@ export function RunPanel() {
     finally { setSteering(false); }
   };
   const downloadDebug = async () => {
+    const debugRunId = run.runId;
     setDebugging(true); setActionError(undefined);
     try {
-      const blob = await apiClient.getDebugBundle(run.runId);
+      const blob = await apiClient.getDebugBundle(debugRunId);
+      if (matStore.getState().viewedRunId !== debugRunId) return;
       const url = URL.createObjectURL(blob);
-      const link = document.createElement('a'); link.href = url; link.download = `mat-debug-${run.runId}.zip`; link.click(); URL.revokeObjectURL(url);
-    } catch (error) { setActionError(errorMessage(error)); }
-    finally { setDebugging(false); }
+      const link = document.createElement('a'); link.href = url; link.download = `mat-debug-${debugRunId}.zip`; link.click(); URL.revokeObjectURL(url);
+    } catch (error) {
+      if (matStore.getState().viewedRunId === debugRunId) setActionError(errorMessage(error));
+    } finally {
+      if (matStore.getState().viewedRunId === debugRunId) setDebugging(false);
+    }
   };
 
   const card = (node: NodeRun) => <NodeCard
     key={node.nodeRunId}
     node={node}
+    displayLabel={displayNodeLabel(node, run.nodes)}
     latestEvent={latestByNode.get(node.nodeRunId)}
     {...(seedByNode.get(node.nodeRunId)?.text ? { seedPrompt: seedByNode.get(node.nodeRunId)!.text } : {})}
     now={now}
@@ -187,7 +210,7 @@ export function RunPanel() {
         {decisions.map((decision) => <DecisionCard key={`${decision.stageId}-${decision.gateAttempt}`} decision={decision} run={run} />)}
       </section>)}
     </div>
-    <ModalDialog open={patchDialog !== undefined} title={patchDialog ? `Patch · ${patchDialog.node.label}` : 'Patch'} onClose={() => setPatchDialog(undefined)} footer={patchDialog && !patchDialog.loading && !patchDialog.error ? <button type="button" disabled={patchDialog.applying} onClick={() => void applyPatch()} className="rounded bg-emerald-700 px-3 py-1.5 text-sm text-white hover:bg-emerald-600 disabled:opacity-50">{patchDialog.applying ? 'Applying…' : 'Apply patch'}</button> : undefined}>
+    <ModalDialog open={patchDialog !== undefined} title={patchDialog ? `Patch · ${displayNodeLabel(patchDialog.node, run.nodes)}` : 'Patch'} onClose={() => setPatchDialog(undefined)} footer={patchDialog && !patchDialog.loading && !patchDialog.error ? <button type="button" disabled={patchDialog.applying} onClick={() => void applyPatch()} className="rounded bg-emerald-700 px-3 py-1.5 text-sm text-white hover:bg-emerald-600 disabled:opacity-50">{patchDialog.applying ? 'Applying…' : 'Apply patch'}</button> : undefined}>
       {patchDialog?.loading && <p className="animate-pulse text-sm text-muted">Loading patch…</p>}
       {patchDialog?.error && <p role="alert" className="text-sm text-red-300">{patchDialog.error}</p>}
       {patchDialog?.content !== undefined && <pre className="max-h-[55vh] overflow-auto whitespace-pre-wrap rounded bg-zinc-950 p-3 text-xs text-zinc-200">{patchDialog.content || '(empty patch)'}</pre>}
@@ -210,6 +233,7 @@ function PanelHeading({ onReport, onDebug, debugging }: { onReport?: () => void;
 
 interface NodeCardProps {
   node: NodeRun;
+  displayLabel?: string;
   latestEvent: AgentEvent | undefined;
   seedPrompt?: string;
   now: number;
@@ -221,13 +245,13 @@ interface NodeCardProps {
   onFocus(): void;
 }
 
-export function NodeCard({ node, latestEvent, seedPrompt, now, confirmingKill, onRequestKill, onCancelKill, onKill, onPatch, onFocus }: NodeCardProps) {
+export function NodeCard({ node, displayLabel = node.label, latestEvent, seedPrompt, now, confirmingKill, onRequestKill, onCancelKill, onKill, onPatch, onFocus }: NodeCardProps) {
   const displayStatus = nodeDisplayStatus(node, latestEvent);
   const elapsed = elapsedForNode(node, now);
   const canKill = ['queued', 'running', 'stalled'].includes(node.status);
   return <article data-node-run-id={node.nodeRunId} className="rounded-md border bg-zinc-900/45 p-2.5 shadow-sm" style={{ borderColor: PROVIDER_COLORS[node.agent.provider] }}>
     <div className="mb-2 flex items-start justify-between gap-2">
-      <AgentChip agent={node.agent} label={node.label} className="min-w-0" />
+      <AgentChip agent={node.agent} label={displayLabel} className="min-w-0" />
       <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${STATUS_STYLE[displayStatus]}`}>{displayStatus}</span>
     </div>
     <div className="mb-2 flex items-center gap-2 text-[10px] text-muted">
@@ -239,7 +263,7 @@ export function NodeCard({ node, latestEvent, seedPrompt, now, confirmingKill, o
     {node.handoff && <p className="mb-2 text-[10px] text-zinc-400">← {node.handoff.priorNodeRunIds.length} upstream node(s){node.handoff.orchestratorContext ? ' + orchestrator context' : ''}{node.handoff.retryAddendum ? ' + retry note' : ''}</p>}
     {seedPrompt && <Collapsible className="mb-2 text-[10px]" summary={<span className="text-sky-300">Seed prompt</span>}><pre className="max-h-48 overflow-auto whitespace-pre-wrap text-[10px] text-zinc-300">{seedPrompt}</pre></Collapsible>}
     {(node.status === 'failed' && (node.errorReason || node.error))
-      ? <p className={`mb-2 line-clamp-3 whitespace-pre-line break-words text-xs ${node.errorReason ? 'text-amber-200' : 'text-red-300'}`} title={node.errorReason ?? node.error}>{node.errorReason ?? node.error}</p>
+      ? <p className={`mb-2 whitespace-pre-line break-words text-xs ${node.errorReason ? 'text-amber-200' : 'line-clamp-3 text-red-300'}`} title={node.errorReason ?? node.error}>{node.errorReason ?? node.error}</p>
       : (node.status === 'killed' && node.error)
         ? <p className="mb-2 line-clamp-3 break-words text-xs text-red-300" title={node.error}>{node.error}</p>
       : <p className="mb-2 line-clamp-2 text-xs text-zinc-300" title={latestEvent?.text}>{latestEvent?.text || (node.status === 'queued' ? 'Waiting to start' : 'Waiting for events…')}</p>}
@@ -273,8 +297,8 @@ function UsageSummary({ node }: { node: NodeRun }) {
 
 export function DecisionCard({ decision, run }: { decision: GateDecision; run: RunSnapshot }) {
   const display = decisionDisplay(decision);
-  const labels = new Map(run.nodes.map((node) => [node.nodeRunId, node.label]));
-  const summary = verificationSummary(run.nodes.filter((node) => node.stageId === decision.stageId));
+  const labels = new Map(run.nodes.map((node) => [node.nodeRunId, displayNodeLabel(node, run.nodes)]));
+  const summary = decision.verificationSummary ?? verificationSummary(run.nodes.filter((node) => node.stageId === decision.stageId));
   return <article className={`mt-2 rounded-md border bg-emerald-950/20 p-2.5 ${display.borderClass}`} data-degraded={display.degraded ? 'true' : 'false'}>
     <header className="mb-1 flex items-center justify-between gap-2"><span className={`text-xs font-semibold uppercase ${display.actionClass}`}>{display.label}</span><span className="text-[10px] text-muted">{run.steers?.some((steer) => steer.steerStageId === decision.stageId) ? 'steer review' : `gate ${decision.gateAttempt}`}</span></header>
     {summary.passed + summary.failed + summary.skipped > 0 && <span className="mb-1 inline-flex rounded-none border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-300">{summary.passed} passed / {summary.failed} failed / {summary.skipped} skipped</span>}

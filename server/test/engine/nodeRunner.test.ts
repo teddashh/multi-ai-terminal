@@ -1,5 +1,5 @@
 import { mkdtempSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -35,7 +35,7 @@ afterEach(async () => {
   clearAllAuthAlerts();
   clearProviderSpawnSlots();
   if (oldDataDir === undefined) delete process.env.MAT_DATA_DIR; else process.env.MAT_DATA_DIR = oldDataDir;
-  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 3 })));
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })));
 });
 
 describe('node runner lifecycle', () => {
@@ -170,6 +170,44 @@ describe('node runner lifecycle', () => {
     }));
   });
 
+  it('turns artifact-finalization failures into failed verification evidence', async () => {
+    const adapter = adapterFrom(() => ({
+      pid: 12345,
+      kill() {},
+      completion: Promise.resolve({ exitCode: 0, resultText: 'provider succeeded' }),
+    }));
+    const result = setup(adapter);
+    registerNodeContext(result.node, {
+      runId: 'run',
+      adapter,
+      persist: async () => undefined,
+      finalize: async () => { throw new Error('artifact disk unavailable'); },
+    });
+
+    await runNode(result.node, { ...stage, isolation: 'worktree', gate: true, requireVerified: true }, 'prompt');
+
+    expect(result.node).toMatchObject({
+      status: 'failed',
+      error: 'Artifact capture failed: artifact disk unavailable',
+      verification: {
+        status: 'error',
+        reason: 'artifact-capture-failed',
+        outputTail: 'artifact disk unavailable',
+      },
+    });
+    expect(result.events()).toContainEqual(expect.objectContaining({
+      role: 'system',
+      kind: 'error',
+      text: 'Artifact capture failed: artifact disk unavailable',
+      data: expect.objectContaining({
+        status: 'failed',
+        detail: 'verify-result',
+        phase: 'artifact-capture',
+        verification: expect.objectContaining({ status: 'error', reason: 'artifact-capture-failed' }),
+      }),
+    }));
+  });
+
   it('registers an auth alert from both output streams and clears it after provider success', async () => {
     const failing = adapterFrom((_spec, io) => {
       io.onRaw('request failed: 401 Unauthorized', 'out');
@@ -188,6 +226,61 @@ describe('node runner lifecycle', () => {
     await runNode(succeeding.node, stage, 'prompt');
     expect(getAuthAlert('grok')).toBeUndefined();
   });
+
+  it('redacts environment values from persisted prompts, provider output, snapshots, and raw logs', async () => {
+    const sentinel = 'sk-ENV-SECRET-123';
+    const prior = process.env.MAT_TEST_API_TOKEN;
+    process.env.MAT_TEST_API_TOKEN = sentinel;
+    try {
+      let spawnedPrompt = '';
+      const adapter = adapterFrom((spec, io) => {
+        spawnedPrompt = spec.promptText;
+        io.onRaw('Authentication required', 'err');
+        io.onRaw(`Use API key ${sentinel}`, 'err');
+        io.onEvent({
+          role: 'agent',
+          kind: 'tool_use',
+          text: `provider echoed ${sentinel}`,
+          tool: {
+            name: 'credential-check',
+            toolCallId: `call-${sentinel}`,
+            input: `input=${sentinel}`,
+            output: `output=${sentinel}`,
+          },
+          data: { nested: { echoed: sentinel } },
+        });
+        return {
+          pid: 12345,
+          kill() {},
+          completion: Promise.resolve({
+            exitCode: 1,
+            resultText: `Use API key ${sentinel}`,
+            error: `provider rejected ${sentinel}`,
+          }),
+        };
+      }, 'grok');
+      const result = setup(adapter);
+      result.node.agent = { provider: 'grok', permission: 'safe' };
+      const snapshots: string[] = [];
+      registerNodeContext(result.node, {
+        runId: 'run',
+        adapter,
+        persist: async () => { snapshots.push(JSON.stringify(result.node)); },
+      });
+
+      await runNode(result.node, stage, `prompt contains ${sentinel}`);
+
+      expect(spawnedPrompt).toBe(`prompt contains ${sentinel}`);
+      expect(result.node.errorReason).toBe('grok is not signed in.\nFix: grok login   (browser) · grok login --device-code (headless) · or set XAI_API_KEY');
+      const raw = await readFile(join(process.env.MAT_DATA_DIR!, 'runs', 'run', 'raw', `${result.node.nodeRunId}.a1.jsonl`), 'utf8');
+      const persisted = JSON.stringify({ node: result.node, events: result.events(), snapshots, raw });
+      expect(persisted).not.toContain(sentinel);
+      expect(persisted).toContain('[REDACTED_ENV]');
+    } finally {
+      if (prior === undefined) delete process.env.MAT_TEST_API_TOKEN;
+      else process.env.MAT_TEST_API_TOKEN = prior;
+    }
+  }, 30_000);
 
   it('does not turn MOCK_AUTHFAIL output into a mock provider alert', async () => {
     const result = setup(mockAdapter); result.node.agent.model = 'MOCK_AUTHFAIL';

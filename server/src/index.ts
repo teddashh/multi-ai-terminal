@@ -13,6 +13,7 @@ import { configureEventLog } from './store/eventLog.js';
 import { configureRunStore, listRuns } from './store/runs.js';
 import { configureWorkflowStore } from './store/workflows.js';
 import { configureWorkspaceStore } from './store/workspaces.js';
+import { redactEnvironmentValues } from './redact.js';
 
 export interface ServerOptions { port: number; host: string; dataDir: string | undefined; token: string | undefined }
 
@@ -72,7 +73,7 @@ export async function buildServer(
 
   if (options.token) {
     app.addHook('onRequest', async (request, reply) => {
-      if (request.url.startsWith('/api/') && request.headers.authorization !== `Bearer ${options.token}`) {
+      if (isRouteFamily(request.url, '/api') && request.headers.authorization !== `Bearer ${options.token}`) {
         return reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'A valid bearer token is required' } });
       }
     });
@@ -86,12 +87,17 @@ export async function buildServer(
   if (existsSync(webDist)) await app.register(fastifyStatic, { root: webDist, wildcard: false });
 
   app.setNotFoundHandler(async (request, reply) => {
-    if (existsSync(webDist) && request.method === 'GET' && !request.url.startsWith('/api/') && !request.url.startsWith('/ws')) {
+    if (existsSync(webDist) && request.method === 'GET' && !isRouteFamily(request.url, '/api') && !isRouteFamily(request.url, '/ws')) {
       return reply.sendFile('index.html');
     }
     return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Not found' } });
   });
   return app;
+}
+
+function isRouteFamily(url: string, prefix: '/api' | '/ws'): boolean {
+  const path = url.split('?', 1)[0]!.toLowerCase();
+  return path === prefix || path.startsWith(`${prefix}/`) || path.startsWith(`${prefix}%2f`) || path.startsWith(`${prefix}%5c`);
 }
 
 async function stopEngine(abort: typeof abortRun): Promise<void> {
@@ -109,13 +115,17 @@ async function main(): Promise<void> {
     await stopEngine(abortRun);
     await app.close();
   };
-  process.once('SIGINT', () => { shutdown().catch((error: unknown) => console.error('[mat] shutdown failed', error)); });
-  process.once('SIGTERM', () => { shutdown().catch((error: unknown) => console.error('[mat] shutdown failed', error)); });
+  process.once('SIGINT', () => { shutdown().catch((error: unknown) => console.error(`[mat] shutdown failed: ${redactedError(error)}`)); });
+  process.once('SIGTERM', () => { shutdown().catch((error: unknown) => console.error(`[mat] shutdown failed: ${redactedError(error)}`)); });
   await app.listen({ port: options.port, host: options.host });
 }
 
 const entry = process.argv[1] ? resolve(process.argv[1]) : '';
 if (entry === fileURLToPath(import.meta.url)) main().catch((error: unknown) => {
-  console.error('[mat] server startup failed', error);
+  console.error(`[mat] server startup failed: ${redactedError(error)}`);
   process.exitCode = 1;
 });
+
+function redactedError(error: unknown): string {
+  return redactEnvironmentValues(error instanceof Error ? (error.stack ?? error.message) : String(error));
+}

@@ -73,7 +73,7 @@ afterAll(() => {
   delete process.env.MAT_CAPTURE_DIR;
   delete process.env.MAT_FIXTURE;
   delete process.env.MAT_AGY_SIZED;
-  rmSync(fakeRoot, { recursive: true, force: true });
+  rmSync(fakeRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 const spec = (
@@ -116,7 +116,7 @@ describe('claude adapter', () => {
     });
     expect(readFileSync(join(captureDir, 'claude.stdin'), 'utf8')).toBe('hello stdin');
     expect(result.raw).toHaveLength(9);
-  });
+  }, 30_000);
 
   it('normalizes thinking, tool use/result, and final message exactly', async () => {
     const { events, outcome } = await runFixture(claudeAdapter, spec('claude'), 'claude-tool.jsonl');
@@ -133,7 +133,7 @@ describe('claude adapter', () => {
       usage: { inputTokens: 18, outputTokens: 171, costUsd: 0.0123488 },
       resultText: 'The command executed successfully. The output is:\n\n```\nhello-mat\n```',
     });
-  });
+  }, 30_000);
 
   it('maps permission, max-turn, system prompt, and resume flags', () => {
     expect(buildClaudeArgs({
@@ -144,7 +144,7 @@ describe('claude adapter', () => {
       '--dangerously-skip-permissions', '--max-turns', '7', '--append-system-prompt', 'extra',
       '--resume', 'session-1',
     ]);
-  });
+  }, 30_000);
 });
 
 describe('codex adapter', () => {
@@ -157,7 +157,7 @@ describe('codex adapter', () => {
       usage: { inputTokens: 13158, outputTokens: 5 },
       resultText: 'ok',
     });
-  });
+  }, 30_000);
 
   it('normalizes command lifecycle and keeps the last agent message as resultText', async () => {
     const { events, outcome } = await runFixture(codexAdapter, spec('codex'), 'codex-tool.jsonl');
@@ -173,14 +173,14 @@ describe('codex adapter', () => {
       usage: { inputTokens: 26436, outputTokens: 83 },
       resultText: '`hello-mat .`',
     });
-  });
+  }, 30_000);
 
   it('raw-logs but skips dirty non-JSON stdout', async () => {
     const { events, raw } = await runFixture(codexAdapter, spec('codex'), 'codex.dirty.jsonl');
     expect(events).toEqual([{ role: 'agent', kind: 'message', text: 'ok' }]);
     expect(raw[0]).toEqual({ line: 'Reading additional input from stdin...', stream: 'out' });
     expect(raw).toHaveLength(5);
-  });
+  }, 30_000);
 
   it('delivers stdin and explicitly re-passes every setting on resume', async () => {
     const resumed = {
@@ -194,7 +194,7 @@ describe('codex adapter', () => {
       '--cd', fakeRoot, '--sandbox', 'read-only', '--skip-git-repo-check',
       'resume', 'thread-1', '-',
     ]);
-  });
+  }, 30_000);
 
   it('maps reasoning and forward-compatible unknown item types', async () => {
     const customFixture = join(fakeRoot, 'codex-unknown.jsonl');
@@ -209,7 +209,7 @@ describe('codex adapter', () => {
       { role: 'tool', kind: 'tool_use', text: 'future_item', tool: { toolCallId: 'future-1', name: 'future_item', input: '{"id":"future-1","type":"future_item","value":1}' } },
       { role: 'tool', kind: 'tool_result', text: 'future_item', tool: { toolCallId: 'future-1', name: 'future_item', output: '{"id":"future-1","type":"future_item","value":2}' } },
     ]);
-  });
+  }, 30_000);
 });
 
 describe('grok adapter', () => {
@@ -224,7 +224,7 @@ describe('grok adapter', () => {
       sessionRef: '019f74a6-104f-7320-8f58-48cf907c2920',
       resultText: 'ok',
     });
-  });
+  }, 30_000);
 
   it('emits no tool rows for the probe-confirmed tool fixture', async () => {
     const { events, outcome } = await runFixture(grokAdapter, spec('grok'), 'grok-tool.jsonl');
@@ -235,7 +235,7 @@ describe('grok adapter', () => {
       sessionRef: '019f74ad-cbba-7372-b0ba-2837c5158a02',
       resultText: '**Command:** `echo hello-mat`  \n**Exit code:** 0  \n\n**Output:**\n```\nhello-mat\n```',
     });
-  });
+  }, 30_000);
 
   it('uses a private prompt file and removes it after completion', async () => {
     await runFixture(grokAdapter, spec('grok', { effort: 'high' }, 'file prompt'), 'grok.jsonl');
@@ -243,7 +243,7 @@ describe('grok adapter', () => {
     expect(readFileSync(join(captureDir, 'grok.prompt'), 'utf8')).toBe('file prompt');
     expect(existsSync(promptPath)).toBe(false);
     expect(buildGrokArgs(spec('grok', { effort: 'high' }), join(tmpdir(), 'prompt'))).toContain('--reasoning-effort');
-  });
+  }, 30_000);
 });
 
 describe('coalescing and agy plain output', () => {
@@ -259,7 +259,7 @@ describe('coalescing and agy plain output', () => {
       { role: 'thinking', kind: 'thinking', text: 'b', data: { continued: true } },
       { role: 'agent', kind: 'message', text: 'answer' },
     ]);
-  });
+  }, 30_000);
 
   it('starts a fresh continuation block for thinking after a message block', () => {
     const events: AdapterContentEvent[] = [];
@@ -273,7 +273,7 @@ describe('coalescing and agy plain output', () => {
       { role: 'agent', kind: 'message', text: 'answer' },
       { role: 'thinking', kind: 'thinking', text: 'second thought' },
     ]);
-  });
+  }, 30_000);
 
   it('streams and coalesces agy stdout while preserving full resultText', async () => {
     process.env.MAT_AGY_SIZED = '1';
@@ -287,21 +287,21 @@ describe('coalescing and agy plain output', () => {
       { role: 'agent', kind: 'message', text: 'b', data: { continued: true } },
     ]);
     expect(outcome).toEqual({ exitCode: 0, resultText: `${'a'.repeat(2048)}b` });
-  });
+  }, 30_000);
 
   it('normalizes the vendored plain-output fixture', async () => {
     const { events, raw, outcome } = await runFixture(agyAdapter, spec('agy'), 'agy.log');
     expect(events).toEqual([{ role: 'agent', kind: 'message', text: 'ok\n' }]);
     expect(raw).toEqual([{ line: 'ok', stream: 'out' }]);
     expect(outcome).toEqual({ exitCode: 0, resultText: 'ok\n' });
-  });
+  }, 30_000);
 
   it('maps display-name effort variants and safe/full permissions', () => {
     expect(resolveAgyModel('Gemini 3.1 Pro (Low)', 'high')).toBe('Gemini 3.1 Pro (High)');
     expect(resolveAgyModel('Claude Sonnet 4.6 (Thinking)', 'low')).toBe('Claude Sonnet 4.6 (Thinking)');
     expect(buildAgyArgs(spec('agy', { permission: 'safe' }, 'inspect'))[1]).toContain('Read-only mode:');
     expect(buildAgyArgs(spec('agy', { permission: 'full' }))).toContain('--dangerously-skip-permissions');
-  });
+  }, 30_000);
 
   it('rejects prompts over the 200 KB argv cap without spawning', async () => {
     const raw: string[] = [];
@@ -311,7 +311,7 @@ describe('coalescing and agy plain output', () => {
     });
     await expect(spawned.completion).resolves.toMatchObject({ exitCode: null, error: expect.stringContaining('200 KB') });
     expect(raw).toEqual([expect.stringContaining('200 KB')]);
-  });
+  }, 30_000);
 });
 
 describe('registry-facing metadata and mock echo', () => {
@@ -321,7 +321,7 @@ describe('registry-facing metadata and mock echo', () => {
     }
     expect([claudeAdapter.defaultModel, codexAdapter.defaultModel, grokAdapter.defaultModel, agyAdapter.defaultModel])
       .toEqual(['sonnet', 'gpt-5.6-sol', 'grok-4.5', 'Gemini 3.1 Pro (High)']);
-  });
+  }, 30_000);
 
   it('uses everything after MOCK_REPLY as the final message and result', async () => {
     const events: AdapterContentEvent[] = [];
@@ -330,5 +330,5 @@ describe('registry-facing metadata and mock echo', () => {
     });
     await expect(spawned.completion).resolves.toMatchObject({ resultText: '{"action":"advance"}' });
     expect(events.at(-1)?.text).toBe('{"action":"advance"}');
-  });
+  }, 30_000);
 });

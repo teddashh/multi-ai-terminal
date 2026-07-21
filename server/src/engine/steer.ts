@@ -1,12 +1,12 @@
 import type { AgentBinding, GateDecision, NodeRun, RunSnapshot, Stage, SteerMessage } from '@mat/shared';
 import { appendEvent } from '../store/eventLog.js';
-import { getWorkspace } from '../store/workspaces.js';
 import { evaluateGate } from '../orchestrator/gate.js';
 import { renderTemplate, STEER_TEMPLATE } from '../orchestrator/prompts.js';
 import { diag } from '../diag.js';
 import { assembleArtifacts, buildDigest } from './digest.js';
 import { killAllActiveNodes, markNodeKilled, resetNodeForRetry } from './nodeRunner.js';
 import { appendDecision, executeNodes, persistRun, queueStageRetryAddendum, takeSteerInterruptedStage } from './stageRunner.js';
+import { workspaceForRun } from './worktree.js';
 
 export type SteerOutcome = 'redo'|'continue'|'continue-pending'|'abort';
 const isAborted = (run: RunSnapshot): boolean => run.status === 'aborted';
@@ -16,7 +16,7 @@ function steerEvent(run: RunSnapshot, steer: SteerMessage, transition: SteerMess
     runId: run.runId, stageId: steer.steerStageId ?? null, nodeRunId: null, attempt: 0,
     role: 'system', kind: 'status', text,
     data: { detail: `steer-${transition}`, steerId: steer.steerId, mode: steer.mode },
-  });
+  }, { trustedData: true });
   diag(run.runId, 'steer', {
     steerId: steer.steerId, transition, mode: steer.mode,
     ...(steer.interruptedStageId !== undefined ? { interruptedStageId: steer.interruptedStageId } : {}),
@@ -40,6 +40,7 @@ function interruptedNodes(run: RunSnapshot, steer: SteerMessage, priorStage: Sta
 }
 
 export async function runSteerCycle(run: RunSnapshot, steer: SteerMessage, priorStage: Stage): Promise<SteerOutcome> {
+  const workspace = await workspaceForRun(run);
   const index = (run.steers ?? []).indexOf(steer) + 1;
   steer.status = 'active';
   steer.appliedAt = Date.now();
@@ -61,13 +62,12 @@ export async function runSteerCycle(run: RunSnapshot, steer: SteerMessage, prior
   const node: NodeRun = {
     nodeRunId: `${stageId}.agent.0`, stageId, slotId: 'agent', instanceIndex: 0,
     agent: structuredClone(agent), label: `Steer · ${agent.provider}`, status: 'queued', attempt: 1,
-    cwd: (await getWorkspace(run.workspaceId)).path,
+    cwd: workspace.path,
   };
   run.nodes.push(node);
   await persistRun(run);
   const priorNodes = interruptedNodes(run, steer, priorStage);
   const artifacts = assembleArtifacts(priorNodes);
-  const workspace = await getWorkspace(run.workspaceId);
   const prompt = renderTemplate(STEER_TEMPLATE, {
     task: run.task, steer_text: steer.text, workspace_path: workspace.path,
     prior_stage_digest: buildDigest(priorNodes, { interruptedPartial: true }), patches: artifacts.patches,
@@ -125,12 +125,15 @@ export async function runSteerCycle(run: RunSnapshot, steer: SteerMessage, prior
     appendEvent(run.runId, {
       runId: run.runId, stageId: null, nodeRunId: null, attempt: 0, role: 'system', kind: 'status',
       text: 'Run aborted by steer review.', data: { status: 'aborted', detail: 'steer-review' },
-    });
+    }, { trustedData: true });
     await persistRun(run);
     return 'abort';
   }
   if (decision.action !== 'retry' || !redoStage) return 'continue';
-  for (const candidate of run.nodes.filter((item) => item.stageId === redoStage.id && item.status !== 'queued')) resetNodeForRetry(candidate);
+  const retryIds = new Set(decision.retryNodeRunIds ?? []);
+  for (const candidate of run.nodes.filter((item) => item.stageId === redoStage.id && retryIds.has(item.nodeRunId) && item.status !== 'queued')) {
+    resetNodeForRetry(candidate);
+  }
   queueStageRetryAddendum(run.runId, redoStage.id, decision.promptAddendum);
   await persistRun(run);
   return 'redo';

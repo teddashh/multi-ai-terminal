@@ -10,6 +10,7 @@ import { runDirectory } from './worktree.js';
 import { recordToolUse, resetToolCount } from './digest.js';
 import { diag } from '../diag.js';
 import { clearAuthAlert, setAuthAlert } from '../providers/auth.js';
+import { redactDiagnosticValue, redactEnvironmentValues } from '../redact.js';
 
 export interface NodeExecutionContext {
   runId: string;
@@ -51,14 +52,21 @@ function eventIdentity(node: NodeRun, context: NodeExecutionContext) {
   };
 }
 
+function redactEventData(data: Record<string, unknown>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(data, redactDiagnosticValue)) as Record<string, unknown>;
+}
+
 function lifecycle(node: NodeRun, context: NodeExecutionContext, kind: 'status' | 'result' | 'error', text: string, data?: Record<string, unknown>): void {
   appendEvent(context.runId, {
     ...eventIdentity(node, context),
     role: 'system',
     kind,
-    text,
+    text: redactEnvironmentValues(text),
+    // Lifecycle metadata contains machine-readable enum values such as
+    // "user" and "user-retry". Preserve those exact values; untrusted text is
+    // redacted before it is placed into lifecycle data.
     ...(data ? { data } : {}),
-  });
+  }, { trustedData: true });
 }
 
 function emitKilledLifecycle(node: NodeRun, context: NodeExecutionContext, reason: NonNullable<LiveNode['killedReason']>): void {
@@ -72,11 +80,11 @@ function emitKilledLifecycle(node: NodeRun, context: NodeExecutionContext, reaso
 function reportPersistFailure(node: NodeRun, context: NodeExecutionContext, error: unknown): void {
   if (reportedPersistFailures.has(context)) return;
   reportedPersistFailures.add(context);
-  const detail = error instanceof Error ? error.message : String(error);
+  const detail = redactEnvironmentValues(error instanceof Error ? error.message : String(error));
   try {
     lifecycle(node, context, 'error', `Snapshot persistence failed: ${detail}`, { detail: 'persist-failed' });
   } catch (appendError) {
-    const appendDetail = appendError instanceof Error ? appendError.message : String(appendError);
+    const appendDetail = redactEnvironmentValues(appendError instanceof Error ? appendError.message : String(appendError));
     console.error(`[mat] snapshot persistence failed for ${context.runId}/${node.nodeRunId}: ${detail}; event append failed: ${appendDetail}`);
   }
 }
@@ -92,7 +100,7 @@ async function persistSafely(node: NodeRun, context: NodeExecutionContext): Prom
 function persistInBackground(node: NodeRun, context: NodeExecutionContext): void {
   persistSafely(node, context).catch((error: unknown) => {
     // persistSafely is defensive, but keep the fire-and-forget boundary rejection-safe.
-    console.error(`[mat] unexpected persistence handler failure for ${context.runId}/${node.nodeRunId}: ${String(error)}`);
+    console.error(`[mat] unexpected persistence handler failure for ${context.runId}/${node.nodeRunId}: ${redactEnvironmentValues(String(error))}`);
   });
 }
 
@@ -143,20 +151,20 @@ function mergeUsage(current: Usage | undefined, next: Usage | undefined): Usage 
 function appendContent(node: NodeRun, context: NodeExecutionContext, event: AdapterContentEvent): void {
   if (event.kind === 'tool_use') recordToolUse(node);
   const tool = event.tool ? {
-    name: event.tool.name,
-    ...(event.tool.toolCallId !== undefined ? { toolCallId: event.tool.toolCallId } : {}),
-    ...(event.tool.input !== undefined ? { input: event.tool.input } : {}),
-    ...(event.tool.output !== undefined ? { output: event.tool.output } : {}),
+    name: redactEnvironmentValues(event.tool.name),
+    ...(event.tool.toolCallId !== undefined ? { toolCallId: redactEnvironmentValues(event.tool.toolCallId) } : {}),
+    ...(event.tool.input !== undefined ? { input: redactEnvironmentValues(event.tool.input) } : {}),
+    ...(event.tool.output !== undefined ? { output: redactEnvironmentValues(event.tool.output) } : {}),
     ...(event.tool.isError !== undefined ? { isError: event.tool.isError } : {}),
   } : undefined;
   appendEvent(context.runId, {
     ...eventIdentity(node, context),
     role: event.role,
     kind: event.kind,
-    text: event.text,
+    text: redactEnvironmentValues(event.text),
     ...(tool ? { tool } : {}),
-    ...(event.data ? { data: event.data } : {}),
-  });
+    ...(event.data ? { data: redactEventData(event.data) } : {}),
+  }, { trustedData: true });
 }
 
 export async function runNode(node: NodeRun, stage: Stage, promptText: string): Promise<void> {
@@ -168,7 +176,9 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
   const rawPath = join(runDirectory(context.runId), 'raw', `${node.nodeRunId}.a${node.attempt}.jsonl`);
   mkdirSync(dirname(rawPath), { recursive: true });
 
-  appendEvent(context.runId, { ...identity, role: 'user', kind: 'message', text: promptText });
+  // The provider receives the original prompt below; only the persisted event
+  // is redacted. This boundary applies to mock as well as real providers.
+  appendEvent(context.runId, { ...identity, role: 'user', kind: 'message', text: redactEnvironmentValues(promptText) });
   if (shouldSkipSpawn()) {
     if (node.status !== 'killed') markNodeKilled(node, context.runId, 'abort');
     else emitKilledLifecycle(node, context, 'user');
@@ -184,7 +194,7 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
       await persistSafely(node, context);
       return;
     }
-    const detail = humanizeError(error);
+    const detail = redactEnvironmentValues(humanizeError(error));
     node.status = 'failed';
     node.startedAt ??= Date.now();
     node.endedAt = Date.now();
@@ -212,7 +222,7 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
   const key = liveKey(context.runId, node.nodeRunId);
   let outputTail = '';
   const appendOutputTail = (text: string): void => {
-    outputTail = `${outputTail}${text}\n`.slice(-4096);
+    outputTail = `${outputTail}${redactEnvironmentValues(text)}\n`.slice(-4096);
     const current = liveNodes.get(key);
     if (current) current.outputTail = outputTail;
   };
@@ -264,12 +274,12 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
       },
       onRaw(line, stream) {
         appendOutputTail(line);
-        appendFileSync(rawPath, `${JSON.stringify({ s: stream, l: line, ts: Date.now() })}\n`, 'utf8');
+        appendFileSync(rawPath, `${JSON.stringify({ s: stream, l: redactEnvironmentValues(line), ts: Date.now() })}\n`, 'utf8');
         if (readyForContent) activity();
       },
     });
   } catch (error) {
-    const detail = humanizeError(error);
+    const detail = redactEnvironmentValues(humanizeError(error));
     node.status = 'failed';
     node.startedAt = Date.now();
     node.endedAt = Date.now();
@@ -328,8 +338,8 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
   if (outcome.sessionRef !== undefined) node.sessionRef = outcome.sessionRef;
   const usage = mergeUsage(node.usage, outcome.usage);
   if (usage !== undefined) node.usage = usage;
-  const outcomeError = outcome.error === undefined ? undefined : humanizeError(outcome.error, node.agent.provider);
-  node.resultText = outcome.resultText ?? outcomeError ?? '';
+  const outcomeError = outcome.error === undefined ? undefined : redactEnvironmentValues(humanizeError(outcome.error, node.agent.provider));
+  node.resultText = redactEnvironmentValues(outcome.resultText ?? outcomeError ?? '');
   if (outcomeError !== undefined) node.error = outcomeError; else delete node.error;
 
   if (killedReason === 'user' || killedReason === 'user-retry' || killedReason === 'abort' || killedReason === 'gate-timeout' || killedReason === 'steer') {
@@ -368,8 +378,32 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
   });
 
   try { await context.finalize?.(); } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    lifecycle(node, context, 'error', `Artifact capture failed: ${detail}`);
+    const detail = redactEnvironmentValues(humanizeError(error));
+    const message = `Artifact capture failed: ${detail}`;
+    const verification = {
+      status: 'error' as const,
+      reason: 'artifact-capture-failed',
+      outputTail: detail.slice(-2000),
+    };
+    node.verification = verification;
+    if (node.status === 'done') {
+      node.status = 'failed';
+      node.error = message;
+    } else {
+      node.error ??= message;
+    }
+    lifecycle(node, context, 'error', message, {
+      status: node.status,
+      detail: 'verify-result',
+      phase: 'artifact-capture',
+      verification,
+    });
+    diag(context.runId, 'verify-result', {
+      nodeRunId: node.nodeRunId,
+      attempt: node.attempt,
+      status: verification.status,
+      reason: verification.reason,
+    });
   }
   diag(context.runId, 'exit', {
     nodeRunId: node.nodeRunId, attempt: node.attempt, status: node.status, exitCode: node.exitCode,

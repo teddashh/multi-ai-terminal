@@ -154,5 +154,5 @@ try {
 } finally {
   child.kill('SIGTERM');
   setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } }, 2000).unref();
-  for (const dir of [dataDir, wsA, wsB]) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ } }
+  for (const dir of [dataDir, wsA, wsB]) { try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best effort */ } }
 }

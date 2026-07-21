@@ -11,7 +11,25 @@ describe('shared schemas', () => {
 
   it('round-trips a run snapshot', () => {
     const workflow = preset('planning');
-    const run = { runId: 'run', workspaceId: 'ws', workflow, task: 'task', status: 'created', nodes: [], gateDecisions: [], createdAt: 1 };
+    const run = {
+      runId: 'run', workspaceId: 'ws',
+      workspaceSnapshot: { name: 'Workspace', path: '/tmp/workspace', isGit: true, verifyCommand: 'npm test', verifyTimeoutSec: 60 },
+      workflow, task: 'task', status: 'created', nodes: [], gateDecisions: [], createdAt: 1,
+    };
+    expect(RunSnapshotSchema.parse(run)).toEqual(run);
+  });
+
+  it('keeps workspace provenance additive for legacy run snapshots', () => {
+    const legacy = { runId: 'run', workspaceId: 'ws', workflow: preset('planning'), task: 'task', status: 'done', nodes: [], gateDecisions: [], createdAt: 1 };
+    expect(RunSnapshotSchema.parse(legacy)).toEqual(legacy);
+  });
+
+  it('accepts an additive immutable verification summary on gate decisions', () => {
+    const run = {
+      runId: 'run', workspaceId: 'ws', workflow: preset('planning'), task: 'task', status: 'done', nodes: [],
+      gateDecisions: [{ stageId: 'round-table', gateAttempt: 1, action: 'retry', rationale: 'checks failed', verificationSummary: { passed: 0, failed: 2, skipped: 1 }, ts: 2 }],
+      createdAt: 1,
+    };
     expect(RunSnapshotSchema.parse(run)).toEqual(run);
   });
 

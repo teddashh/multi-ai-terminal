@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { nanoid } from 'nanoid';
 import { execFile } from '../execFile.js';
 import { getDataDir } from '../store/dataDir.js';
-import type { RunSnapshot } from '@mat/shared';
+import type { RunSnapshot, Workspace } from '@mat/shared';
 import { getRun } from '../store/runs.js';
 import { getWorkspace } from '../store/workspaces.js';
 
@@ -47,11 +47,18 @@ export async function createWorktree(workspacePath: string, runId: string, nodeR
 
 export async function collectPatch(cwd: string, baseCommit: string, patchPath: string): Promise<void> {
   await git(cwd, ['add', '-A']);
+  // This is an executable artifact, not a transcript. It must remain byte-for-byte
+  // applicable; API and debug-bundle export boundaries redact their own copies.
   const patch = await gitRaw(cwd, ['diff', '--cached', '--binary', baseCommit]);
   await mkdir(dirname(patchPath), { recursive: true });
   const temporary = join(dirname(patchPath), `.${process.pid}.${nanoid()}.patch.tmp`);
   await writeFile(temporary, patch, 'utf8');
   await rename(temporary, patchPath);
+}
+
+export async function workspaceForRun(run: RunSnapshot): Promise<Workspace> {
+  if (run.workspaceSnapshot) return { id: run.workspaceId, ...run.workspaceSnapshot };
+  return getWorkspace(run.workspaceId);
 }
 
 export async function pruneRunWorktrees(workspacePath: string, runId: string): Promise<void> {
@@ -76,8 +83,7 @@ export async function pruneRunWorktrees(workspacePath: string, runId: string): P
 
 export async function pruneWorktrees(runId: string, snapshot?: RunSnapshot): Promise<void> {
   const run = snapshot ?? await getRun(runId);
-  const workspace = await getWorkspace(run.workspaceId);
-  await pruneRunWorktrees(workspace.path, runId);
+  await pruneRunWorktrees((await workspaceForRun(run)).path, runId);
 }
 
 export async function readPatch(path: string): Promise<string> {

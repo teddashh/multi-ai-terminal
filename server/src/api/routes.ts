@@ -26,6 +26,7 @@ import { diag, serverDiagPath } from '../diag.js';
 import * as runManager from '../engine/runManager.js';
 import { buildDebugBundle, readTail } from '../engine/debugBundle.js';
 import { buildRunReport } from '../engine/report.js';
+import { redactEnvironmentValues } from '../redact.js';
 import { providerInstallPlan, type ProviderInstallPlan } from '../providers/install.js';
 import { clearAugmentedPathCache, spawnManaged, type ManagedProcess } from '../spawn.js';
 import { readEventsAfter } from '../store/eventLog.js';
@@ -66,6 +67,7 @@ const ClientLogSchema = z.object({
   level: z.enum(['error', 'warn']), message: z.string().max(4000),
   stack: z.string().max(8000).optional(), url: z.string().optional(),
 }).strict();
+const ACTIVE_RUN_STATUSES = new Set<RunSnapshot['status']>(['created', 'running', 'gating']);
 
 export interface ApiRouteDependencies {
   providers(): ReturnType<typeof listProviders>;
@@ -165,9 +167,10 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
       dependencies.providerInstall.clearPathCache();
       dependencies.providerInstall.clearVersionCache(current.id);
       const provider = (await dependencies.providers()).find((candidate) => candidate.id === current.id) ?? current;
-      const logTail = output.subarray(Math.max(0, output.length - 8 * 1024)).toString('utf8');
+      const logTail = redactEnvironmentValues(output.subarray(Math.max(0, output.length - 8 * 1024)).toString('utf8'));
+      const safeProvider = provider.detail === undefined ? provider : { ...provider, detail: redactEnvironmentValues(provider.detail) };
       diag(null, 'install', { providerId: current.id, exitCode, durationMs: Math.max(0, Date.now() - startedAt) });
-      return reply.send({ ok: exitCode === 0 && provider.ok, exitCode, logTail, provider });
+      return reply.send({ ok: exitCode === 0 && provider.ok, exitCode, logTail, provider: safeProvider });
     } finally {
       runningInstalls.delete(current.id);
     }
@@ -182,7 +185,7 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
   }));
   app.get('/api/debug/server-log', wrap(async (_request, reply) => {
     const path = serverDiagPath();
-    return reply.type('text/plain; charset=utf-8').send(existsSync(path) ? readTail(path) : Buffer.alloc(0));
+    return reply.type('text/plain; charset=utf-8').send(existsSync(path) ? redactEnvironmentValues(readTail(path).toString('utf8')) : '');
   }));
 
   app.get('/api/workspaces', wrap(async () => dependencies.workspaces.list()));
@@ -199,7 +202,15 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
     return dependencies.workspaces.update(parseId(request), update as Partial<Pick<Workspace, 'name' | 'path' | 'defaultWorkflowId' | 'verifyCommand' | 'verifyTimeoutSec'>>);
   }));
   app.delete('/api/workspaces/:id', wrap(async (request, reply) => {
-    await dependencies.workspaces.delete(parseId(request));
+    const workspaceId = parseId(request);
+    const runs = await dependencies.runs.list(workspaceId, Number.MAX_SAFE_INTEGER);
+    const active = runs.find((run) => ACTIVE_RUN_STATUSES.has(run.status));
+    if (active) throw apiError(409, 'CONFLICT', `Workspace has an active run: ${active.runId}`);
+    const legacy = runs.find((run) => !run.workspaceSnapshot);
+    if (legacy) {
+      throw apiError(409, 'CONFLICT', `Workspace has a legacy run without embedded provenance: ${legacy.runId}. Delete that run before deleting the workspace.`);
+    }
+    await dependencies.workspaces.delete(workspaceId);
     return reply.code(204).send();
   }));
 
@@ -250,13 +261,13 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
   }));
   app.get('/api/runs/:id/report', wrap(async (request, reply) => {
     const run = await dependencies.runs.get(parseId(request));
-    const workspace = await dependencies.workspaces.get(run.workspaceId);
+    const workspace = await evidenceWorkspace(run, dependencies);
     const events = await dependencies.runs.events(run.runId, 0, Number.MAX_SAFE_INTEGER);
-    return reply.type('text/markdown; charset=utf-8').send(dependencies.report(run, workspace, events));
+    return reply.type('text/markdown; charset=utf-8').send(redactEnvironmentValues(dependencies.report(run, workspace, events)));
   }));
   app.get('/api/runs/:id/debug-bundle', wrap(async (request, reply) => {
     const run = await dependencies.runs.get(parseId(request));
-    const workspace = await dependencies.workspaces.get(run.workspaceId);
+    const workspace = await evidenceWorkspace(run, dependencies);
     const events = await dependencies.runs.events(run.runId, 0, Number.MAX_SAFE_INTEGER);
     const zip = buildDebugBundle(run, workspace, events);
     return reply
@@ -267,7 +278,7 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
   app.get('/api/runs/:id/patches/:nodeRunId', wrap(async (request, reply) => {
     const { id, nodeRunId } = NodeParamsSchema.parse(request.params);
     const patch = await dependencies.runs.patch(id, nodeRunId);
-    return reply.type('text/plain; charset=utf-8').send(patch);
+    return reply.type('text/plain; charset=utf-8').send(redactEnvironmentValues(patch));
   }));
   app.post('/api/runs/:id/abort', wrap(async (request) => {
     const runId = parseId(request);
@@ -299,7 +310,12 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
     const { id, nodeRunId } = NodeParamsSchema.parse(request.params);
     const run = await dependencies.runs.get(id);
     if (!run.nodes.some((node) => node.nodeRunId === nodeRunId)) throw apiError(404, 'NOT_FOUND', `Node not found: ${nodeRunId}`);
-    return dependencies.runs.applyPatch(id, nodeRunId);
+    const result = await dependencies.runs.applyPatch(id, nodeRunId);
+    return {
+      ...result,
+      message: redactEnvironmentValues(result.message),
+      ...(result.conflicts ? { conflicts: result.conflicts.map((conflict) => redactEnvironmentValues(conflict)) } : {}),
+    };
   }));
   app.delete('/api/runs/:id', wrap(async (request, reply) => {
     await dependencies.runs.delete(parseId(request));
@@ -309,6 +325,11 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
 
 function parseId(request: FastifyRequest): string {
   return IdParamsSchema.parse(request.params).id;
+}
+
+async function evidenceWorkspace(run: RunSnapshot, dependencies: ApiRouteDependencies): Promise<Workspace> {
+  if (run.workspaceSnapshot) return { id: run.workspaceId, ...run.workspaceSnapshot };
+  return dependencies.workspaces.get(run.workspaceId);
 }
 
 function unavailableProviderBindings(workflow: WorkflowDef, providers: readonly ProviderInfo[]): string[] {
@@ -387,7 +408,7 @@ function sendError(reply: FastifyReply, error: unknown, request?: FastifyRequest
   if (typeof candidate.statusCode === 'number' && candidate.statusCode >= 400 && candidate.statusCode < 500) {
     return send(candidate.statusCode, errorBody(typeof candidate.code === 'string' ? candidate.code : 'BAD_REQUEST', messageOf(error)));
   }
-  reply.log.error(error);
+  reply.log.error({ message: redactEnvironmentValues(messageOf(error)) }, 'request failed');
   return send(500, errorBody('INTERNAL_ERROR', 'Internal server error'));
 }
 
@@ -396,5 +417,5 @@ function errorBody(code: string, message: string): { error: { code: string; mess
 }
 
 function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : 'Request failed';
+  return redactEnvironmentValues(error instanceof Error ? error.message : 'Request failed');
 }

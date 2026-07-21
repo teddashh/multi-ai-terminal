@@ -8,11 +8,12 @@ Successor to [multi-ai-chat-desktop](https://github.com/teddashh/multi-ai-chat-d
 
 ## How it works
 
-- **Workspaces** — each points at a directory (git-aware). The rail shows every workspace's last workflow and live state.
-- **Workflows** — ordered stages; each stage holds agent slots (drag from the palette; multiple same-provider instances allowed, Σ ≤ 12 per stage). Per-slot: model, reasoning effort, permission tier, prompt template, count.
+- **Projects + Launchpad** — each workspace points at a directory (git-aware). The rail switches between project selection and a launch composer without losing drafts; common mode/readiness/task settings stay visible while advanced stage editing lives under **Customize**.
+- **Workflows** — ordered stages; each stage holds agent slots (drag from the advanced palette; multiple same-provider instances allowed, Σ ≤ 12 per stage). Per-slot: model, reasoning effort, permission tier, prompt template, count.
 - **Orchestrator** — a real CLI agent (any provider) that receives a digest of each gated stage's candidates and answers with a strict-JSON gate decision: advance / retry (with per-node targeting + prompt addendum) / abort. Deterministic budget caps; parse failures degrade to safe advance.
 - **Stage isolation** — optional git-worktree isolation per node; each attempt's work is captured as a binary patch you can inspect and apply from the UI.
-- **Stream panel** — every event from every agent, categorized **your messages / agent replies / tooling / thinking**, virtualized, filterable per node/role/search, with full replay of past runs from the durable event log.
+- **Run Workspace** — a Narrative-first **Conversation** makes every node's answer, decision, verification, and failure easy to scan. **Timeline** preserves the virtualized raw categories, node/role/search filters, and full replay from the durable event log.
+- **Health & diagnostics** — read-only server, provider, workspace, run, verification, and evidence-continuity findings with safe Setup, inspect, redacted-log, and debug-bundle actions. CLI detection is never presented as proof of sign-in.
 
 ## Verification (evidence plane)
 
@@ -26,7 +27,7 @@ While a run is active, enter a new instruction in the run panel. **Interrupt** (
 
 ## Debug bundle
 
-Choose **Debug** beside **Report** to download one `mat-debug-<runId>.zip`. It contains the full run snapshot, events, diagnostic journal, Markdown report, raw adapter output, patches, verification logs, runtime/provider versions, and the tail of the server diagnostic log. Browser errors are also reported best-effort to the server journal; environment variable values are never intentionally recorded.
+Choose **Debug** beside **Report**, or use the read-only **Health** drawer, to download one `mat-debug-<runId>.zip`. It contains the full run snapshot, events, diagnostic journal, Markdown report, raw adapter output, patches, verification logs, runtime/provider versions, and the tail of the server diagnostic log. Browser errors are also reported best-effort to the server journal; environment variable values are never intentionally recorded.
 
 ## Quickstart
 
@@ -39,9 +40,9 @@ npm start                      # serves web UI + API on http://127.0.0.1:7788
 # options: --port N --host H --data-dir DIR --token SECRET
 ```
 
-Open the UI, add a workspace (absolute path), pick a builtin workflow (Planning / Build / Review / Pipeline), drop agents onto stages, write the task, Start.
+Open the UI, choose **Projects** to add a workspace (absolute path), return to **Launch**, pick a builtin workflow (Planning / Build / Review / Pipeline), write the task, and Start. Use **Customize** only when you need to change stages or agent bindings.
 
-Dev mode: `npm run dev` (vite + API with hot reload). Tests: `npm test`. Typecheck: `npm run typecheck`.
+Dev mode: `npm run dev` (vite + API with hot reload). Tests: `npm test`. Typecheck: `npm run typecheck`. Version contract: `npm run verify:version`. Built-server evidence suite: `npm run evidence` after `npm run build`.
 
 ## Desktop app
 
@@ -68,6 +69,8 @@ Some Codex authentication failures are caused by concurrent CLI sessions racing 
 
 The durable options are API-key authentication or serial provider usage. Codex supports API-key login, and Claude Code honors `ANTHROPIC_API_KEY`. If an OAuth refresh token has already been revoked, sign out and back in with that CLI first; for Codex, run `codex logout && codex login`.
 
+When a real provider fails with a recognized sign-in error, its node card shows multi-line amber guidance with the verified command, its provider chip gains an `auth` badge, and Setup exposes a copyable **Sign in** block. The composer warns before another run uses that provider without blocking it; a later successful node clears the alert.
+
 ## Providers (verified invocations)
 
 | Provider | CLI | Stream | Notes |
@@ -86,11 +89,12 @@ Binds `127.0.0.1` by default. `--host 0.0.0.0` exposes the API/UI to your networ
 
 ## Data
 
-`~/.multi-ai-terminal/` (override with `--data-dir` / `MAT_DATA_DIR`): `workspaces.json`, `workflows/*.json`, `runs/<runId>/run.json` + `events.jsonl` + `raw/*.jsonl` (untouched CLI output per attempt) + `artifacts/*.patch` + `artifacts/*.verify.log`. Retention: last 100 runs per workspace, worktrees/branches pruned on delete.
+`~/.multi-ai-terminal/` (override with `--data-dir` / `MAT_DATA_DIR`): `workspaces.json`, `workflows/*.json`, `runs/<runId>/run.json` + `events.jsonl` + `raw/*.jsonl` (environment-value-sanitized CLI output per attempt) + `artifacts/*.patch` + `artifacts/*.verify.log`. Retention: last 100 runs per workspace, worktrees/branches pruned on delete.
 
 ## Docs
 
-- [SPEC.md](./SPEC.md) — the engineering contract (v1.3)
+- [SPEC.md](./SPEC.md) — the engineering contract (v1.4)
+- [docs/project-audit-2026-07-20.md](./docs/project-audit-2026-07-20.md) — current hardening record and ordered continuation backlog
 - [docs/spec-review-panel.md](./docs/spec-review-panel.md) — 4-model spec review record
 - [docs/code-review-panel.md](./docs/code-review-panel.md) — 4-model code review record (25 findings fixed, 3 refuted)
 

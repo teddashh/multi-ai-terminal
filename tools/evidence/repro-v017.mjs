@@ -106,7 +106,11 @@ try {
   check('C: currentStageId back on the real stage', doneC.currentStageId === 'build', doneC.currentStageId);
   const eventsC = await api(`/api/runs/${runC.runId}/events?afterSeq=0&limit=10000`);
   const attempt2Seed = eventsC.find((event) => event.nodeRunId === 'build.writer.0' && event.attempt === 2 && event.role === 'user');
-  check('C: redo prompt carries the steer outcome', attempt2Seed?.text?.includes('mid-run user instruction') === true && attempt2Seed.text.includes('pivot: rename the widget to gadget'));
+  check(
+    'C: redo prompt carries the steer outcome',
+    attempt2Seed?.text?.includes('instruction was executed') === true && attempt2Seed.text.includes('pivot: rename the widget to gadget'),
+    JSON.stringify(attempt2Seed?.text),
+  );
   const killedEvent = eventsC.find((event) => event.nodeRunId === 'build.writer.0' && event.data?.detail === 'steer');
   check('C: kill lifecycle labeled steer', Boolean(killedEvent));
   const reportC = await api(`/api/runs/${runC.runId}/report`);
@@ -177,5 +181,5 @@ try {
 } finally {
   child.kill('SIGTERM');
   setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } }, 2000).unref();
-  for (const dir of [dataDir, wsC, wsD]) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ } }
+  for (const dir of [dataDir, wsC, wsD]) { try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best effort */ } }
 }

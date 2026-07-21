@@ -1,5 +1,5 @@
 import { mkdtempSync } from 'node:fs';
-import { rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
@@ -18,7 +18,7 @@ const tempDir = (): string => {
 
 afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
-  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })));
 });
 
 async function server(token?: string, webDist?: string): Promise<FastifyInstance> {
@@ -82,5 +82,21 @@ describe('static server', () => {
     const api404 = await app.inject({ method: 'GET', url: '/api/missing' });
     expect(api404.statusCode).toBe(404);
     expect(api404.json()).toEqual({ error: { code: 'NOT_FOUND', message: 'Not found' } });
+  });
+
+  it('does not let an encoded separator bypass a protected route into static files', async () => {
+    const webDist = tempDir();
+    await mkdir(join(webDist, 'api'));
+    await writeFile(join(webDist, 'index.html'), '<!doctype html><title>MAT shell</title>', 'utf8');
+    await writeFile(join(webDist, 'api', 'secret.txt'), 'route-boundary-secret', 'utf8');
+    const app = await server('secret', webDist);
+
+    const direct = await app.inject({ method: 'GET', url: '/api/secret.txt' });
+    expect(direct.statusCode).toBe(401);
+    const encodedWithoutToken = await app.inject({ method: 'GET', url: '/api%2Fsecret.txt' });
+    expect(encodedWithoutToken.statusCode).toBe(401);
+    const encoded = await app.inject({ method: 'GET', url: '/api%2Fsecret.txt', headers: { authorization: 'Bearer secret' } });
+    expect(encoded.statusCode).toBe(404);
+    expect(encoded.body).not.toContain('route-boundary-secret');
   });
 });

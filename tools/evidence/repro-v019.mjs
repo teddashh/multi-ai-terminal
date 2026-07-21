@@ -103,7 +103,7 @@ try {
 } finally {
   child.kill('SIGTERM');
   await new Promise((resolve) => setTimeout(resolve, 300));
-  for (const dir of [dataDir, ws]) { try { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { /* best effort */ } }
+  for (const dir of [dataDir, ws]) { try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best effort */ } }
 }
 
 console.log(failures.length === 0 ? '\nALL CHECKS PASSED' : `\n${failures.length} FAILURES:\n${failures.join('\n')}`);

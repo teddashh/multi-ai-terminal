@@ -19,30 +19,29 @@ let verifiedWorkspaceDir;
 let steerWorkspaceDir;
 
 const overallDeadline = setTimeout(() => {
-  console.error('[smoke:browser] FAIL: smoke test exceeded the 120-second hard deadline.');
-  try {
-    child?.kill('SIGKILL');
-  } catch {
-    // The process may already have exited.
-  }
-  void browser?.close();
-  if (dataDir) {
-    void rm(dataDir, { recursive: true, force: true });
-  }
-  if (workspaceDir) {
-    void rm(workspaceDir, { recursive: true, force: true });
-  }
-  if (verifiedWorkspaceDir) {
-    void rm(verifiedWorkspaceDir, { recursive: true, force: true });
-  }
-  if (steerWorkspaceDir) {
-    void rm(steerWorkspaceDir, { recursive: true, force: true });
-  }
-  process.exit(1);
-}, 120_000);
+  console.error('[smoke:browser] FAIL: smoke test exceeded the 180-second hard deadline.');
+  void (async () => {
+    try { child?.kill('SIGKILL'); } catch { /* The process may already have exited. */ }
+    try { await browser?.close(); } catch { /* Continue emergency cleanup. */ }
+    await Promise.allSettled([dataDir, workspaceDir, verifiedWorkspaceDir, steerWorkspaceDir]
+      .filter(Boolean)
+      .map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })));
+    process.exit(1);
+  })();
+}, 180_000);
 overallDeadline.unref();
 
 const delay = (milliseconds) => new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
+const sensitiveEnvironmentName = /(?:api[_-]?key|access[_-]?key|token|secret|password|passwd|credential|authorization|private[_-]?key|database[_-]?url|connection[_-]?string|dsn|cookie|session)/i;
+function redactDiagnosticText(value) {
+  let text = String(value);
+  for (const [name, environmentValue] of Object.entries(process.env)) {
+    if (!environmentValue) continue;
+    if (text === environmentValue) return '[REDACTED_ENV]';
+    if (environmentValue.length >= 8 || sensitiveEnvironmentName.test(name)) text = text.split(environmentValue).join('[REDACTED_ENV]');
+  }
+  return text;
+}
 
 async function phase(name, operation) {
   try {
@@ -50,7 +49,7 @@ async function phase(name, operation) {
     console.log(`[smoke:browser] PASS: ${name}`);
     return result;
   } catch (error) {
-    console.error(`[smoke:browser] FAIL: ${name}: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`[smoke:browser] FAIL: ${name}: ${redactDiagnosticText(error instanceof Error ? error.message : error)}`);
     throw error;
   }
 }
@@ -123,9 +122,9 @@ async function waitForHealth(url, serverOutput) {
 async function resolveBrowserExecutable() {
   if (process.env.CHROME_PATH) {
     if (await isFile(process.env.CHROME_PATH)) {
-      return process.env.CHROME_PATH;
+      return { executablePath: process.env.CHROME_PATH, source: 'CHROME_PATH' };
     }
-    throw new Error(`CHROME_PATH does not point to an existing browser executable: ${process.env.CHROME_PATH}`);
+    throw new Error('CHROME_PATH does not point to an existing browser executable.');
   }
 
   const candidates = {
@@ -147,7 +146,7 @@ async function resolveBrowserExecutable() {
 
   for (const candidate of candidates) {
     if (await isFile(candidate)) {
-      return candidate;
+      return { executablePath: candidate, source: 'auto-detected browser' };
     }
   }
 
@@ -190,16 +189,28 @@ async function runCommand(command, args, cwd) {
   await new Promise((resolveCommand, rejectCommand) => {
     const process = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let output = '';
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      if (error) rejectCommand(error); else resolveCommand();
+    };
+    const deadline = setTimeout(() => {
+      try { process.kill('SIGKILL'); } catch { /* The child may have exited. */ }
+      finish(new Error(`${command} exceeded the 30-second smoke-test deadline.`));
+    }, 30_000);
     process.stdout.on('data', (chunk) => { output += chunk.toString(); });
     process.stderr.on('data', (chunk) => { output += chunk.toString(); });
-    process.once('error', rejectCommand);
-    process.once('close', (code) => code === 0 ? resolveCommand() : rejectCommand(new Error(`${command} ${args.join(' ')} exited ${code}: ${output}`)));
+    process.once('error', (error) => finish(error));
+    process.once('close', (code) => finish(code === 0 ? undefined : new Error(`${command} ${args.join(' ')} exited ${code}: ${output}`)));
   });
 }
 
 let page;
 let port;
 let browserPath;
+let browserSource;
 let serverOutput = '';
 let rootState = { childElementCount: 0, innerText: '' };
 const pageErrors = [];
@@ -235,7 +246,7 @@ try {
 
   const baseUrl = `http://127.0.0.1:${port}`;
   await phase('server startup', () => waitForHealth(`${baseUrl}/api/health`, () => serverOutput));
-  browserPath = await resolveBrowserExecutable();
+  ({ executablePath: browserPath, source: browserSource } = await resolveBrowserExecutable());
 
   browser = await chromium.launch({ executablePath: browserPath, headless: true });
   page = await browser.newPage({ viewport: { width: 1400, height: 800 } });
@@ -258,14 +269,14 @@ try {
           innerText: rootElement?.innerText ?? '',
         };
       });
-      if (rootState.childElementCount >= 1 && rootState.innerText.includes('WORKSPACES')) { mounted = true; break; }
+      if (rootState.childElementCount >= 1 && await page.locator('[data-testid="app-shell"]').count() === 1) { mounted = true; break; }
       await delay(250);
     }
     const diagnosticMarkers = ['Startup error', 'Startup rejection', 'did not mount'];
     const startupDiagnostic = diagnosticMarkers.find((marker) => rootState.innerText.includes(marker));
     if (pageErrors.length > 0) throw new Error(`Captured ${pageErrors.length} page error${pageErrors.length === 1 ? '' : 's'}.`);
     if (startupDiagnostic) throw new Error(`The boot-diagnostics card reported: ${startupDiagnostic}`);
-    if (!mounted) throw new Error('The React app did not render the WORKSPACES heading within 15 seconds.');
+    if (!mounted) throw new Error('The React app did not render its application shell within 15 seconds.');
   });
 
   const api = async (apiPath, init) => {
@@ -274,16 +285,63 @@ try {
     return response.status === 204 ? undefined : response.json();
   };
 
+  const selectWorkspace = async (name) => {
+    await page.getByRole('button', { name: 'Projects', exact: true }).click();
+    const card = page.locator('#launchpad-projects article > button').filter({ hasText: name }).first();
+    await card.waitFor({ state: 'visible', timeout: 10_000 });
+    await card.click();
+    await page.getByRole('button', { name: 'Launch', exact: true }).click();
+  };
+
+  await phase('shell responsiveness and health diagnostics', async () => {
+    await page.setViewportSize({ width: 1024, height: 640 });
+    const assertWorkspaceGeometry = async (state) => {
+      const geometry = await page.locator('[data-testid="app-shell"]').evaluate((element) => {
+        const shell = element.getBoundingClientRect();
+        const workspace = element.querySelector('[data-testid="run-workspace"]')?.getBoundingClientRect();
+        return {
+          shellLeft: shell.left,
+          shellRight: shell.right,
+          shellWidth: shell.width,
+          workspaceLeft: workspace?.left ?? 0,
+          workspaceRight: workspace?.right ?? 0,
+          workspaceWidth: workspace?.width ?? 0,
+          viewportWidth: window.innerWidth,
+        };
+      });
+      const workspaceVisible = geometry.workspaceWidth >= 320
+        && geometry.workspaceLeft >= geometry.shellLeft - 1
+        && geometry.workspaceRight <= geometry.shellRight + 1
+        && geometry.workspaceRight <= geometry.viewportWidth + 1;
+      if (geometry.shellWidth > geometry.viewportWidth + 1 || !workspaceVisible) {
+        throw new Error(`Shell geometry was invalid with ${state}: ${JSON.stringify(geometry)}`);
+      }
+    };
+
+    await assertWorkspaceGeometry('both side panels open');
+    await page.getByRole('button', { name: 'Hide settings', exact: true }).click();
+    await assertWorkspaceGeometry('settings collapsed');
+    await page.getByRole('button', { name: 'Show settings', exact: true }).click();
+    await assertWorkspaceGeometry('settings restored');
+    await page.getByRole('button', { name: 'Hide activity', exact: true }).click();
+    await assertWorkspaceGeometry('activity collapsed');
+    await page.getByRole('button', { name: 'Show activity', exact: true }).click();
+    await assertWorkspaceGeometry('activity restored');
+
+    await page.getByRole('button', { name: 'Health', exact: true }).click();
+    const health = page.getByRole('dialog', { name: 'Health & diagnostics' });
+    await health.getByText('Local server reachable', { exact: true }).waitFor({ timeout: 10_000 });
+    if (await health.getByText(/^Signed in$/i).count() > 0) throw new Error('Health diagnostics made an unsupported signed-in claim.');
+    await page.getByRole('button', { name: 'Close Health & diagnostics' }).click();
+    await page.setViewportSize({ width: 1400, height: 800 });
+  });
+
   const run = await phase('live run setup', async () => {
     const workspace = await api('/api/workspaces', { method: 'POST', body: JSON.stringify({ name: 'Smoke', path: workspaceDir }) });
     const workflows = await api('/api/workflows');
     const workflow = workflows[0];
     if (!workflow) throw new Error('No workflow was available for the smoke run.');
-    await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent?.includes('Smoke')), null, { timeout: 10_000 });
-    await page.evaluate(() => {
-      const button = [...document.querySelectorAll('button')].find((candidate) => candidate.textContent?.includes('Smoke'));
-      button?.click();
-    });
+    await selectWorkspace('Smoke');
     await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent?.trim() === 'Start'), null, { timeout: 10_000 });
 
     const longReply = (index) => `Candidate ${index}: ${'The quick brown fox streams a detailed response while the terminal keeps the live output pinned. '.repeat(38)}`;
@@ -309,7 +367,16 @@ try {
     });
   });
 
+  await phase('narrative-first run workspace', async () => {
+    await page.waitForSelector('[data-testid="narrative-scroll-region"]', { timeout: 10_000 });
+    const conversation = page.getByRole('tabpanel', { name: 'Conversation' });
+    await conversation.getByText(/Candidate \d:/).first().waitFor({ timeout: 10_000 });
+    const selected = await page.getByRole('tab', { name: 'Conversation' }).getAttribute('aria-selected');
+    if (selected !== 'true') throw new Error('Conversation was not the default evidence view.');
+  });
+
   await phase('live switching and panel sizing', async () => {
+    await page.getByRole('tab', { name: 'Timeline' }).click();
     await page.waitForSelector('[data-testid="stream-scroll-region"]', { timeout: 10_000 });
     const dimensions = await page.$eval('[data-testid="stream-scroll-region"]', (element) => ({ clientHeight: element.clientHeight, windowHeight: window.innerHeight }));
     if (dimensions.clientHeight <= 0 || dimensions.clientHeight >= dimensions.windowHeight) {
@@ -401,7 +468,17 @@ try {
       snapshot = await api(`/api/runs/${encodeURIComponent(verifiedRun.runId)}`);
     }
     if (snapshot.status !== 'done') throw new Error(`Verified run ${verifiedRun.runId} did not finish (status=${snapshot.status}).`);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('[data-testid="app-shell"]', { timeout: 15_000 });
+    await selectWorkspace('Verified Smoke');
+    await page.waitForSelector('[data-node-run-id="verify-stage.writer.0"]', { timeout: 10_000 });
     await page.getByText('✓ verified', { exact: true }).waitFor({ timeout: 10_000 });
+    const replayState = await page.evaluate(() => ({
+      selectedRunId: document.querySelector('#run-workspace-run-selector')?.value,
+      runPanelText: document.querySelector('[aria-label="Run panel"]')?.textContent ?? '',
+    }));
+    if (replayState.selectedRunId !== verifiedRun.runId) throw new Error(`Reload selected ${replayState.selectedRunId || '(none)'} instead of terminal run ${verifiedRun.runId}.`);
+    if (!replayState.runPanelText.includes('Create verified smoke evidence')) throw new Error('Run panel did not follow the terminal replay selection after reload.');
     await page.getByRole('button', { name: 'Report', exact: true }).click();
     const dialog = page.getByRole('dialog');
     await dialog.getByText('## Outcome', { exact: false }).waitFor({ timeout: 10_000 });
@@ -418,11 +495,7 @@ try {
     const workspace = await api('/api/workspaces', { method: 'POST', body: JSON.stringify({
       name: 'Steer Smoke', path: steerWorkspaceDir, verifyCommand: 'node -e "process.exit(0)"',
     }) });
-    await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent?.includes('Steer Smoke')), null, { timeout: 10_000 });
-    await page.evaluate(() => {
-      const button = [...document.querySelectorAll('button')].find((candidate) => candidate.textContent?.includes('Steer Smoke'));
-      button?.click();
-    });
+    await selectWorkspace('Steer Smoke');
     const workflows = await api('/api/workflows');
     const source = workflows[0];
     if (!source) throw new Error('No workflow was available for the steer smoke run.');
@@ -505,13 +578,13 @@ try {
 }
 
 if (failure) {
-  console.error(`[smoke:browser] FAIL: ${failure.stack ?? String(failure)}`);
+  console.error(`[smoke:browser] FAIL: ${redactDiagnosticText(failure.stack ?? failure)}`);
   console.error(`[smoke:browser] #root childElementCount: ${rootState.childElementCount}`);
-  console.error(`[smoke:browser] #root innerText (first 500 chars): ${rootState.innerText.slice(0, 500) || '(empty)'}`);
-  console.error(`[smoke:browser] Page errors:\n${pageErrors.join('\n') || '(none)'}`);
-  console.error(`[smoke:browser] Console messages:\n${consoleMessages.join('\n') || '(none)'}`);
-  console.error(`[smoke:browser] Server output:\n${serverOutput.trim() || '(none)'}`);
+  console.error(`[smoke:browser] #root innerText (first 500 chars): ${redactDiagnosticText(rootState.innerText.slice(0, 500) || '(empty)')}`);
+  console.error(`[smoke:browser] Page errors:\n${redactDiagnosticText(pageErrors.join('\n') || '(none)')}`);
+  console.error(`[smoke:browser] Console messages:\n${redactDiagnosticText(consoleMessages.join('\n') || '(none)')}`);
+  console.error(`[smoke:browser] Server output:\n${redactDiagnosticText(serverOutput.trim() || '(none)')}`);
   process.exitCode = 1;
 } else {
-  console.log(`[smoke:browser] PASS port=${port} browser=${browserPath}`);
+  console.log(`[smoke:browser] PASS port=${port} browser=${browserSource}`);
 }

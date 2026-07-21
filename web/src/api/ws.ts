@@ -1,17 +1,24 @@
 import { WsServerMsgSchema, type WsClientMsg, type WsServerMsg } from '@mat/shared';
 import { apiClient, type ApiClient } from './client.js';
 
+export type WsCatchUpUpdate =
+  | { runId: string; status: 'started'; afterSeq: number }
+  | { runId: string; status: 'synchronized' | 'failed' };
+
 export interface ReconnectingWsOptions {
   url?: string;
   token?: string | (() => string | undefined);
   api?: ApiClient;
   onMessage(message: WsServerMsg): void;
   onStateChange?(state: 'connecting'|'open'|'closed'): void;
+  onCatchUpState?(update: WsCatchUpUpdate): void;
 }
 
 export class ReconnectingWsClient {
   readonly #subscriptions = new Set<string>();
   readonly #lastSeq = new Map<string, number>();
+  readonly #catchUpGeneration = new Map<string, number>();
+  readonly #activeCatchUps = new Map<string, number>();
   readonly #api: ApiClient;
   #socket: WebSocket | undefined;
   #timer: number | undefined;
@@ -21,8 +28,18 @@ export class ReconnectingWsClient {
 
   connect(): void { if (!this.#closed || this.#socket) return; this.#closed = false; this.#open(); }
   close(): void { this.#closed = true; if (this.#timer !== undefined) window.clearTimeout(this.#timer); this.#socket?.close(); this.#socket = undefined; this.options.onStateChange?.('closed'); }
-  subscribe(runId: string): void { this.#subscriptions.add(runId); this.#send({ type: 'sub', runId }); if (this.#socket?.readyState === WebSocket.OPEN) void this.#catchUp(runId); }
-  unsubscribe(runId: string): void { this.#subscriptions.delete(runId); this.#send({ type: 'unsub', runId }); }
+  subscribe(runId: string): void {
+    if (this.#subscriptions.has(runId)) return;
+    this.#subscriptions.add(runId);
+    this.#send({ type: 'sub', runId });
+    if (this.#socket?.readyState === WebSocket.OPEN) void this.#catchUp(runId);
+  }
+  unsubscribe(runId: string): void {
+    this.#subscriptions.delete(runId);
+    this.#catchUpGeneration.set(runId, (this.#catchUpGeneration.get(runId) ?? 0) + 1);
+    if (this.#activeCatchUps.delete(runId)) this.options.onCatchUpState?.({ runId, status: 'failed' });
+    this.#send({ type: 'unsub', runId });
+  }
 
   #open(): void {
     if (this.#closed) return;
@@ -55,15 +72,35 @@ export class ReconnectingWsClient {
   #send(message: WsClientMsg): void { if (this.#socket?.readyState === WebSocket.OPEN) this.#socket.send(JSON.stringify(message)); }
   async #catchUp(runId: string): Promise<void> {
     let cursor = this.#lastSeq.get(runId) ?? 0;
+    const generation = (this.#catchUpGeneration.get(runId) ?? 0) + 1;
+    this.#catchUpGeneration.set(runId, generation);
+    this.#activeCatchUps.set(runId, generation);
+    this.options.onCatchUpState?.({ runId, status: 'started', afterSeq: cursor });
     try {
       for (;;) {
+        const before = cursor;
         const events = await this.#api.getEvents(runId, cursor, 1000);
+        if (this.#closed || this.#catchUpGeneration.get(runId) !== generation) return;
         for (const event of events) {
           cursor = Math.max(cursor, event.seq); this.#lastSeq.set(runId, cursor);
           this.options.onMessage({ type: 'event', event });
         }
-        if (events.length < 1000) break;
+        if (events.length < 1000) {
+          this.#activeCatchUps.delete(runId);
+          this.options.onCatchUpState?.({ runId, status: 'synchronized' });
+          return;
+        }
+        if (cursor === before) {
+          this.#activeCatchUps.delete(runId);
+          this.options.onCatchUpState?.({ runId, status: 'failed' });
+          return;
+        }
       }
-    } catch { /* The next reconnect retries from the last confirmed sequence. */ }
+    } catch {
+      if (!this.#closed && this.#catchUpGeneration.get(runId) === generation) {
+        this.#activeCatchUps.delete(runId);
+        this.options.onCatchUpState?.({ runId, status: 'failed' });
+      }
+    }
   }
 }

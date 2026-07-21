@@ -3,9 +3,14 @@ import { Collapsible } from './Collapsible.js';
 
 export function mergeConsecutiveEvents(events: readonly AgentEvent[]): AgentEvent[] {
   const merged: AgentEvent[] = [];
+  let previousSource: AgentEvent | undefined;
   for (const event of events) {
     const prior = merged.at(-1);
-    if (prior && prior.nodeRunId === event.nodeRunId && prior.attempt === event.attempt && prior.kind === event.kind) {
+    const sameToolCall = Boolean(prior?.tool?.toolCallId && prior.tool.toolCallId === event.tool?.toolCallId);
+    const mergeableKind = event.kind === 'message' || event.kind === 'thinking'
+      || ((event.kind === 'tool_use' || event.kind === 'tool_result') && sameToolCall);
+    const consecutive = previousSource !== undefined && event.seq === previousSource.seq + 1;
+    if (prior && consecutive && mergeableKind && prior.nodeRunId === event.nodeRunId && prior.stageId === event.stageId && prior.attempt === event.attempt && prior.kind === event.kind && prior.role === event.role) {
       let tool: AgentEvent['tool'];
       if (prior.tool || event.tool) {
         tool = { ...(prior.tool ?? event.tool!), ...(event.tool ?? {}) };
@@ -16,6 +21,7 @@ export function mergeConsecutiveEvents(events: readonly AgentEvent[]): AgentEven
       }
       merged[merged.length - 1] = { ...prior, text: prior.text + event.text, ...(tool ? { tool } : {}), data: { ...(prior.data ?? {}), ...(event.data ?? {}), continued: true } };
     } else merged.push({ ...event, ...(event.tool ? { tool: { ...event.tool } } : {}), ...(event.data ? { data: { ...event.data } } : {}) });
+    previousSource = event;
   }
   return merged;
 }

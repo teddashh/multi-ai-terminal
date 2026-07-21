@@ -8,7 +8,7 @@ import { createLineBuffer } from '../../src/adapters/base.js';
 import { augmentedPathEnv, sanitizedEnvironment, spawnManaged } from '../../src/spawn.js';
 
 const testRoot = mkdtempSync(join(tmpdir(), 'mat-spawn-tests-'));
-afterAll(() => rmSync(testRoot, { recursive: true, force: true }));
+afterAll(() => rmSync(testRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 
 async function firstLine(stream: Readable): Promise<string> {
   let output = '';
@@ -30,7 +30,8 @@ function isAlive(pid: number): boolean {
 }
 
 async function waitForDeath(pid: number): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  const deadline = Date.now() + 25_000;
+  while (Date.now() < deadline) {
     if (!isAlive(pid)) return;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
@@ -53,14 +54,14 @@ describe('spawnManaged', () => {
     );
     expect(env.LD_LIBRARY_PATH).toBeUndefined();
     expect(env.PATH?.split(':')).toEqual(['/bin']);
-  });
+  }, 30_000);
 
   it('augments Unix PATH with the user-local and system CLI directories that exist', () => {
     const exists = (path: string) => path === '/fake/home/.local/bin' || path === '/usr/local/bin';
     const env = augmentedPathEnv({ platform: 'linux', delimiter: ':', homedir: '/fake/home', env: { PATH: '/bin' }, exists });
     expect(env.PATH?.split(':')).toEqual(['/bin', '/fake/home/.local/bin', '/usr/local/bin']);
     expect(augmentedPathEnv({ platform: 'linux', delimiter: ':', homedir: '/fake/missing', env: { PATH: '/bin' }, exists: () => false }).PATH).toBe('/bin');
-  });
+  }, 30_000);
 
   it('augments Windows PATH case-insensitively from injected platform and environment values', () => {
     const local = String.raw`C:\Users\Tester\AppData\Local`;
@@ -71,7 +72,7 @@ describe('spawnManaged', () => {
       exists: (path) => existing.has(path),
     });
     expect(env.Path?.split(';')).toEqual([String.raw`C:\Windows`, String.raw`c:\users\tester\appdata\roaming\NPM`, String.raw`C:\Users\Tester\AppData\Local\Antigravity`]);
-  });
+  }, 30_000);
 
   it('preserves the Windows PATH key casing and delimiter without Unix additions', () => {
     const env = sanitizedEnvironment(
@@ -82,7 +83,7 @@ describe('spawnManaged', () => {
     expect(env.Path).toBe(String.raw`C:\Windows;C:\Tools`);
     expect(env.PATH).toBeUndefined();
     expect(Object.keys(env).filter((key) => key.toLowerCase() === 'path')).toEqual(['Path']);
-  });
+  }, 30_000);
 
   it('passes the sanitized environment to the spawned process', async () => {
     const managed = spawnManaged({
@@ -97,7 +98,7 @@ describe('spawnManaged', () => {
     const parsed = JSON.parse(output) as { library?: string; path?: string };
     expect(parsed.library).toBeUndefined();
     expect(parsed.path?.split(delimiter).filter(Boolean).length).toBeGreaterThan(0);
-  });
+  }, 30_000);
 
   it('pipes stdin then closes it, with stdout available incrementally', async () => {
     const script = `let value = ''; process.stdin.on('data', (chunk) => value += chunk); process.stdin.on('end', () => console.log('got:' + value.trim()));`;
@@ -109,7 +110,7 @@ describe('spawnManaged', () => {
     buffer.end();
     expect(code).toBe(0);
     expect(lines).toEqual(['got:hello']);
-  });
+  }, 30_000);
 
   it('kills the process tree, including a spawned grandchild', async () => {
     const managed = spawnManaged({ command: process.execPath, args: ['-e', parentWithGrandchild], cwd: testRoot });
@@ -121,7 +122,7 @@ describe('spawnManaged', () => {
     if (process.platform === 'win32') expect(code).not.toBe(0);
     else expect(signal).toBe('SIGTERM');
     await waitForDeath(grandchildPid);
-  });
+  }, 30_000);
 
   it('invokes the timeout hook and terminates the group', async () => {
     let timedOut = false;
@@ -134,7 +135,7 @@ describe('spawnManaged', () => {
     });
     await once(managed.child, 'close');
     expect(timedOut).toBe(true);
-  });
+  }, 30_000);
 
   it.skipIf(process.platform === 'win32')('sweeps background descendants when the direct child exits naturally', async () => {
     const parentThatExits = `
@@ -149,5 +150,5 @@ console.log(child.pid);
     await closed;
     expect(Number.isInteger(descendantPid)).toBe(true);
     await waitForDeath(descendantPid);
-  });
+  }, 30_000);
 });

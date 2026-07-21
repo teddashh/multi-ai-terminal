@@ -11,6 +11,26 @@ describe('detectAuthFailure', () => {
     expect(detectAuthFailure('grok', text)).toBe('grok is not signed in.\nFix: grok login   (browser) · grok login --device-code (headless) · or set XAI_API_KEY\ngrok login --device-code');
   });
 
+  it('never copies a possible API key or token value into the auth reason', () => {
+    const sentinel = 'sk-ENV-SECRET-123';
+    const prior = process.env.MAT_TEST_API_TOKEN;
+    process.env.MAT_TEST_API_TOKEN = sentinel;
+    try {
+      const reason = detectAuthFailure('grok', `Authentication required\nUse API key ${sentinel}`);
+      expect(reason).toBe('grok is not signed in.\nFix: grok login   (browser) · grok login --device-code (headless) · or set XAI_API_KEY');
+      expect(reason).not.toContain(sentinel);
+    } finally {
+      if (prior === undefined) delete process.env.MAT_TEST_API_TOKEN;
+      else process.env.MAT_TEST_API_TOKEN = prior;
+    }
+  });
+
+  it('rejects extra values appended to an otherwise safe login instruction', () => {
+    expect(detectAuthFailure('grok', 'Authentication required\nRun: grok login --device-code pairing-code-482719')).toBe(
+      'grok is not signed in.\nFix: grok login   (browser) · grok login --device-code (headless) · or set XAI_API_KEY',
+    );
+  });
+
   it('uses expired wording for a bare 401', () => {
     expect(detectAuthFailure('claude', 'request failed: 401 Unauthorized')).toBe('claude sign-in expired.\nFix: claude   (then /login inside the session)');
   });

@@ -8,9 +8,11 @@ import { collectPatch, createWorktree, pruneRunWorktrees } from '../../src/engin
 
 const dirs: string[] = [];
 const oldDataDir = process.env.MAT_DATA_DIR;
+const oldPatchSecret = process.env.MAT_TEST_PATCH_SECRET;
 afterEach(async () => {
   if (oldDataDir === undefined) delete process.env.MAT_DATA_DIR; else process.env.MAT_DATA_DIR = oldDataDir;
-  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  if (oldPatchSecret === undefined) delete process.env.MAT_TEST_PATCH_SECRET; else process.env.MAT_TEST_PATCH_SECRET = oldPatchSecret;
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })));
 });
 
 describe('worktree lifecycle', () => {
@@ -34,11 +36,17 @@ describe('worktree lifecycle', () => {
     execFileSync('git', ['-C', repo, 'commit', '-m', 'base']);
 
     const first = await createWorktree(repo, 'run1', 'stage.slot.0', 1);
-    writeFileSync(join(first.cwd, 'untracked.txt'), 'new\n');
+    const sentinel = 'patch-env-sentinel-326d7a';
+    process.env.MAT_TEST_PATCH_SECRET = sentinel;
+    writeFileSync(join(first.cwd, 'untracked.txt'), `new ${sentinel}\n`);
     const patchPath = join(data, 'runs', 'run1', 'artifacts', 'node.patch');
     await collectPatch(first.cwd, first.baseCommit, patchPath);
-    expect(readFileSync(patchPath, 'utf8')).toContain('untracked.txt');
+    const patch = readFileSync(patchPath, 'utf8');
+    expect(patch).toContain('untracked.txt');
+    expect(patch).toContain(sentinel);
     expect((await readdir(join(data, 'runs', 'run1', 'artifacts'))).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+    execFileSync('git', ['-C', repo, 'apply', '--binary', patchPath]);
+    expect(readFileSync(join(repo, 'untracked.txt'), 'utf8')).toBe(`new ${sentinel}\n`);
 
     const retrySafe = await createWorktree(repo, 'run1', 'stage.slot.0', 1);
     expect(retrySafe.cwd).toBe(first.cwd);
@@ -46,5 +54,5 @@ describe('worktree lifecycle', () => {
     await pruneRunWorktrees(repo, 'run1');
     expect(existsSync(retrySafe.cwd)).toBe(false);
     expect(execFileSync('git', ['-C', repo, 'branch', '--list', retrySafe.branch], { encoding: 'utf8' }).trim()).toBe('');
-  });
+  }, 30_000);
 });

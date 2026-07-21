@@ -24,7 +24,7 @@ import { EngineConflictError, EngineNotFoundError } from './errors.js';
 import { killActiveNode, killAllActiveNodes, markNodeKilled, resetNodeForRetry } from './nodeRunner.js';
 import { clearSteerInterrupt, persistRun, queueStageRetryAddendum, requestActiveStageRetry, requestSteerInterrupt, runStage } from './stageRunner.js';
 import { expireSteers, runSteerCycle, type SteerOutcome } from './steer.js';
-import { isGitRepository, pruneWorktrees, runDirectory } from './worktree.js';
+import { isGitRepository, pruneWorktrees, runDirectory, workspaceForRun } from './worktree.js';
 
 const activeRuns = new Map<string, RunSnapshot>();
 const executions = new Map<string, Promise<void>>();
@@ -60,7 +60,7 @@ function systemEvent(run: RunSnapshot, kind: 'status' | 'error', text: string, d
     kind,
     text,
     ...(data ? { data } : {}),
-  });
+  }, { trustedData: true });
 }
 
 function validateWorkflowIdentity(workflow: WorkflowDef): void {
@@ -191,6 +191,13 @@ export async function createRun(req: RunCreateRequest, providerVersions?: Record
   const run: RunSnapshot = {
     runId: `r_${nanoid()}`,
     workspaceId: workspace.id,
+    workspaceSnapshot: {
+      name: workspace.name,
+      path: workspace.path,
+      isGit: workspace.isGit,
+      ...(workspace.verifyCommand ? { verifyCommand: workspace.verifyCommand } : {}),
+      ...(workspace.verifyTimeoutSec !== undefined ? { verifyTimeoutSec: workspace.verifyTimeoutSec } : {}),
+    },
     workflow,
     task: req.task,
     status: 'created',
@@ -238,7 +245,7 @@ export async function steerRun(runId: string, req: SteerRequest): Promise<RunSna
     appendEvent(run.runId, {
       runId: run.runId, stageId: null, nodeRunId: null, attempt: 0, role: 'user', kind: 'message', text: steer.text,
       data: { detail: 'steer', steerId: steer.steerId, mode: steer.mode },
-    });
+    }, { trustedData: true });
     diag(run.runId, 'steer', { steerId: steer.steerId, transition: 'pending', mode: steer.mode });
     if (steer.mode === 'interrupt' && run.status === 'running') {
       requestSteerInterrupt(runId);
@@ -335,7 +342,7 @@ export async function applyPatch(runId: string, nodeRunId: string): Promise<Appl
   if (!node) throw new EngineNotFoundError(`Node not found: ${nodeRunId}`);
   const patchFile = node.patchFile ?? join(runDirectory(runId), 'artifacts', `${node.nodeRunId}.a${node.attempt}.patch`);
   if (!existsSync(patchFile)) return { ok: false, message: 'No captured patch is available for this node.' };
-  const workspace = await getWorkspace(run.workspaceId);
+  const workspace = await workspaceForRun(run);
   if (!workspace.isGit || !await isGitRepository(workspace.path)) return { ok: false, message: 'Patches can only be applied to a Git workspace.' };
   return withMutex(workspaceApplyTails, workspace.id, async () => {
     try {

@@ -1,7 +1,7 @@
-# Multi-AI Terminal — Product & Engineering Spec (v1.1)
+# Multi-AI Terminal — Product & Engineering Spec (v1.4)
 
-> v1.1 incorporates the 4-model panel review (codex gpt-5.6-sol, agy Gemini 3.1 Pro, grok 4.5, Claude Fable 5 — all verdicts: revise; findings merged, see docs/spec-review-panel.md).
-> Date: 2026-07-18
+> v1.1 incorporates the 4-model panel review (codex gpt-5.6-sol, agy Gemini 3.1 Pro, grok 4.5, Claude Fable 5 — all verdicts: revise; findings merged, see docs/spec-review-panel.md). The normative v1.2 evidence-plane, v1.3 steering/debug-plane, and v1.4 evidence-workbench UX amendments are integrated below and summarized at the end.
+> Base date: 2026-07-18. Amended through 2026-07-20.
 
 ## 0. What this is
 
@@ -18,26 +18,26 @@ Successor concept to `multi-ai-chat-desktop` (webchat orchestration), rebuilt on
 5. **Orchestrator = a real LLM agent, minimum-branch.** Deterministic trunk (fan-out stage → join → gate → next stage); the LLM decides only at gates: advance / retry(nodes, addendum) / abort, emitting a machine-parseable decision + rationale (decision log is first-class UI data).
 6. **Turn-based coordination via job queue + files.** No realtime stdin injection. Fan-in compares normalized events/artifacts.
 7. **Node schema is provider-agnostic from day 1.** Multiple instances of one agent at one checkpoint (e.g. 3× grok) is a core interaction.
-8. **Mid-run human intervention v1 =** kill node, retry stage, abort run, apply patch. No typing into a live agent session.
+8. **Mid-run human intervention v1 =** kill node, retry stage, abort run, apply patch, and process-boundary steering. No typing into a live agent session.
 
 ### Non-goals (v1)
 
-Interactive terminals/stdin; dynamic runtime graph growth (only retries of existing nodes); Tauri/Electron packaging (localhost web app; §2); Windows; graph-canvas editing (form-based editing + drag-to-assign); i18n; auth beyond network trust + optional token; `gemini` as a separate provider (agy serves Gemini models; dedicated gemini-cli adapter is v1.1).
+Interactive terminals/stdin; arbitrary agent-authored runtime graph growth (only retries plus engine-owned transient steer stages); graph-canvas editing (form-based editing + drag-to-assign); i18n; auth beyond network trust + optional token; `gemini` as a separate provider (agy serves Gemini models). Desktop packaging and Windows are shipped surfaces, not non-goals.
 
 ## 1. Primary user story
 
-The user opens MAT on a headless dev box via browser (Tailscale). Left rail shows workspaces (repos) with the last workflow mode each ran. The user picks a workspace, selects **Planning Mode** (builtin), drags `codex` and two `grok` chips onto *Round Table* **directly on the builtin** (edits are an ephemeral run-scoped copy; "Duplicate" only to save), sets one candidate's model/effort, types the task, hits **Run**. Node cards light up; the stream panel shows every agent's your/agent/tool/thinking messages live (aggregated feed; click a node card to focus it — true side-by-side panes are v1.1). At the gate, the Orchestrator's decision card explains why R2 is retried with an addendum. The Final Reviewer produces the consolidated plan; the run is replayable after a server restart.
+The user opens MAT in the Tauri desktop app or from a headless dev box via browser (Tailscale). The navigation rail switches a persistent Launchpad between **Projects** and **Launch** without discarding either panel's draft. The user picks a workspace, selects **Planning Mode** (builtin), sees provider readiness, types the task, and hits **Start**. Advanced stage/agent editing is available through an explicit **Customize** drawer; edits to a builtin remain an ephemeral run-scoped copy ("Duplicate" only to save). Node cards light up in the activity inspector while the main **Conversation** view identifies which node said what; raw prompts, thinking, tools, lifecycle, and exact ordering remain available in **Timeline**. At the gate, the Orchestrator's decision card explains why R2 is retried with an addendum. The Final Reviewer produces the consolidated plan; the run is replayable after a server restart.
 
 ## 2. Architecture & stack
 
-**Topology: single Node.js server process + browser UI.**
+**Topology: single Node.js server process + browser UI, packaged in a Tauri v2 desktop shell.**
 
 - Server: **Node ≥ 20, TypeScript, Fastify** (REST + WebSocket + static hosting). Spawns agent CLIs as child processes, parses stdout line-by-line, persists + broadcasts normalized events.
 - Frontend: **React 18 + Vite + TypeScript + Tailwind CSS + zustand + @dnd-kit/core + @tanstack/react-virtual**. Backend touchpoints ONLY via `web/src/api/client.ts` (REST) and `web/src/api/ws.ts` (WS).
 - Shared package: **zod schemas + TS types** consumed by both sides.
 - Monorepo: npm workspaces (`shared/`, `server/`, `web/`). ESM, TS strict. Engines `>=20`.
 
-Why web-served instead of Tauri: the target fleet is headless servers over Tailscale; BAT needs an xvfb hack there. A web app is natively headless, e2e-verifiable by agents, wrappable in Tauri later. *(Deviation from debate round 12, deliberate: "reuse BAT peripheral scaffolding" was dropped because BAT is Tauri-bound; its lifecycle/worktree patterns are re-specified natively here.)*
+The web-served topology remains the runtime contract because it works on headless servers over Tailscale and is independently browser-testable. The shipped Tauri v2 shell launches that same bundled Fastify server on an ephemeral loopback port and navigates its WebView to it; it does not replace the server architecture. *(Deviation from debate round 12, deliberate: "reuse BAT peripheral scaffolding" was dropped because BAT is Tauri-bound; its lifecycle/worktree patterns are re-specified natively here.)*
 
 **Bind & trust**: default `--host 127.0.0.1`. `--host 0.0.0.0` (or a tailscale IP) opts into remote access; v1 trust model is the network boundary (tailnet ACLs). Optional `--token <secret>` (or `MAT_TOKEN`): when set, REST requires `Authorization: Bearer <secret>` and WS requires `?token=<secret>`; when unset, no auth. Server never exposes itself beyond the chosen bind.
 
@@ -47,6 +47,9 @@ Why web-served instead of Tauri: the target fleet is headless servers over Tails
 multi-ai-terminal/
 ├── package.json                # workspaces root; scripts: dev, build, test, start, typecheck
 ├── SPEC.md  README.md  LICENSE  docs/spec-review-panel.md
+├── desktop/src-tauri/          # Tauri v2 shell, capabilities, native plugins, packaging
+├── scripts/                    # desktop bundle, browser smoke, version synchronization
+├── tools/evidence/             # built-server and extracted-artifact black-box instruments
 ├── shared/
 │   └── src/
 │       ├── events.ts workflow.ts run.ts providers.ts api.ts   # types + zod (normative, §3)
@@ -64,9 +67,9 @@ multi-ai-terminal/
 │   └── test/                   # vitest; fixtures/ = cleaned REAL CLI captures (§11)
 └── web/
     └── src/
-        ├── app/                # App shell, layout grid, theme, store.ts (zustand — FROZEN in wave 0)
+        ├── app/                # App shell, layout grid, theme, store.ts (zustand)
         ├── api/                # client.ts ws.ts
-        ├── components/         # AgentChip StatusDot ModalDialog Collapsible EventRow… (FROZEN in wave 0)
+        ├── components/         # AgentChip StatusDot ModalDialog Collapsible EventRow…
         ├── panels/workspace/   # left rail
         ├── panels/workflow/    # mode picker, stage editor, agent palette, run box
         ├── panels/run/         # node cards grid + gate decision cards
@@ -110,7 +113,7 @@ export interface AgentEvent {
 2. **nodeRunner (engine) emits ALL lifecycle events**: the synthesized `role:'user', kind:'message'` prompt event (see rule 3), `status` (`spawned`/`running`/`stalled`/`retry`/`killed`), `result`, `error` — all with `role:'system'` except the user prompt event. It stamps `runId/stageId/nodeRunId/attempt` on every event (adapter or lifecycle) before append.
 3. **The engine synthesizes the 'your' category**: at every attempt start (initial + each retry), BEFORE `status:spawned`, it appends a `role:'user', kind:'message'` event whose text is the final rendered prompt (with retry addendum when applicable). No CLI echoes prompts; without this rule the headline "your" category would be empty.
 4. **eventLog.append is the single writer** (§7): per-run FIFO queue; assigns `id/seq/ts`; appends durably to `events.jsonl`; ONLY THEN `wsHub.broadcast(event)`. Synchronous interface: `appendEvent(runId, partial): AgentEvent`.
-5. **Events are immutable.** Streaming deltas (grok tokens, agy stdout) are coalesced per (nodeRunId, kind) and flushed on kind-change, ≥1500 ms, or ≥2 KB buffer — each flush appends a NEW event with `data:{continued:true}` after the first. The EventRow renderer AND the digest builder MUST merge runs of consecutive events with equal `(nodeRunId, attempt, kind)` into one visual/logical block.
+5. **Events are immutable.** Streaming deltas (grok tokens, agy stdout) are coalesced per (nodeRunId, kind) and flushed on kind-change, ≥1500 ms, or ≥2 KB buffer — each flush appends a NEW event with `data:{continued:true}` after the first. The Narrative projection and digest builder may merge only adjacent, identity-compatible continuation events into one readable/logical block. Timeline retains every source event with its original `id` and `seq`; tool halves and duplicate prompts may receive adjacent-only visual grouping, but the representation must expand back into monotonically increasing source sequence order.
 6. Non-JSON stdout lines from `rich`-tier CLIs are silently skipped for normalization but always land in the raw log.
 7. Every raw stdout/stderr line is appended verbatim to `raw/<nodeRunId>.a<attempt>.jsonl` as `{s:'out'|'err', l:string, ts:number}`.
 
@@ -193,11 +196,18 @@ export interface GateDecision {
   rationale: string;
   raw?: string;
   degraded?: boolean;                        // parse-failure or gate-timeout fallback
+  verificationSummary?: {                    // frozen at decision time; optional for persisted legacy runs
+    passed: number; failed: number; skipped: number;
+  };
   ts: number;
 }
 export interface RunSnapshot {
   runId: string; workspaceId: string;
-  workflow: WorkflowDef;                     // FROZEN resolved copy — the only workflow source at runtime
+  workspaceSnapshot?: {                     // immutable provenance; absent only on legacy persisted runs
+    name: string; path: string; isGit: boolean;
+    verifyCommand?: string; verifyTimeoutSec?: number;
+  };
+  workflow: WorkflowDef;                     // immutable resolved copy — the only workflow source at runtime
   task: string; status: RunStatus;
   currentStageId?: string;
   nodes: NodeRun[];                          // includes the reserved orchestrator NodeRun when enabled
@@ -390,7 +400,11 @@ REST (zod-validated; errors `{error:{code,message}}`; bearer token if configured
 
 ```
 GET  /api/health                              → {ok, version}
-GET  /api/providers                           → [{id, tier, ok, version, models, defaultModel}]
+GET  /api/providers                           → [{id, tier, ok, version?, detail?, models, defaultModel,
+                                                installable, manualCommand?, authAlert?, signInCommand?}]
+POST /api/providers/:id/install               # explicit click only; fixed server-side recipe or manual command
+POST /api/client-log                          # bounded best-effort browser diagnostic intake
+GET  /api/debug/server-log                    # bounded server diagnostic tail
 GET|POST|PATCH|DELETE /api/workspaces(:id)    # POST validates path exists; returns isGit
 GET  /api/workflows                           → builtin + custom
 POST /api/workflows  PATCH|DELETE /api/workflows/:id    (builtin → 409; POST /api/workflows/:id/duplicate)
@@ -398,9 +412,12 @@ POST /api/runs                                RunCreateRequest → RunSnapshot (
 GET  /api/runs?workspaceId=&limit=50&before=<createdAt>   → RunSnapshot[] (newest first, cursor = createdAt)
 GET  /api/runs/:id                            → RunSnapshot
 GET  /api/runs/:id/events?afterSeq=0&limit=1000 → AgentEvent[]
+GET  /api/runs/:id/report                     → text/markdown deterministic evidence report
+GET  /api/runs/:id/debug-bundle               → application/zip debug bundle v1
 GET  /api/runs/:id/patches/:nodeRunId         → text/plain latest-attempt patch content
 POST /api/runs/:id/abort
 POST /api/runs/:id/nodes/:nodeRunId/kill
+POST /api/runs/:id/steer                      SteerRequest — FIFO interrupt (default) or queue
 POST /api/runs/:id/stages/:stageId/retry      RetryStageRequest — valid while gating at that stage, or when the
                                               run is terminal and stageId was the last executed stage (run re-enters running(k));
                                               counts against the stage's gate budget
@@ -414,20 +431,25 @@ WS `/ws[?token=]`: client `{type:'sub'|'unsub', runId}`; server pushes per §3.4
 
 ## 9. Frontend spec (web/)
 
-Four-column CSS grid (from the design mock), draggable dividers, dark theme default.
+Dark evidence workbench: a 52 px navigation rail, collapsible Launchpad, collapsible activity inspector, and a flexible Run Workspace. Launchpad/inspector widths use the independent `mat-shell-layout-v2` preference and keyboard-accessible dividers. Collapsing or navigating hides panels without unmounting them, so task, workspace, and model-editor drafts survive.
 
-1. **Workspace rail**: cards — name, short path, `lastRun` badge ("Planning · done · 2h ago"), live pulse when running; add-workspace dialog (server validates; shows isGit chip).
-2. **Workflow panel**: workflow dropdown (builtin ⭐ + custom). Stage sections with slot chips (`AgentChip`: provider color dot + provider + model + effort + ×count). Chip popover: model input w/ datalist, effort select, count stepper (1–8), permission select, promptTemplate textarea, remove. Stage header: isolation toggle, timeout, gate toggle. **Agent palette at the bottom** (draggable chips per provider; grayed when unavailable); drag onto a stage appends a slot (provider defaults); "+ add agent" menu as fallback. **Editing a builtin mutates an ephemeral run-scoped copy** submitted as `workflowOverride` — banner offers "Duplicate to save". **Run box**: task textarea, orchestrator toggle + binding summary, Start (disabled while a run is active in this workspace).
-3. **Run panel**: stage groups; node cards: label, provider ring, status badge (queued gray / running sky / thinking pulse / stalled amber / done emerald / failed red / killed zinc), elapsed ticker, last-event line, usage/cost, buttons: kill, view patch (modal, content from `/patches/:nodeRunId`, Apply patch inside), focus-stream. Orchestrator card pinned top. Gate decision cards (emerald; amber border when degraded) between stages; stage header retry button (calls retry-stage).
-4. **Stream panel**: virtualized aggregated feed (`@tanstack/react-virtual`). EventRow merges consecutive same-(node,attempt,kind) events (§3.1 rule 5). Styling: user sky left-border; agent ink; thinking violet italic collapsed 2 lines; tool amber mono (tool_use header + collapsible result, matched by toolCallId); decision emerald card; error red; status dim. Filters: node multi-select, category toggles, auto-follow (pause on scroll-up), client-side search. Header: run selector (live + history via cursor paging) — replay uses the same renderer fed by REST pages.
-5. **Theme tokens**: `--panel #18181b --border #27272a --ink #e4e4e7 --muted #a1a1aa` accent `#a78bfa`; providers: claude `#d97706`, codex `#10a37f`, agy `#4285f4`, grok `#e11d48`, mock `#71717a`.
-6. **zustand store (FROZEN wave 0)**: state {workspaces, workflows, providers, selectedWorkspaceId, ephemeralWorkflowEdits, activeRunId, runs: Record<runId,RunSnapshot>, events: Record<runId,AgentEvent[]> (ring 20k), filters {nodeRunIds, roles, follow}, ui {focusedNodeRunId}} + actions (setters, applyWsMsg(msg), focusNode(id), toggleRole(role), loadOlderEvents(runId)). Wave-1 panels consume via selectors; gaps reported, not hacked in.
+1. **Projects**: workspace cards — name, short path, `lastRun` badge ("Planning · done · 2h ago"), live pulse when running; add-workspace dialog (server validates; shows isGit chip). Projects is a Launchpad view selected from the rail, not a permanently competing column.
+2. **Launch**: the default Launchpad view leads with visual workflow-mode choices, provider readiness, task, and Start. "CLI detected" never claims authentication; a recent observed auth failure is labeled as such. **Customize** opens the advanced stage editor, orchestrator binding, slot editors, and agent palette in a focus-trapped drawer. Slot editing keeps the explicit custom-model input: never use `<datalist>` and never auto-collapse while a custom value is being typed. Editing a builtin mutates an ephemeral run-scoped `workflowOverride`; Duplicate is required to save it.
+3. **Activity inspector**: the existing run/node evidence controls stay persistently mounted. Stage groups and node cards show provider identity, state, elapsed time, last evidence, usage, verification, handoff, patch, kill/retry controls, steering, Report, and Debug. The rail may hide this region without discarding dialog or composer state.
+4. **Run Workspace**: one shared run selector owns live/history identity and replay hydration for every evidence view. It must never replace `activeRunId` when the user chooses a historical `viewedRunId`. Node chips plus All/Running/Attention presets focus both the inspector and evidence views. A run that finishes while open remains the same live session for follow/read controls; a terminal run selected after reload is a replay.
+5. **Conversation (default)**: a virtualized Narrative projection emphasizes agent messages, decisions, verification, and errors. Each block identifies node label, provider/model, stage, attempt, source sequence, and time. Source `seq` is authoritative; every source event appears in exactly one projection item; gaps are explicit items; grouping never crosses a gap/node/stage/attempt/role/kind boundary. Tool use/result pair only when adjacent and identity-compatible. Prompts, thinking, tools, and lifecycle are hidden by default but remain searchable and available through **Tools & thinking**. Narrative is a projection only; it never rewrites durable evidence.
+6. **Timeline**: the raw virtualized feed remains available with node/role/search filters and expandable tool evidence. It preserves chronological source order and adjacent-only compaction. Auto-follow disarms on intentional upward reading, re-arms at the bottom, and remains usable if the live run completes while open. Replay is hydrated by the parent Run Workspace, not a second competing selector.
+7. **Health & diagnostics**: a header drawer performs read-only server/provider refreshes and derives workspace, viewed-run, node, verification, degraded-gate, WebSocket, and evidence-continuity findings. Provider `ok` means CLI discovery only; authentication is unknown unless a recent failure was observed. `mock` is always a deterministic non-issue. Safe actions are fixed-recipe Setup/sign-in copy, node inspection, redacted server-log loading, and debug-bundle export; no retry/kill/apply mutation belongs in Health.
+8. **Live evidence continuity**: a WebSocket sequence jump sets a visible recovering state, buffers concurrent live events, backfills from persisted REST evidence, merges/deduplicates by sequence, and becomes `incomplete` with explicit Retry when recovery fails. A later gap must retain the earliest unresolved cursor. Existing evidence remains visible, but the UI must not imply completeness while recovery is unresolved.
+9. **Theme tokens**: `--panel #18181b --border #27272a --ink #e4e4e7 --muted #a1a1aa` accent `#a78bfa`; providers: claude `#d97706`, codex `#10a37f`, agy `#4285f4`, grok `#e11d48`, mock `#71717a`.
+10. **zustand store**: state includes workspaces, workflows, providers, workspace selection, ephemeral workflow edits, separate active/live and viewed/replay run identities, run snapshots, bounded per-run event windows (the server remains the complete record), WebSocket/evidence-integrity state, filters, and focused-node UI state. Panels consume it through stable selectors; selectors must not allocate fresh fallback arrays or objects because that caused the React #185 black-screen loop.
 
 ## 10. Builtin presets (shared/src/presets) — also the reference examples for §6.2
 
 1. **planning.json** — Round Table (gate ✓, isolation none): R1 codex/gpt-5.6-sol/high, R2 claude/sonnet, R3 grok/grok-4.5 — independent implementation plans. Final Review: claude/opus, permission safe, template uses `{{prior_stage_digest}}`. Orchestrator claude/sonnet enabled.
 2. **build.json** — Implement (isolation worktree, gate ✓): codex/gpt-5.6-sol/high ×2. Review: grok + claude on `{{patches}}`. Orchestrator enabled.
 3. **review.json** — Review (permission safe, gate off): claude, codex, grok, agy ×1. Synthesize: claude merges verdicts via `{{prior_stage_digest}}`. Orchestrator disabled.
+4. **pipeline.json** — Implement → Test → Review: worktree-isolated implementation and test stages carry patches and verification evidence forward; `requireVerified` protects the evidence gates.
 
 ## 11. Testing & acceptance
 
@@ -435,14 +457,20 @@ Four-column CSS grid (from the design mock), draggable dividers, dark theme defa
 - Unit: adapters × fixtures → exact expected event sequences incl. coalescing and outcome fields; line-buffer edges; decision.ts (happy, re-ask, degraded, invalid-id filtering); template rendering; digest budget math; store atomicity + seq recovery.
 - Engine (mock adapter): happy 2-stage fan-out 3; retry loop honoring budgets + `status:retry` boundaries + user-event synthesis per attempt; all-fail; abort mid-stage; stall mark+recover; worktree lifecycle incl. retry re-add and untracked-file patch capture (real temp git repo); crash sweep (simulated stale run.json).
 - API: fastify inject — full run lifecycle with mock provider, WS order = after-append, afterSeq catch-up, retry-stage validity matrix, apply-patch 3way conflict path, token auth on/off.
-- Smoke: `scripts/smoke-real.sh` (opt-in) — real claude(haiku)+codex+grok+agy tiny task through Planning; asserts ≥1 event of each of the four categories incl. synthesized user events + a gate decision.
-- **Acceptance**: `npm install && npm run build && npm test` green on Node 24; `npm start` serves UI; §1 story executes with real CLIs; a finished run replays after server restart; crash sweep leaves no orphan processes/worktrees.
+- Browser smoke: `npm run smoke:browser` launches the built server and production React bundle in real Chrome/Chromium; it guards mount, compact shell geometry, Health semantics, Narrative-first rendering, Timeline scrolling/follow mode, live switching/completion, verification/report, steering, and debug export. CI must keep this on Linux and Windows because jsdom missed the React #185 black screen.
+- Artifact evidence: `npm run evidence` runs every `tools/evidence/repro-v01{6,7,8,9}.mjs` black-box instrument. Release acceptance reruns the suite against the extracted `.deb` with `MAT_ROOT` and `MAT_EXPECT_VERSION`.
+- **Acceptance**: `npm ci && npm run verify:version && npm run build && npm test && npm run typecheck && npm run evidence && npm run smoke:browser` green on the applicable CI lanes; `npm start` serves UI; §1 story executes with real CLIs; a finished run replays after server restart; crash sweep leaves no orphan processes/worktrees.
 
-## 12. Build-phase module ownership (codex fleet)
+## 12. Historical build-phase module ownership (codex fleet; non-normative)
 
-| Wave | Worker | Owns (exclusive) |
+> **Historical record only.** This table and §12.1 describe the one-time initial
+> build-wave scaffold. They do not freeze files, grant current workers exclusive
+> ownership, or override `HANDOFF.md`, `AGENTS.md`, the current schemas, or the
+> implementation. Do not use this section to plan present-day edits.
+
+| Wave | Worker | Initial assignment (historical) |
 |------|--------|------------------|
-| 0 | scaffold | whole tree; all package/tsconfig/tailwind/vite; shared/src COMPLETE; web/src/components/** COMPLETE; web/src/app/store.ts COMPLETE (frozen); api client/ws; mock adapter COMPLETE; eventLog + dataDir COMPLETE; stubs elsewhere; fixtures vendored; build+test green |
+| 0 | scaffold | whole tree; all package/tsconfig/tailwind/vite; shared/src COMPLETE; web/src/components/** COMPLETE; web/src/app/store.ts COMPLETE; api client/ws; mock adapter COMPLETE; eventLog + dataDir COMPLETE; stubs elsewhere; fixtures vendored; build+test green |
 | 1 | W-adapters | server/src/adapters/** (incl. mock.ts — keep wave-0 mock tests green), server/src/spawn.ts, server/test/adapters/** |
 | 1 | W-engine | server/src/engine/**, server/src/orchestrator/**, server/test/engine/** |
 | 1 | W-store-api | server/src/store/{workspaces,workflows,runs}.ts, server/src/api/**, server/src/index.ts, server/test/api/** |
@@ -450,12 +478,12 @@ Four-column CSS grid (from the design mock), draggable dividers, dark theme defa
 | 1 | W-web-run | web/src/panels/run/**, web/src/panels/stream/** |
 | 2 | integrate | cross-module fixes only |
 
-### 12.1 Internal seams (wave-0 stubs implement these signatures verbatim)
+### 12.1 Historical internal seams used by the initial build
 
 - `store/eventLog.appendEvent(runId, partial: Omit<AgentEvent,'id'|'seq'|'ts'>): AgentEvent` — sync assign+append, THEN caller-visible; wsHub subscribes to appends (never broadcasts unappended events).
 - `engine/runManager`: `createRun(req: RunCreateRequest): Promise<RunSnapshot>`, `abortRun(runId)`, `killNode(runId, nodeRunId)`, `retryStage(runId, stageId, req)`, `applyPatch(runId, nodeRunId)`, `sweepOnBoot()` — the complete surface routes.ts consumes.
 - Adapter contract exactly §4.0; nodeRunner is the only event stamper; store.runs persists RunSnapshot atomically.
-- Wave-1 workers MUST NOT edit shared/src/**, web/src/components/**, web/src/app/store.ts, package.json, or another worker's files. Contract gaps → report back; fixed centrally between waves.
+- During that build only, wave-1 workers did not edit shared/src/**, web/src/components/**, web/src/app/store.ts, package.json, or another worker's files; contract gaps were reported and integrated centrally. This is not a current ownership rule.
 
 ## v1.2 — Evidence plane (2026-07-19)
 
@@ -476,3 +504,11 @@ Steer review uses the configured orchestrator with retry IDs restricted to the i
 The debug plane writes best-effort JSONL diagnostics for run, stage, spawn/exit, verification, gate prompt/raw response, decision, steer, API/client error, provider probe, and unhandled engine error activity. Diagnostic failure never enters engine control flow, and environment variable values must not be logged. Bundle format v1 is a read-only zip containing a manifest, snapshot, complete events, run diagnostics, report, raw adapter output, patch/verification artifacts, and the final 512 KB of server diagnostics. Client error intake accepts at most 200 entries per server boot.
 
 Explicitly deferred: pause/resume, human approval nodes, and a steer-time agent picker.
+
+## v1.4 — Evidence-workbench UX (2026-07-20)
+
+The four equal-weight columns are replaced by an explicit information hierarchy: navigation rail → persistent Launchpad → activity inspector → Run Workspace. Basic launch configuration is visible first; advanced stage/agent editing is opt-in and preserves all existing workflow contracts. Conversation is the default evidence view and gives every message a stable node/provider/stage/attempt identity, while Timeline remains the complete technical renderer. Both views share one viewed-run selector and replay loader.
+
+Live evidence is no longer silently trusted across a WebSocket sequence gap. The browser visibly recovers persisted events, buffers simultaneous arrivals, preserves the earliest unresolved gap, and exposes an incomplete/retry state if backfill fails. Health centralizes honest, read-only troubleshooting and safe exports without claiming that CLI detection proves authentication or adding run mutations.
+
+This amendment changes presentation and web-local state only. It adds no PTY, interactive terminal, pause/resume, human approval node, canvas/multi-pane workflow, or new shared persisted schema.

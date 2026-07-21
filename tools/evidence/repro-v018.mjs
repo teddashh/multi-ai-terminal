@@ -8,13 +8,14 @@
 // G: mock stays exempt from the same-provider spawn stagger (2-node stage
 //    spawns < 1s apart) and a 0.1.8 run completes end-to-end.
 import { spawn, execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const ROOT = process.env.MAT_ROOT ?? REPO_ROOT;
+const CURRENT_VERSION = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')).version;
 const PORT = Number(process.env.MAT_PORT ?? 7816);
 const BASE = `http://127.0.0.1:${PORT}`;
 const failures = [];
@@ -40,8 +41,17 @@ const waitFor = async (predicate, label, timeoutMs = 60_000) => {
   }
 };
 
-// Fake HOME with an agy stub in ~/.local/bin — NOT on the inherited PATH.
+// A deliberately sparse PATH makes provider discovery independent of whichever
+// real CLIs happen to be installed on the verifier machine. Git remains
+// available for the worktree scenario; agy is discoverable only after MAT adds
+// fake HOME/.local/bin, while grok deterministically fails its version probe.
 const fakeHome = mkdtempSync(join(tmpdir(), 'mat-v018-home-'));
+const isolatedBin = join(fakeHome, 'isolated-bin');
+mkdirSync(isolatedBin, { recursive: true });
+const gitPath = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+symlinkSync(gitPath, join(isolatedBin, 'git'));
+writeFileSync(join(isolatedBin, 'grok'), '#!/bin/sh\necho deterministic-grok-probe-failure >&2\nexit 7\n');
+chmodSync(join(isolatedBin, 'grok'), 0o755);
 mkdirSync(join(fakeHome, '.local', 'bin'), { recursive: true });
 writeFileSync(join(fakeHome, '.local', 'bin', 'agy'), '#!/bin/sh\necho agy-stub/9.9.9\n');
 chmodSync(join(fakeHome, '.local', 'bin', 'agy'), 0o755);
@@ -59,7 +69,7 @@ const gitWorkspace = () => {
 const dataDir = mkdtempSync(join(tmpdir(), 'mat-v018-data-'));
 const ws = gitWorkspace();
 const child = spawn(process.execPath, [join(ROOT, 'server/dist/index.js')], {
-  env: { ...process.env, HOME: fakeHome, MAT_PORT: String(PORT), MAT_DATA_DIR: dataDir, MAT_HOST: '127.0.0.1' },
+  env: { ...process.env, HOME: fakeHome, PATH: isolatedBin, MAT_PORT: String(PORT), MAT_DATA_DIR: dataDir, MAT_HOST: '127.0.0.1' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let serverLog = '';
@@ -69,7 +79,7 @@ child.stderr.on('data', (chunk) => { serverLog += chunk; });
 try {
   await waitFor(async () => { try { return (await api('/api/health')).status === 200 ? true : undefined; } catch { return undefined; } }, 'server health', 15_000);
   const health = (await api('/api/health')).body;
-  const expectVersion = process.env.MAT_EXPECT_VERSION ?? '0.1.8';
+  const expectVersion = process.env.MAT_EXPECT_VERSION ?? CURRENT_VERSION;
   check(`F: server reports ${expectVersion}`, health.version === expectVersion, String(health.version));
 
   const providers = (await api('/api/providers')).body;
@@ -80,7 +90,7 @@ try {
   check('F: agy version comes from the fake-HOME stub', byId.agy?.version === 'agy-stub/9.9.9', String(byId.agy?.version));
   check('F: npm providers are installable', ['claude', 'codex', 'grok'].every((id) => byId[id]?.installable === true));
   check('F: mock is not installable', byId.mock?.installable === false);
-  check('F: grok unavailable here with a failure detail', byId.grok?.ok === false && typeof byId.grok?.detail === 'string' && byId.grok.detail.length > 0, JSON.stringify({ ok: byId.grok?.ok, detail: byId.grok?.detail }));
+  check('F: grok failure stub returns a probe detail', byId.grok?.ok === false && typeof byId.grok?.detail === 'string' && byId.grok.detail.includes('deterministic-grok-probe-failure'), JSON.stringify({ ok: byId.grok?.ok, detail: byId.grok?.detail }));
 
   const agyInstall = await api('/api/providers/agy/install', { method: 'POST' });
   check('F: installing an available provider is rejected', agyInstall.status === 409, String(agyInstall.status));
@@ -118,7 +128,7 @@ try {
 } finally {
   child.kill('SIGTERM');
   await new Promise((resolve) => setTimeout(resolve, 300));
-  for (const dir of [dataDir, ws, fakeHome]) { try { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { /* best effort */ } }
+  for (const dir of [dataDir, ws, fakeHome]) { try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best effort */ } }
 }
 
 console.log(failures.length === 0 ? '\nALL CHECKS PASSED' : `\n${failures.length} FAILURES:\n${failures.join('\n')}`);

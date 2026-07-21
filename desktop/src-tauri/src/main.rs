@@ -56,10 +56,36 @@ fn home_dir() -> Option<PathBuf> {
     { env::var_os("HOME").map(PathBuf::from) }
 }
 
+fn is_sensitive_environment_name(name: &OsStr) -> bool {
+    let name = name.to_string_lossy().to_ascii_lowercase();
+    ["api_key", "api-key", "access_key", "access-key", "token", "secret", "password", "passwd", "credential", "authorization", "private_key", "private-key", "database_url", "connection_string", "dsn"]
+        .iter().any(|marker| name.contains(marker))
+        || ["session", "session_id", "session_key", "session_value", "cookie", "cookie_id", "cookie_key", "cookie_value"]
+            .iter().any(|marker| name == *marker || name.ends_with(&format!("_{marker}")) || name.ends_with(&format!("-{marker}")))
+}
+
+fn redact_environment_values(message: &str) -> String {
+    const REDACTED: &str = "[REDACTED_ENV]";
+    let mut values = env::vars_os().filter_map(|(name, value)| {
+        let value = value.into_string().ok()?;
+        if value.is_empty() { None } else { Some((value, is_sensitive_environment_name(&name))) }
+    }).collect::<Vec<_>>();
+    if values.iter().any(|(value, _)| value == message) { return REDACTED.into(); }
+    values.sort_by(|(left, _), (right, _)| right.len().cmp(&left.len()));
+    values.into_iter().fold(message.to_owned(), |redacted, (value, sensitive_name)| {
+        if value.len() >= 8 || sensitive_name {
+            redacted.replace(&value, REDACTED)
+        } else {
+            redacted
+        }
+    })
+}
+
 /// Mirrors every diagnostic line to ~/.multi-ai-terminal/desktop.log so
 /// failures are inspectable on Windows, where a windows_subsystem build
 /// has no visible stderr. The log is reset once per app session.
 fn log_line(message: &str) {
+    let message = redact_environment_values(message);
     eprintln!("{message}");
     let path = LOG_PATH.get_or_init(|| home_dir().map(|home| {
         let dir = home.join(".multi-ai-terminal");
@@ -75,9 +101,11 @@ fn log_line(message: &str) {
     }
 }
 
-fn node_binary() -> OsString {
-    env::var_os("MAT_NODE").filter(|value| !value.is_empty())
-        .unwrap_or_else(|| OsString::from("node"))
+fn node_binary() -> (OsString, &'static str) {
+    match env::var_os("MAT_NODE").filter(|value| !value.is_empty()) {
+        Some(value) => (value, "MAT_NODE override"),
+        None => (OsString::from("node"), "node from PATH"),
+    }
 }
 
 fn sanitize_child_environment(command: &mut Command) {
@@ -95,19 +123,18 @@ fn hide_command_window(command: &mut Command) {
     { command.creation_flags(CREATE_NO_WINDOW); }
 }
 
-fn validate_node(binary: &OsStr) -> Result<String, String> {
+fn validate_node(binary: &OsStr, description: &str) -> Result<String, String> {
     let mut command = Command::new(binary);
     command.args(["-e", "console.log(process.versions.node)"]);
     sanitize_child_environment(&mut command);
     hide_command_window(&mut command);
     let output = command.output().map_err(|error| format!(
-        "Could not run Node.js at '{}': {error}\n\nInstall Node.js 20 or newer and ensure `node` is on PATH, or set MAT_NODE to a specific Node.js binary.",
-        binary.to_string_lossy()
+        "Could not run Node.js ({description}): {error}\n\nInstall Node.js 20 or newer and ensure `node` is on PATH, or set MAT_NODE to a specific Node.js binary."
     ))?;
     if !output.status.success() {
         return Err(format!(
-            "Node.js validation failed for '{}': {}\n\nInstall Node.js 20 or newer and ensure `node` is on PATH, or set MAT_NODE to a specific Node.js binary.",
-            binary.to_string_lossy(), String::from_utf8_lossy(&output.stderr).trim()
+            "Node.js validation failed ({description}): {}\n\nInstall Node.js 20 or newer and ensure `node` is on PATH, or set MAT_NODE to a specific Node.js binary.",
+            String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
     let version = String::from_utf8_lossy(&output.stdout).trim().to_owned();
@@ -129,8 +156,9 @@ fn free_port() -> Result<u16, String> {
 }
 
 fn show_error(window: &tauri::WebviewWindow, message: &str) {
+    let message = redact_environment_values(message);
     log_line(&format!("[desktop] startup error: {message}"));
-    let encoded = serde_json::to_string(message)
+    let encoded = serde_json::to_string(&message)
         .unwrap_or_else(|_| "\"Unknown startup error\"".into());
     if let Err(error) = window.eval(&format!("window.__matShowError?.({encoded});")) {
         log_line(&format!("[desktop] Could not render startup error: {error}"));
@@ -165,12 +193,12 @@ fn recent_errors(history: &Mutex<VecDeque<String>>) -> String {
 }
 
 fn start_server(window: tauri::WebviewWindow, resources: PathBuf, process: Arc<ServerProcess>) {
-    let node = node_binary();
-    let version = match validate_node(&node) {
+    let (node, node_description) = node_binary();
+    let version = match validate_node(&node, node_description) {
         Ok(version) => version,
         Err(message) => { show_error(&window, &message); return; }
     };
-    log_line(&format!("[desktop] Using Node.js {version} at {}", node.to_string_lossy()));
+    log_line(&format!("[desktop] Using Node.js {version} ({node_description})"));
     let port = match free_port() {
         Ok(port) => port,
         Err(message) => { show_error(&window, &message); return; }

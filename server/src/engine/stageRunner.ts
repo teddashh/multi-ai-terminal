@@ -2,14 +2,14 @@ import { join } from 'node:path';
 import type { GateDecision, NodeRun, RunSnapshot, Stage, Workspace } from '@mat/shared';
 import { appendEvent } from '../store/eventLog.js';
 import { saveRun } from '../store/runs.js';
-import { getWorkspace } from '../store/workspaces.js';
 import { evaluateGate } from '../orchestrator/gate.js';
 import { renderTemplate } from '../orchestrator/prompts.js';
 import { diag } from '../diag.js';
 import { assembleArtifacts, buildDigest } from './digest.js';
 import { emitRetryBoundary, killActiveNode, registerNodeContext, resetNodeForRetry, runNode } from './nodeRunner.js';
-import { collectPatch, createWorktree, isGitRepository, isWorkspaceDirty, runDirectory } from './worktree.js';
+import { collectPatch, createWorktree, isGitRepository, isWorkspaceDirty, runDirectory, workspaceForRun } from './worktree.js';
 import { verifyCandidate } from './verify.js';
+import { redactEnvironmentValues } from '../redact.js';
 
 export interface StageControl {
   stageId: string;
@@ -77,7 +77,7 @@ function systemEvent(run: RunSnapshot, stageId: string | null, text: string, dat
     kind: 'status',
     text,
     ...(data ? { data } : {}),
-  });
+  }, { trustedData: true });
 }
 
 function stageNodes(run: RunSnapshot, stage: Stage): NodeRun[] {
@@ -172,26 +172,43 @@ export async function executeNodes(
 }
 
 export function appendDecision(run: RunSnapshot, decision: GateDecision, options: { engineForced?: boolean } = {}): void {
-  run.gateDecisions.push(decision);
+  const orchestratorAttempt = run.gateDecisions.length + 1;
+  const stageNodes = run.nodes.filter((node) => node.stageId === decision.stageId);
+  const recordedDecision: GateDecision = {
+    ...decision,
+    verificationSummary: decision.verificationSummary ?? {
+      passed: stageNodes.filter((node) => node.verification?.status === 'passed').length,
+      failed: stageNodes.filter((node) => node.verification?.status === 'failed' || node.verification?.status === 'error').length,
+      skipped: stageNodes.filter((node) => node.verification?.status === 'skipped' && node.verification.reason !== 'no-verify-command').length,
+    },
+  };
+  run.gateDecisions.push(recordedDecision);
+  const decisionData: Record<string, unknown> = {
+    ...recordedDecision,
+    rationale: redactEnvironmentValues(recordedDecision.rationale),
+    ...(recordedDecision.promptAddendum !== undefined ? { promptAddendum: redactEnvironmentValues(recordedDecision.promptAddendum) } : {}),
+    ...(recordedDecision.contextForNext !== undefined ? { contextForNext: redactEnvironmentValues(recordedDecision.contextForNext) } : {}),
+    ...(recordedDecision.raw !== undefined ? { raw: redactEnvironmentValues(recordedDecision.raw) } : {}),
+  };
   appendEvent(run.runId, {
     runId: run.runId,
     // SPEC v1.1 §3.1 and §6 require orchestrator-identity events to use stageId:null.
     stageId: null,
     nodeRunId: 'orchestrator',
-    attempt: decision.gateAttempt,
+    attempt: orchestratorAttempt,
     role: 'decision',
     kind: 'decision',
-    text: decision.rationale,
-    data: { ...decision },
-  });
+    text: recordedDecision.rationale,
+    data: decisionData,
+  }, { trustedData: true });
   diag(run.runId, 'decision', {
-    stageId: decision.stageId, action: decision.action, degraded: decision.degraded === true,
+    stageId: recordedDecision.stageId, action: recordedDecision.action, degraded: recordedDecision.degraded === true,
     ...(options.engineForced ? { engineForced: true } : {}),
   });
 }
 
 export async function runStage(run: RunSnapshot, stage: Stage): Promise<void> {
-  const workspace = await getWorkspace(run.workspaceId);
+  const workspace = await workspaceForRun(run);
   if (isAborted(run)) return;
   const nodes = stageNodes(run, stage);
   const control: StageControl = { stageId: stage.id, gating: false };
@@ -222,8 +239,11 @@ export async function runStage(run: RunSnapshot, stage: Stage): Promise<void> {
         // The stage finished intact; run its gate and apply the steer at the boundary.
       }
 
+      const failedVerificationNodes = nodes.filter((node) => node.verification?.status === 'failed' || node.verification?.status === 'error');
+      const verificationRetryRequired = stage.requireVerified && failedVerificationNodes.length > 0
+        && !nodes.some((node) => node.verification?.status === 'passed');
       const allFailed = nodes.every((node) => node.status === 'failed');
-      if (allFailed && !run.workflow.orchestrator.enabled) {
+      if (allFailed && !run.workflow.orchestrator.enabled && !verificationRetryRequired) {
         run.status = 'failed';
         run.endedAt = Date.now();
         await persistRun(run);
@@ -235,27 +255,25 @@ export async function runStage(run: RunSnapshot, stage: Stage): Promise<void> {
         return;
       }
 
+      let decision: GateDecision;
+      let engineForced = false;
       if (!run.workflow.orchestrator.enabled) {
         const gateAttempt = run.gateDecisions.filter((candidate) => candidate.stageId === stage.id).length + 1;
-        appendDecision(run, {
+        decision = {
           stageId: stage.id,
           gateAttempt,
           action: 'advance',
           rationale: 'Gate auto-advanced: orchestrator disabled',
           degraded: false,
           ts: Date.now(),
-        });
-        run.status = 'running';
+        };
+      } else {
+        run.status = 'gating';
+        control.gating = true;
         await persistRun(run);
-        return;
+        decision = await evaluateGate(run, stage, buildDigest(nodes));
+        if (isAborted(run)) return;
       }
-
-      run.status = 'gating';
-      control.gating = true;
-      await persistRun(run);
-      let decision = await evaluateGate(run, stage, buildDigest(nodes));
-      let engineForced = false;
-      if (isAborted(run)) return;
       const maxEvaluations = 1 + run.workflow.maxRetriesPerStage;
       const manual = control.pendingRetry;
       delete control.pendingRetry;
@@ -270,9 +288,7 @@ export async function runStage(run: RunSnapshot, stage: Stage): Promise<void> {
           ts: Date.now(),
         };
       }
-      const failedVerificationNodes = nodes.filter((node) => node.verification?.status === 'failed' || node.verification?.status === 'error');
-      if (stage.requireVerified && decision.action === 'advance' && failedVerificationNodes.length > 0
-        && !nodes.some((node) => node.verification?.status === 'passed')) {
+      if (verificationRetryRequired && decision.action === 'advance') {
         decision = {
           ...decision,
           action: 'retry',

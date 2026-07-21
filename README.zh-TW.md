@@ -8,11 +8,12 @@
 
 ## 運作方式
 
-- **工作區(Workspaces)** — 每個指向一個目錄(可感知 git)。左側欄顯示每個工作區最近執行的工作流與即時狀態。
-- **工作流(Workflows)** — 由有序階段組成;每個階段放置 agent 槽位(從調色盤拖入;同供應商可放多個實例,每階段 Σ ≤ 12)。每個槽位可設定:模型、推理力度、權限層級、提示模板、數量。
+- **專案 + Launchpad** — 每個工作區指向一個目錄(可感知 git)。左側 rail 可在專案選擇與啟動設定間切換且不清除草稿;常用的模式、readiness、任務直接可見,進階階段編輯收在 **Customize**。
+- **工作流(Workflows)** — 由有序階段組成;每個階段放置 agent 槽位(從進階調色盤拖入;同供應商可放多個實例,每階段 Σ ≤ 12)。每個槽位可設定:模型、推理力度、權限層級、提示模板、數量。
 - **調度者(Orchestrator)** — 一個真實的 CLI agent(任一供應商),接收每個把關階段候選結果的摘要,回覆嚴格 JSON 的閘門決策:前進 / 重試(可指定節點並附加提示)/ 中止。確定性的預算上限;解析失敗時安全降級為前進。
 - **階段隔離** — 每個節點可選 git worktree 隔離;每次嘗試的改動會擷取成二進位 patch,可在 UI 中檢視並套用。
-- **訊息流面板** — 所有 agent 的所有事件,分為**你的訊息 / agent 回覆 / 工具操作 / 思考過程**四類,虛擬化捲動、可按節點/角色/搜尋過濾,並可從持久事件日誌完整回放過去的執行。
+- **Run Workspace** — 預設的 **Conversation** 讓每個節點的回答、決策、驗證與失敗一眼可讀;**Timeline** 保留原始四類事件、虛擬化捲動、節點/角色/搜尋過濾與持久事件完整回放。
+- **Health & diagnostics** — 以唯讀方式整理 server、provider、workspace、run、驗證與 evidence continuity;只提供安全的 Setup、Inspect、遮罩日誌與 debug bundle。偵測到 CLI 絕不冒充已登入。
 
 ## 驗證（證據層）
 
@@ -26,7 +27,7 @@ UI 與產生的 Markdown 報告會區分「已產生、已審查、已前進、�
 
 ## 除錯套件
 
-按 **Report** 旁的 **Debug**，即可下載單一 `mat-debug-<runId>.zip`。內容包括完整執行快照、事件、診斷日誌、Markdown 報告、adapter 原始輸出、patch、驗證日誌、執行環境與供應商版本，以及伺服器診斷日誌尾端。瀏覽器錯誤也會以 best-effort 方式送入伺服器日誌；系統不會刻意記錄環境變數值。
+按 **Report** 旁的 **Debug**，或從唯讀 **Health** drawer，即可下載單一 `mat-debug-<runId>.zip`。內容包括完整執行快照、事件、診斷日誌、Markdown 報告、adapter 原始輸出、patch、驗證日誌、執行環境與供應商版本，以及伺服器診斷日誌尾端。瀏覽器錯誤也會以 best-effort 方式送入伺服器日誌；系統不會刻意記錄環境變數值。
 
 ## 快速開始
 
@@ -39,9 +40,9 @@ npm start                      # 在 http://127.0.0.1:7788 提供網頁 UI + API
 # 選項:--port N --host H --data-dir DIR --token SECRET
 ```
 
-打開 UI,新增工作區(絕對路徑),挑一個內建工作流(Planning / Build / Review / Pipeline),把 agent 拖到階段上,寫下任務,按 Start。
+打開 UI,從 **Projects** 新增工作區(絕對路徑),回到 **Launch**,挑一個內建工作流(Planning / Build / Review / Pipeline),寫下任務並按 Start。只有需要更改階段或 agent 綁定時才打開 **Customize**。
 
-開發模式:`npm run dev`(vite + API 熱重載)。測試:`npm test`。型別檢查:`npm run typecheck`。
+開發模式:`npm run dev`(vite + API 熱重載)。測試:`npm test`。型別檢查:`npm run typecheck`。版本一致性:`npm run verify:version`。建置後的 server 證據套件:`npm run evidence`。
 
 ## 桌面版
 
@@ -54,7 +55,23 @@ npm start                      # 在 http://127.0.0.1:7788 提供網頁 UI + API
 
 桌面外殼跑的是與網頁版完全相同的打包 server,監聽隨機的 `127.0.0.1` 埠,資料同樣存在 `~/.multi-ai-terminal/`。本機建置桌面資源:先 `npm run build` 再 `npm run desktop:bundle`;`npm run desktop:build` 另需 Rust 與 Tauri 原生建置環境。
 
-## 供應商(已驗證的呼叫方式)
+新增工作區時,桌面版提供原生 **Browse…** 資料夾選擇器;純瀏覽器模式仍保留手動輸入絕對路徑,不會載入桌面 dialog integration。
+
+## Provider 設定
+
+無法使用的 provider 會在 agent palette 顯示 **Setup**。安裝只有在使用者明確點擊後才會開始,而且只使用 server 端固定 recipe:Claude Code、Codex、Grok 走 npm global install;Windows 的 Antigravity 走 `winget`;其他平台只顯示可複製、由使用者自行執行的 Antigravity 指令。MAT 不會隱性綁入或下載任何 CLI;各 provider 的授權條款與登入仍由其上游工具管理。
+
+MAT 會在子行程 `PATH` 後補上既有的常見 CLI 位置:Windows 的 `%LOCALAPPDATA%\Antigravity`、`%APPDATA%\npm`;其他平台的 `~/.local/bin`、`/usr/local/bin`、`/opt/homebrew/bin`。這讓桌面 server 找得到常見的使用者層級安裝,但不會把環境變數值寫進診斷紀錄。
+
+## Provider 登入與平行 session
+
+Codex 的部分登入失敗來自多個 CLI session 同時輪替單次使用的 OAuth refresh token。MAT 會讓同一個真實 provider 的啟動至少間隔 1.5 秒(包含 orchestrator),以降低競態,但無法讓上游 token rotation 變成原子操作。相關上游議題:[openai/codex#9634](https://github.com/openai/codex/issues/9634)、[openai/codex#15502](https://github.com/openai/codex/issues/15502)。
+
+長期穩定的做法是 API-key auth 或把同一 provider 串行使用。Codex 支援 API-key login,Claude Code 會讀取 `ANTHROPIC_API_KEY`;refresh token 已撤銷時,先直接用該 CLI 登出再登入,Codex 可執行 `codex logout && codex login`。
+
+真實 provider 若命中已知登入錯誤,失敗節點卡會顯示多行琥珀色指引與查證過的登入命令,provider chip 會出現 `auth` 徽章,Setup 也會提供可複製的 **Sign in** 區塊。Composer 會在再次使用該 provider 前提出非阻擋式警告;之後任一成功節點會清除此警示。
+
+## Provider(已驗證的呼叫方式)
 
 | 供應商 | CLI | 串流 | 備註 |
 |---|---|---|---|
@@ -72,11 +89,12 @@ npm start                      # 在 http://127.0.0.1:7788 提供網頁 UI + API
 
 ## 資料
 
-`~/.multi-ai-terminal/`(可用 `--data-dir` / `MAT_DATA_DIR` 覆蓋):`workspaces.json`、`workflows/*.json`、`runs/<runId>/run.json` + `events.jsonl` + `raw/*.jsonl`(每次嘗試未經處理的 CLI 輸出)+ `artifacts/*.patch` + `artifacts/*.verify.log`。保留策略:每個工作區最近 100 次執行,刪除時一併清理 worktree 與分支。
+`~/.multi-ai-terminal/`(可用 `--data-dir` / `MAT_DATA_DIR` 覆蓋):`workspaces.json`、`workflows/*.json`、`runs/<runId>/run.json` + `events.jsonl` + `raw/*.jsonl`(每次嘗試均先移除環境變數值的 CLI 輸出)+ `artifacts/*.patch` + `artifacts/*.verify.log`。保留策略:每個工作區最近 100 次執行,刪除時一併清理 worktree 與分支。
 
 ## 文件
 
-- [SPEC.md](./SPEC.md) — 工程契約(v1.3)
+- [SPEC.md](./SPEC.md) — 工程契約(v1.4)
+- [docs/project-audit-2026-07-20.md](./docs/project-audit-2026-07-20.md) — 本次 hardening 記錄與依風險排序的後續 backlog
 - [docs/spec-review-panel.md](./docs/spec-review-panel.md) — 4 模型規格審查記錄
 - [docs/code-review-panel.md](./docs/code-review-panel.md) — 4 模型程式碼審查記錄(25 項發現已修復、3 項駁回)
 
