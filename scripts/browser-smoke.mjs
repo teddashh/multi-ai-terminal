@@ -336,6 +336,36 @@ try {
     await page.setViewportSize({ width: 1400, height: 800 });
   });
 
+  await phase('visible navigation, Traditional Chinese, and three themes', async () => {
+    const projectsButton = page.getByRole('button', { name: 'Projects', exact: true });
+    if ((await projectsButton.textContent())?.trim() !== 'Projects') throw new Error('Primary navigation did not expose a visible Projects label.');
+
+    await page.getByText('Language · Theme', { exact: true }).click();
+    const themeOptions = await page.getByLabel('Theme').locator('option').count();
+    if (themeOptions !== 3) throw new Error(`Expected three theme choices, found ${themeOptions}.`);
+    const darkCanvas = await page.locator('main').evaluate((element) => getComputedStyle(element).backgroundColor);
+
+    await page.getByLabel('Language').selectOption('zh-TW');
+    await page.getByText('健康狀態', { exact: true }).waitFor({ timeout: 5_000 });
+    if (await page.locator('html').getAttribute('lang') !== 'zh-TW') throw new Error('Traditional Chinese selection did not update document language.');
+
+    await page.getByLabel('介面主題').selectOption('light');
+    if (await page.locator('html').getAttribute('data-theme') !== 'light') throw new Error('Daylight theme was not applied.');
+    const lightCanvas = await page.locator('main').evaluate((element) => getComputedStyle(element).backgroundColor);
+    if (lightCanvas === darkCanvas) throw new Error('Daylight theme did not change the application canvas.');
+
+    await page.getByLabel('介面主題').selectOption('aurora');
+    if (await page.locator('html').getAttribute('data-theme') !== 'aurora') throw new Error('Aurora theme was not applied.');
+    const auroraCanvas = await page.locator('main').evaluate((element) => getComputedStyle(element).backgroundColor);
+    if (auroraCanvas === darkCanvas || auroraCanvas === lightCanvas) throw new Error('Aurora theme did not expose a distinct application canvas.');
+    const persisted = await page.evaluate(() => JSON.parse(localStorage.getItem('mat-ui-preferences-v1') ?? '{}'));
+    if (persisted.language !== 'zh-TW' || persisted.theme !== 'aurora') throw new Error(`UI preferences were not persisted: ${JSON.stringify(persisted)}`);
+
+    await page.getByLabel('介面語言').selectOption('en');
+    await page.getByLabel('Theme').selectOption('dark');
+    await page.getByText('Health', { exact: true }).waitFor({ timeout: 5_000 });
+  });
+
   const run = await phase('live run setup', async () => {
     const workspace = await api('/api/workspaces', { method: 'POST', body: JSON.stringify({ name: 'Smoke', path: workspaceDir }) });
     const workflows = await api('/api/workflows');

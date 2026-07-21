@@ -2,20 +2,114 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+:root,
+html[data-theme='dark'] {
   color-scheme: dark;
-  --panel: #18181b;
-  --border: #27272a;
-  --ink: #e4e4e7;
-  --muted: #a1a1aa;
-  --accent: #a78bfa;
+  --canvas: 9 9 11;
+  --panel: 24 24 27;
+  --surface: 24 24 27;
+  --raised: 39 39 42;
+  --control: 63 63 70;
+  --border: 39 39 42;
+  --ink: 228 228 231;
+  --muted: 161 161 170;
+  --accent: 167 139 250;
+  --accent-soft: 46 16 101;
+  --accent-foreground: 221 214 254;
+  --accent-border: 109 40 217;
+  --on-accent: 24 24 27;
   --provider-claude: #d97706;
   --provider-codex: #10a37f;
   --provider-agy: #4285f4;
   --provider-grok: #e11d48;
   --provider-mock: #71717a;
 }
+
+html[data-theme='light'] {
+  color-scheme: light;
+  --canvas: 248 250 252;
+  --panel: 255 255 255;
+  --surface: 241 245 249;
+  --raised: 255 255 255;
+  --control: 226 232 240;
+  --border: 203 213 225;
+  --ink: 24 24 27;
+  --muted: 82 82 91;
+  --accent: 124 58 237;
+  --accent-soft: 237 233 254;
+  --accent-foreground: 91 33 182;
+  --accent-border: 139 92 246;
+  --on-accent: 255 255 255;
+}
+
+/* Status utilities predate the semantic surface tokens. Keep their meaning and
+   contrast in Daylight instead of leaving pale dark-theme text on white. */
+html[data-theme='light'] :where(
+  [class~='text-red-100'], [class~='text-red-200'], [class~='text-red-300']
+) { color: rgb(185 28 28); }
+html[data-theme='light'] :where(
+  [class~='text-amber-100'], [class~='text-amber-200'], [class~='text-amber-300']
+) { color: rgb(146 64 14); }
+html[data-theme='light'] :where(
+  [class~='text-emerald-100'], [class~='text-emerald-200'], [class~='text-emerald-300']
+) { color: rgb(4 120 87); }
+html[data-theme='light'] :where(
+  [class~='text-sky-100'], [class~='text-sky-200'], [class~='text-sky-300']
+) { color: rgb(3 105 161); }
+html[data-theme='light'] :where(
+  [class~='text-violet-100'], [class~='text-violet-200']
+) { color: rgb(109 40 217); }
+html[data-theme='light'] :where(
+  [class~='bg-red-950'], [class~='bg-red-950/25'], [class~='bg-red-950/30'], [class~='bg-red-950/40']
+) { background-color: rgb(254 226 226 / 0.82); }
+html[data-theme='light'] :where(
+  [class~='bg-amber-950'], [class~='bg-amber-950/10'], [class~='bg-amber-950/20'], [class~='bg-amber-950/30'], [class~='bg-amber-950/50']
+) { background-color: rgb(254 243 199 / 0.82); }
+html[data-theme='light'] :where(
+  [class~='bg-emerald-950'], [class~='bg-emerald-950/20'], [class~='bg-emerald-950/25'], [class~='bg-emerald-950/30']
+) { background-color: rgb(209 250 229 / 0.82); }
+html[data-theme='light'] :where(
+  [class~='bg-sky-950'], [class~='bg-sky-950/15'], [class~='bg-sky-950/20'], [class~='bg-sky-950/30'], [class~='bg-sky-950/40']
+) { background-color: rgb(224 242 254 / 0.82); }
+html[data-theme='light'] :where(
+  [class~='bg-violet-950'], [class~='bg-violet-950/20'], [class~='bg-violet-950/40']
+) { background-color: rgb(237 233 254 / 0.82); }
+html[data-theme='light'] [class~='hover:bg-red-950']:hover { background-color: rgb(254 202 202); }
+html[data-theme='light'] [class~='hover:bg-amber-900']:hover { background-color: rgb(253 230 138); }
+html[data-theme='light'] :where([class~='hover:bg-sky-900'], [class~='hover:bg-sky-950/40']):hover { background-color: rgb(186 230 253); }
+html[data-theme='light'] [class~='hover:bg-violet-950/40']:hover { background-color: rgb(221 214 254); }
+
+html[data-theme='aurora'] {
+  color-scheme: dark;
+  --canvas: 8 15 25;
+  --panel: 15 23 42;
+  --surface: 19 30 48;
+  --raised: 29 41 61;
+  --control: 51 65 85;
+  --border: 51 65 85;
+  --ink: 241 245 249;
+  --muted: 174 187 207;
+  --accent: 196 181 253;
+  --accent-soft: 67 35 104;
+  --accent-foreground: 237 233 254;
+  --accent-border: 167 139 250;
+  --on-accent: 31 20 52;
+}
+
 html, body, #root { min-height: 100%; margin: 0; }
-body { background: #09090b; color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+body {
+  background-color: rgb(var(--canvas));
+  color: rgb(var(--ink));
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+html[data-theme='aurora'] body {
+  background-image:
+    radial-gradient(circle at 8% 8%, rgb(124 58 237 / 0.18), transparent 31rem),
+    radial-gradient(circle at 78% 4%, rgb(245 158 11 / 0.11), transparent 28rem),
+    radial-gradient(circle at 95% 88%, rgb(20 184 166 / 0.12), transparent 32rem);
+  background-attachment: fixed;
+}
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
+::selection { background: rgb(var(--accent) / 0.32); }

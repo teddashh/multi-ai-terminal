@@ -50,7 +50,8 @@ describe('health logic', () => {
     expect(unavailable).toMatchObject({
       title: 'grok: latest CLI check did not detect it', severity: 'warning', issue: false,
     });
-    expect(unavailable.detail).toContain('cached for up to 10 minutes');
+    expect(unavailable.detail).toContain('only cached briefly');
+    expect(unavailable.detail).toContain('retry detection');
 
     const unavailableAfterAuth = providerFinding(provider({
       id: 'grok', ok: false, detail: 'binary missing',
@@ -109,5 +110,13 @@ describe('health logic', () => {
       evidenceIntegrity: { status: 'recovering', expectedSeq: 2, receivedSeq: 3 },
       providerRefreshError: 'probe timed out',
     }))).toBe(8);
+  });
+
+  it('renders diagnostic guidance in Traditional Chinese without changing issue semantics', () => {
+    const findings = healthFindings(healthyInput({ locale: 'zh-TW', run }));
+    expect(findings.find((finding) => finding.id === 'server')?.title).toBe('本機伺服器可連線');
+    expect(findings.find((finding) => finding.id === 'provider-codex')?.title).toBe('codex：最新 CLI 檢查已偵測到');
+    expect(findings.find((finding) => finding.id === 'run-status')?.title).toBe('目前執行：失敗');
+    expect(findings.filter((finding) => finding.issue)).toHaveLength(5);
   });
 });

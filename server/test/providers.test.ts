@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { clearVersionCache, probeVersion } from '../src/adapters/base.js';
-import { providerInstallPlan } from '../src/providers/install.js';
+import { clearVersionCache, probeVersion, providerVersionCacheTtlMs, providerVersionProbeTimeoutMs } from '../src/adapters/base.js';
+import { providerInstallPlan, providerInstallTimeoutMs } from '../src/providers/install.js';
 import { configureDataDir } from '../src/store/dataDir.js';
 import { createFakeExecutable } from './helpers/fakeExecutable.js';
 
@@ -12,7 +12,7 @@ const root = mkdtempSync(join(tmpdir(), 'mat-provider-tests-'));
 beforeAll(() => { configureDataDir(join(root, 'data')); clearVersionCache(); });
 afterAll(() => {
   clearVersionCache();
-  rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+  rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 describe('provider install recipes', () => {
@@ -27,9 +27,21 @@ describe('provider install recipes', () => {
     expect(providerInstallPlan('agy', 'win32')).toEqual({ recipe: { command: 'winget', args: ['install', '-e', '--id', 'Google.AntigravityCLI', '--accept-source-agreements', '--accept-package-agreements'] } });
     expect(providerInstallPlan('agy', 'linux')).toEqual({ manualCommand: 'curl -fsSL https://antigravity.google/cli/install.sh | bash' });
   });
+
+  it('allows the slower Antigravity installer more time without changing other recipes', () => {
+    expect(providerInstallTimeoutMs('agy')).toBe(600_000);
+    expect(providerInstallTimeoutMs('codex')).toBe(300_000);
+  });
 });
 
 describe('provider version probes', () => {
+  it('allows Windows cold starts and only briefly caches transient failures', () => {
+    expect(providerVersionProbeTimeoutMs('win32')).toBe(15_000);
+    expect(providerVersionProbeTimeoutMs('linux')).toBe(8_000);
+    expect(providerVersionCacheTtlMs(true)).toBe(600_000);
+    expect(providerVersionCacheTtlMs(false)).toBe(2_000);
+  });
+
   it('returns actionable failure detail', async () => {
     const command = join(root, 'definitely-missing-provider');
     clearVersionCache(command);

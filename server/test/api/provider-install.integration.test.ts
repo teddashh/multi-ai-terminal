@@ -32,7 +32,25 @@ beforeEach(() => {
 });
 afterEach(async () => {
   if (app) await app.close();
-  await rm(dataDir, { recursive: true, force: true, maxRetries: 3 });
+  await rm(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+});
+
+describe('provider refresh endpoint', () => {
+  it('clears PATH and all version probes before returning fresh detection', async () => {
+    const installed = unavailable({ ok: true, version: 'grok 1.0.0' });
+    delete installed.detail;
+    dependencies.providers = vi.fn(async () => [installed]);
+    dependencies.providerInstall.clearVersionCache = vi.fn();
+    dependencies.providerInstall.clearPathCache = vi.fn();
+    await ready();
+
+    const response = await app.inject({ method: 'POST', url: '/api/providers/refresh' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([installed]);
+    expect(dependencies.providerInstall.clearPathCache).toHaveBeenCalledOnce();
+    expect(dependencies.providerInstall.clearVersionCache).toHaveBeenCalledWith();
+  });
 });
 
 describe('provider install endpoint', () => {

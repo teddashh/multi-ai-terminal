@@ -2,13 +2,14 @@ import { memo, useEffect, useRef, useState, type PointerEvent as ReactPointerEve
 import { RunPanel } from '../panels/run/RunPanel.js';
 import { WorkflowPanel } from '../panels/workflow/WorkflowPanel.js';
 import { WorkspacePanel } from '../panels/workspace/WorkspacePanel.js';
+import { useUiPreferences } from '../i18n/UiPreferences.js';
 import { RunWorkspace } from './RunWorkspace.js';
 
 const LAYOUT_KEY = 'mat-shell-layout-v2';
 const DEFAULT_LAYOUT = { launchpadWidth: 320, inspectorWidth: 280 } as const;
 const MIN_LAYOUT = { launchpadWidth: 280, inspectorWidth: 260 } as const;
 const MAX_LAYOUT = { launchpadWidth: 520, inspectorWidth: 520 } as const;
-const RAIL_WIDTH = 52;
+const RAIL_WIDTH = 84;
 const DIVIDER_WIDTH = 5;
 const MIN_WORKSPACE_WIDTH = 320;
 
@@ -25,6 +26,7 @@ export interface ShellLayout {
 }
 
 export function AppShell() {
+  const { t } = useUiPreferences();
   const [layout, setLayout] = useState(loadShellLayout);
   const [launchpadView, setLaunchpadView] = useState<LaunchpadView>('launch');
   const [launchpadOpen, setLaunchpadOpen] = useState(true);
@@ -85,15 +87,15 @@ export function AppShell() {
   const columns = `${RAIL_WIDTH}px ${launchpadOpen ? `${fittedLayout.launchpadWidth}px ${DIVIDER_WIDTH}px` : '0px 0px'} ${inspectorOpen ? `${fittedLayout.inspectorWidth}px ${DIVIDER_WIDTH}px` : '0px 0px'} minmax(${MIN_WORKSPACE_WIDTH}px, 1fr)`;
   return <div className="grid h-full min-h-0 min-w-0 overflow-hidden" style={{ gridTemplateColumns: columns }} data-testid="app-shell">
     <NavigationRail launchpadView={launchpadView} launchpadOpen={launchpadOpen} inspectorOpen={inspectorOpen} onView={showLaunchpad} onToggleLaunchpad={() => setLaunchpadOpen((value) => !value)} onToggleInspector={() => setInspectorOpen((value) => !value)} />
-    <aside aria-label="Launchpad" aria-hidden={!launchpadOpen} className="min-h-0 min-w-0 overflow-hidden border-r border-border bg-panel">
+    <aside aria-label={t('shell.launchpad')} aria-hidden={!launchpadOpen} className="min-h-0 min-w-0 overflow-hidden border-r border-border bg-panel">
       <div hidden={!launchpadOpen} data-testid="launchpad-content" className="h-full min-h-0">
         <div id="launchpad-projects" hidden={launchpadView !== 'projects'} className="h-full min-h-0"><StableWorkspacePanel /></div>
         <div id="launchpad-launch" hidden={launchpadView !== 'launch'} className="h-full min-h-0"><StableWorkflowPanel /></div>
       </div>
     </aside>
-    {launchpadOpen ? <Divider label="Resize Launchpad" value={fittedLayout.launchpadWidth} min={MIN_LAYOUT.launchpadWidth} max={MAX_LAYOUT.launchpadWidth} onPointerDown={(event) => resize('launchpadWidth', event)} onDelta={(delta) => resizeWithKeyboard('launchpadWidth', delta)} /> : <div />}
-    <aside aria-label="Activity inspector" aria-hidden={!inspectorOpen} className="min-h-0 min-w-0 overflow-hidden border-r border-border bg-panel"><div hidden={!inspectorOpen} data-testid="inspector-content" className="h-full"><StableRunPanel /></div></aside>
-    {inspectorOpen ? <Divider label="Resize activity inspector" value={fittedLayout.inspectorWidth} min={MIN_LAYOUT.inspectorWidth} max={MAX_LAYOUT.inspectorWidth} onPointerDown={(event) => resize('inspectorWidth', event)} onDelta={(delta) => resizeWithKeyboard('inspectorWidth', delta)} /> : <div />}
+    {launchpadOpen ? <Divider label={t('shell.resizeLaunchpad')} value={fittedLayout.launchpadWidth} min={MIN_LAYOUT.launchpadWidth} max={MAX_LAYOUT.launchpadWidth} onPointerDown={(event) => resize('launchpadWidth', event)} onDelta={(delta) => resizeWithKeyboard('launchpadWidth', delta)} /> : <div />}
+    <aside aria-label={t('shell.activity')} aria-hidden={!inspectorOpen} className="min-h-0 min-w-0 overflow-hidden border-r border-border bg-panel"><div hidden={!inspectorOpen} data-testid="inspector-content" className="h-full"><StableRunPanel /></div></aside>
+    {inspectorOpen ? <Divider label={t('shell.resizeActivity')} value={fittedLayout.inspectorWidth} min={MIN_LAYOUT.inspectorWidth} max={MAX_LAYOUT.inspectorWidth} onPointerDown={(event) => resize('inspectorWidth', event)} onDelta={(delta) => resizeWithKeyboard('inspectorWidth', delta)} /> : <div />}
     <div className="min-h-0 min-w-0 overflow-hidden"><StableRunWorkspace /></div>
   </div>;
 }
@@ -106,25 +108,26 @@ function NavigationRail({ launchpadView, launchpadOpen, inspectorOpen, onView, o
   onToggleLaunchpad(): void;
   onToggleInspector(): void;
 }) {
-  return <nav aria-label="Primary" className="z-10 flex min-h-0 flex-col items-center gap-1 border-r border-border bg-zinc-950 px-1.5 py-2">
-    <span className="mb-2 grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-violet-600 to-sky-600 text-xs font-black text-white" title="Multi-AI Terminal">MAT</span>
-    <RailButton label="Projects" selected={launchpadOpen && launchpadView === 'projects'} controls="launchpad-projects" onClick={() => onView('projects')} icon={<ProjectsIcon />} />
-    <RailButton label="Launch" selected={launchpadOpen && launchpadView === 'launch'} controls="launchpad-launch" onClick={() => onView('launch')} icon={<LaunchIcon />} />
-    <div className="my-1 h-px w-7 bg-border" />
-    <RailButton label={launchpadOpen ? 'Hide settings' : 'Show settings'} selected={launchpadOpen} onClick={onToggleLaunchpad} icon={<PanelIcon side="left" />} />
-    <RailButton label={inspectorOpen ? 'Hide activity' : 'Show activity'} selected={inspectorOpen} onClick={onToggleInspector} icon={<PanelIcon side="right" />} />
+  const { t } = useUiPreferences();
+  return <nav aria-label={t('shell.primary')} className="z-10 flex min-h-0 flex-col items-stretch gap-1 border-r border-border bg-canvas px-2 py-2">
+    <span className="mb-2 grid h-8 place-items-center rounded-lg bg-gradient-to-r from-violet-600 via-amber-500 to-teal-500 text-xs font-black text-white" title="Multi-AI Terminal">MAT</span>
+    <RailButton label={t('shell.projects')} selected={launchpadOpen && launchpadView === 'projects'} controls="launchpad-projects" onClick={() => onView('projects')} icon={<ProjectsIcon />} />
+    <RailButton label={t('shell.launch')} selected={launchpadOpen && launchpadView === 'launch'} controls="launchpad-launch" onClick={() => onView('launch')} icon={<LaunchIcon />} />
+    <div className="my-1 h-px bg-border" />
+    <RailButton label={launchpadOpen ? t('shell.hideSettings') : t('shell.showSettings')} selected={launchpadOpen} onClick={onToggleLaunchpad} icon={<PanelIcon side="left" />} />
+    <RailButton label={inspectorOpen ? t('shell.hideActivity') : t('shell.showActivity')} selected={inspectorOpen} onClick={onToggleInspector} icon={<PanelIcon side="right" />} />
   </nav>;
 }
 
 function RailButton({ label, selected, controls, icon, onClick }: { label: string; selected: boolean; controls?: string; icon: ReactNode; onClick(): void }) {
-  return <button type="button" aria-label={label} aria-pressed={selected} {...(controls ? { 'aria-controls': controls } : {})} onClick={onClick} className={`grid h-9 w-9 place-items-center rounded-lg border text-xs transition-colors ${selected ? 'border-violet-700 bg-violet-950/55 text-violet-100' : 'border-transparent text-muted hover:border-border hover:bg-zinc-900 hover:text-ink'}`} title={label}>{icon}</button>;
+  return <button type="button" aria-label={label} aria-pressed={selected} {...(controls ? { 'aria-controls': controls } : {})} onClick={onClick} className={`flex min-h-11 w-full items-center gap-2 rounded-lg border px-2 text-left text-[10px] font-medium leading-tight transition-colors ${selected ? 'border-accentBorder bg-accentSoft/70 text-accentForeground' : 'border-transparent text-muted hover:border-border hover:bg-surface hover:text-ink'}`} title={label}><span className="shrink-0">{icon}</span><span>{label}</span></button>;
 }
 
 function Divider({ label, value, min, max, onPointerDown, onDelta }: { label: string; value: number; min: number; max: number; onPointerDown(event: ReactPointerEvent<HTMLDivElement>): void; onDelta(delta: number): void }) {
   return <div role="separator" aria-label={label} tabIndex={0} aria-orientation="vertical" aria-valuemin={min} aria-valuemax={max} aria-valuenow={Math.round(value)} aria-valuetext={`${Math.round(value)} pixels`} onPointerDown={onPointerDown} onKeyDown={(event) => {
     if (event.key === 'ArrowLeft') { event.preventDefault(); onDelta(-10); }
     else if (event.key === 'ArrowRight') { event.preventDefault(); onDelta(10); }
-  }} className="cursor-col-resize bg-zinc-950 outline-none transition-colors hover:bg-accent focus:bg-accent" />;
+  }} className="cursor-col-resize bg-canvas outline-none transition-colors hover:bg-accent focus:bg-accent" />;
 }
 
 export function loadShellLayout(): ShellLayout {

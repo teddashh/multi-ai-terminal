@@ -1,7 +1,7 @@
-# Multi-AI Terminal — Product & Engineering Spec (v1.4)
+# Multi-AI Terminal — Product & Engineering Spec (v1.5)
 
-> v1.1 incorporates the 4-model panel review (codex gpt-5.6-sol, agy Gemini 3.1 Pro, grok 4.5, Claude Fable 5 — all verdicts: revise; findings merged, see docs/spec-review-panel.md). The normative v1.2 evidence-plane, v1.3 steering/debug-plane, and v1.4 evidence-workbench UX amendments are integrated below and summarized at the end.
-> Base date: 2026-07-18. Amended through 2026-07-20.
+> v1.1 incorporates the 4-model panel review (codex gpt-5.6-sol, agy Gemini 3.1 Pro, grok 4.5, Claude Fable 5 — all verdicts: revise; findings merged, see docs/spec-review-panel.md). The normative v1.2 evidence-plane, v1.3 steering/debug-plane, v1.4 evidence-workbench UX, and v1.5 provider-recovery/localized-UI amendments are integrated below and summarized at the end.
+> Base date: 2026-07-18. Amended through 2026-07-21.
 
 ## 0. What this is
 
@@ -22,7 +22,7 @@ Successor concept to `multi-ai-chat-desktop` (webchat orchestration), rebuilt on
 
 ### Non-goals (v1)
 
-Interactive terminals/stdin; arbitrary agent-authored runtime graph growth (only retries plus engine-owned transient steer stages); graph-canvas editing (form-based editing + drag-to-assign); i18n; auth beyond network trust + optional token; `gemini` as a separate provider (agy serves Gemini models). Desktop packaging and Windows are shipped surfaces, not non-goals.
+Interactive terminals/stdin; arbitrary agent-authored runtime graph growth (only retries plus engine-owned transient steer stages); graph-canvas editing (form-based editing + drag-to-assign); locales beyond English and Traditional Chinese; auth beyond network trust + optional token; `gemini` as a separate provider (agy serves Gemini models). Desktop packaging and Windows are shipped surfaces, not non-goals.
 
 ## 1. Primary user story
 
@@ -67,8 +67,9 @@ multi-ai-terminal/
 │   └── test/                   # vitest; fixtures/ = cleaned REAL CLI captures (§11)
 └── web/
     └── src/
-        ├── app/                # App shell, layout grid, theme, store.ts (zustand)
+        ├── app/                # App shell, layout grid, semantic theme tokens, store.ts (zustand)
         ├── api/                # client.ts ws.ts
+        ├── i18n/               # persisted language/theme preferences + en/zh-TW dictionaries
         ├── components/         # AgentChip StatusDot ModalDialog Collapsible EventRow…
         ├── panels/workspace/   # left rail
         ├── panels/workflow/    # mode picker, stage editor, agent palette, run box
@@ -402,6 +403,7 @@ REST (zod-validated; errors `{error:{code,message}}`; bearer token if configured
 GET  /api/health                              → {ok, version}
 GET  /api/providers                           → [{id, tier, ok, version?, detail?, models, defaultModel,
                                                 installable, manualCommand?, authAlert?, signInCommand?}]
+POST /api/providers/refresh                   # no body; clears local PATH/version caches and reruns discovery
 POST /api/providers/:id/install               # explicit click only; fixed server-side recipe or manual command
 POST /api/client-log                          # bounded best-effort browser diagnostic intake
 GET  /api/debug/server-log                    # bounded server diagnostic tail
@@ -431,7 +433,7 @@ WS `/ws[?token=]`: client `{type:'sub'|'unsub', runId}`; server pushes per §3.4
 
 ## 9. Frontend spec (web/)
 
-Dark evidence workbench: a 52 px navigation rail, collapsible Launchpad, collapsible activity inspector, and a flexible Run Workspace. Launchpad/inspector widths use the independent `mat-shell-layout-v2` preference and keyboard-accessible dividers. Collapsing or navigating hides panels without unmounting them, so task, workspace, and model-editor drafts survive.
+Evidence workbench: an 84 px icon+text navigation rail, collapsible Launchpad, collapsible activity inspector, and a flexible Run Workspace. Launchpad/inspector widths use the independent `mat-shell-layout-v2` preference and keyboard-accessible dividers. Collapsing or navigating hides panels without unmounting them, so task, workspace, and model-editor drafts survive.
 
 1. **Projects**: workspace cards — name, short path, `lastRun` badge ("Planning · done · 2h ago"), live pulse when running; add-workspace dialog (server validates; shows isGit chip). Projects is a Launchpad view selected from the rail, not a permanently competing column.
 2. **Launch**: the default Launchpad view leads with visual workflow-mode choices, provider readiness, task, and Start. "CLI detected" never claims authentication; a recent observed auth failure is labeled as such. **Customize** opens the advanced stage editor, orchestrator binding, slot editors, and agent palette in a focus-trapped drawer. Slot editing keeps the explicit custom-model input: never use `<datalist>` and never auto-collapse while a custom value is being typed. Editing a builtin mutates an ephemeral run-scoped `workflowOverride`; Duplicate is required to save it.
@@ -439,9 +441,9 @@ Dark evidence workbench: a 52 px navigation rail, collapsible Launchpad, collaps
 4. **Run Workspace**: one shared run selector owns live/history identity and replay hydration for every evidence view. It must never replace `activeRunId` when the user chooses a historical `viewedRunId`. Node chips plus All/Running/Attention presets focus both the inspector and evidence views. A run that finishes while open remains the same live session for follow/read controls; a terminal run selected after reload is a replay.
 5. **Conversation (default)**: a virtualized Narrative projection emphasizes agent messages, decisions, verification, and errors. Each block identifies node label, provider/model, stage, attempt, source sequence, and time. Source `seq` is authoritative; every source event appears in exactly one projection item; gaps are explicit items; grouping never crosses a gap/node/stage/attempt/role/kind boundary. Tool use/result pair only when adjacent and identity-compatible. Prompts, thinking, tools, and lifecycle are hidden by default but remain searchable and available through **Tools & thinking**. Narrative is a projection only; it never rewrites durable evidence.
 6. **Timeline**: the raw virtualized feed remains available with node/role/search filters and expandable tool evidence. It preserves chronological source order and adjacent-only compaction. Auto-follow disarms on intentional upward reading, re-arms at the bottom, and remains usable if the live run completes while open. Replay is hydrated by the parent Run Workspace, not a second competing selector.
-7. **Health & diagnostics**: a header drawer performs read-only server/provider refreshes and derives workspace, viewed-run, node, verification, degraded-gate, WebSocket, and evidence-continuity findings. Provider `ok` means CLI discovery only; authentication is unknown unless a recent failure was observed. `mock` is always a deterministic non-issue. Safe actions are fixed-recipe Setup/sign-in copy, node inspection, redacted server-log loading, and debug-bundle export; no retry/kill/apply mutation belongs in Health.
+7. **Health & diagnostics**: a header drawer performs observational server/provider checks and derives workspace, viewed-run, node, verification, degraded-gate, WebSocket, and evidence-continuity findings. Provider `ok` means CLI discovery only; authentication is unknown unless a recent failure was observed. `mock` is always a deterministic non-issue. Safe actions are fixed-recipe Setup/sign-in copy, explicit cache-bypassing provider recheck, node inspection, redacted server-log loading, and debug-bundle export; no run retry/kill/apply mutation belongs in Health.
 8. **Live evidence continuity**: a WebSocket sequence jump sets a visible recovering state, buffers concurrent live events, backfills from persisted REST evidence, merges/deduplicates by sequence, and becomes `incomplete` with explicit Retry when recovery fails. A later gap must retain the earliest unresolved cursor. Existing evidence remains visible, but the UI must not imply completeness while recovery is unresolved.
-9. **Theme tokens**: `--panel #18181b --border #27272a --ink #e4e4e7 --muted #a1a1aa` accent `#a78bfa`; providers: claude `#d97706`, codex `#10a37f`, agy `#4285f4`, grok `#e11d48`, mock `#71717a`.
+9. **Language + theme tokens**: system/en/zh-TW language and Midnight/Daylight/Aurora theme choices persist in `mat-ui-preferences-v1`; `main.tsx` applies them before React mounts. Visible chrome and troubleshooting copy must use the typed dictionary. Neutral surfaces/text use semantic `canvas/panel/surface/raised/control/border/ink/muted` tokens rather than fixed zinc colors. Aurora is a restrained violet/gold/teal palette; provider identity colors remain claude `#d97706`, codex `#10a37f`, agy `#4285f4`, grok `#e11d48`, mock `#71717a`.
 10. **zustand store**: state includes workspaces, workflows, providers, workspace selection, ephemeral workflow edits, separate active/live and viewed/replay run identities, run snapshots, bounded per-run event windows (the server remains the complete record), WebSocket/evidence-integrity state, filters, and focused-node UI state. Panels consume it through stable selectors; selectors must not allocate fresh fallback arrays or objects because that caused the React #185 black-screen loop.
 
 ## 10. Builtin presets (shared/src/presets) — also the reference examples for §6.2
@@ -457,7 +459,7 @@ Dark evidence workbench: a 52 px navigation rail, collapsible Launchpad, collaps
 - Unit: adapters × fixtures → exact expected event sequences incl. coalescing and outcome fields; line-buffer edges; decision.ts (happy, re-ask, degraded, invalid-id filtering); template rendering; digest budget math; store atomicity + seq recovery.
 - Engine (mock adapter): happy 2-stage fan-out 3; retry loop honoring budgets + `status:retry` boundaries + user-event synthesis per attempt; all-fail; abort mid-stage; stall mark+recover; worktree lifecycle incl. retry re-add and untracked-file patch capture (real temp git repo); crash sweep (simulated stale run.json).
 - API: fastify inject — full run lifecycle with mock provider, WS order = after-append, afterSeq catch-up, retry-stage validity matrix, apply-patch 3way conflict path, token auth on/off.
-- Browser smoke: `npm run smoke:browser` launches the built server and production React bundle in real Chrome/Chromium; it guards mount, compact shell geometry, Health semantics, Narrative-first rendering, Timeline scrolling/follow mode, live switching/completion, verification/report, steering, and debug export. CI must keep this on Linux and Windows because jsdom missed the React #185 black screen.
+- Browser smoke: `npm run smoke:browser` launches the built server and production React bundle in real Chrome/Chromium; it guards mount, compact shell geometry, visible navigation labels, zh-TW and three-theme persistence, Health semantics, Narrative-first rendering, Timeline scrolling/follow mode, live switching/completion, verification/report, steering, and debug export. CI must keep this on Linux and Windows because jsdom missed the React #185 black screen.
 - Artifact evidence: `npm run evidence` runs every `tools/evidence/repro-v01{6,7,8,9}.mjs` black-box instrument. Release acceptance reruns the suite against the extracted `.deb` with `MAT_ROOT` and `MAT_EXPECT_VERSION`.
 - **Acceptance**: `npm ci && npm run verify:version && npm run build && npm test && npm run typecheck && npm run evidence && npm run smoke:browser` green on the applicable CI lanes; `npm start` serves UI; §1 story executes with real CLIs; a finished run replays after server restart; crash sweep leaves no orphan processes/worktrees.
 
@@ -512,3 +514,11 @@ The four equal-weight columns are replaced by an explicit information hierarchy:
 Live evidence is no longer silently trusted across a WebSocket sequence gap. The browser visibly recovers persisted events, buffers simultaneous arrivals, preserves the earliest unresolved gap, and exposes an incomplete/retry state if backfill fails. Health centralizes honest, read-only troubleshooting and safe exports without claiming that CLI detection proves authentication or adding run mutations.
 
 This amendment changes presentation and web-local state only. It adds no PTY, interactive terminal, pause/resume, human approval node, canvas/multi-pane workflow, or new shared persisted schema.
+
+## v1.5 — Provider recovery & localized UI (2026-07-21)
+
+A field debug bundle proved that healthy Codex and Grok Windows shims could exceed the former five-second cold version probe, after which the failure was mislabeled as unavailable and cached for ten minutes. Version probes now allow 15 seconds on Windows and eight elsewhere, share only in-flight work, cache successful results for ten minutes, and cache failures for two seconds. `POST /api/providers/refresh` takes no user input, clears augmented-PATH and version caches, and reruns discovery. The UI exposes this as **Retry detection** in Setup and **Recheck providers** in Health; neither action installs software or changes a run.
+
+Agy's fixed Windows `winget` recipe may run for several minutes, so its fixed timeout is ten minutes while npm recipes remain five. Setup shows elapsed time, automatically rechecks on completion, and keeps an explicit ready/no-restart or installed-but-not-detected/restart-once result visible. The original security boundary remains unchanged: installation requires an explicit click, runs only a fixed server recipe, and accepts no command input.
+
+The chrome follows the system language or persists English/Traditional Chinese, and persists one of Midnight, Daylight, or violet/gold/teal Aurora. Navigation icons have visible text; Conversation cards strengthen node label, provider/model, stage, attempt, sequence, time, and provider-color identity. These preferences and translations are web-local only and add no shared persisted schema or engine behavior.

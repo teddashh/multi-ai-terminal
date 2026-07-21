@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { useUiPreferences } from '../i18n/UiPreferences.js';
 
 export interface SideDrawerProps {
   open: boolean;
@@ -12,6 +13,7 @@ export interface SideDrawerProps {
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function SideDrawer({ open, title, onClose, children, footer, widthClassName = 'max-w-xl' }: SideDrawerProps) {
+  const { t } = useUiPreferences();
   const titleId = useId();
   const panelRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -44,7 +46,7 @@ export function SideDrawer({ open, title, onClose, children, footer, widthClassN
     <section ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className={`flex h-full w-full flex-col border-l border-border bg-panel shadow-2xl ${widthClassName}`}>
       <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
         <h2 id={titleId} className="font-semibold text-ink">{title}</h2>
-        <button ref={closeRef} type="button" onClick={onClose} aria-label={`Close ${title}`} className="rounded px-2 py-1 text-muted hover:bg-zinc-800 hover:text-ink">×</button>
+        <button ref={closeRef} type="button" onClick={onClose} aria-label={t('common.closeNamed', { title })} className="rounded px-2 py-1 text-muted hover:bg-raised hover:text-ink">×</button>
       </header>
       <div className="min-h-0 flex-1 overflow-auto p-4">{children}</div>
       {footer && <footer className="shrink-0 border-t border-border px-4 py-3">{footer}</footer>}

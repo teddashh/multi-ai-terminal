@@ -84,6 +84,6 @@ describe('AppShell', () => {
 
   it('fits oversized persisted side panels without clipping the run workspace', () => {
     const fitted = fitShellLayout({ launchpadWidth: 520, inspectorWidth: 520 }, 1024, true, true);
-    expect(52 + fitted.launchpadWidth + 5 + fitted.inspectorWidth + 5 + 320).toBeLessThanOrEqual(1024);
+    expect(84 + fitted.launchpadWidth + 5 + fitted.inspectorWidth + 5 + 320).toBeLessThanOrEqual(1024);
   });
 });

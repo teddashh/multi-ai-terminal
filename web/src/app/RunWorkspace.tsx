@@ -4,12 +4,14 @@ import { apiClient } from '../api/client.js';
 import { displayNodeLabel } from '../components/nodeLabel.js';
 import { NarrativePanel } from '../panels/narrative/NarrativePanel.js';
 import { loadReplayPages, StreamPanel } from '../panels/stream/StreamPanel.js';
+import { useUiPreferences } from '../i18n/UiPreferences.js';
 import { ACTIVE_RUN_STATUSES, matStore, useMatStore } from './store.js';
 
 type EvidenceView = 'conversation' | 'timeline';
 
 /** Owns run selection and replay loading so every evidence view observes the same run. */
 export function RunWorkspace() {
+  const { locale, t } = useUiPreferences();
   const selectedWorkspaceId = useMatStore((state) => state.selectedWorkspaceId);
   const activeRunId = useMatStore((state) => state.activeRunId);
   const viewedRunId = useMatStore((state) => state.viewedRunId);
@@ -117,40 +119,40 @@ export function RunWorkspace() {
     focusNode(undefined);
   };
 
-  return <section aria-label="Run workspace" className="flex h-full min-h-0 min-w-0 flex-col bg-zinc-950/30" data-testid="run-workspace">
+  return <section aria-label={t('runWorkspace.label')} className="flex h-full min-h-0 min-w-0 flex-col bg-canvas/30" data-testid="run-workspace">
     <header className="shrink-0 border-b border-border bg-panel px-3 py-2">
       <div className="flex min-w-0 items-center gap-2">
-        <label htmlFor="run-workspace-run-selector" className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted">Run</label>
-        <select id="run-workspace-run-selector" value={viewedRunId ?? ''} onChange={(event) => selectRun(event.target.value)} className="min-w-0 max-w-md flex-1 rounded border border-border bg-zinc-950 px-2 py-1.5 text-xs text-ink">
-          {!viewedRunId && <option value="">No runs</option>}
-          {availableRuns.map((run) => <option key={run.runId} value={run.runId}>{formatRunOption(run, run.runId === activeRunId)}</option>)}
+        <label htmlFor="run-workspace-run-selector" className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted">{t('runWorkspace.run')}</label>
+        <select id="run-workspace-run-selector" value={viewedRunId ?? ''} onChange={(event) => selectRun(event.target.value)} className="min-w-0 max-w-md flex-1 rounded border border-border bg-canvas px-2 py-1.5 text-xs text-ink">
+          {!viewedRunId && <option value="">{t('runWorkspace.noRuns')}</option>}
+          {availableRuns.map((run) => <option key={run.runId} value={run.runId}>{formatRunOption(run, run.runId === activeRunId ? t('runWorkspace.live') : '', locale)}</option>)}
         </select>
-        {selectedRun && <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] ${viewingLiveSession ? 'border-sky-700 bg-sky-950/30 text-sky-200' : 'border-border text-muted'}`}>{selectedRun.runId === activeRunId ? 'Live' : viewingLiveSession ? 'Completed' : 'Replay'} · {selectedRun.status}</span>}
-        <button type="button" disabled={!selectedWorkspaceId || historyLoading} onClick={() => void loadMoreRuns()} className="shrink-0 rounded border border-border px-2 py-1 text-[10px] text-muted hover:text-ink disabled:opacity-40">{historyLoading ? 'Loading…' : historyHasMore ? 'More runs' : 'Older runs'}</button>
+        {selectedRun && <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] ${viewingLiveSession ? 'border-sky-700 bg-sky-950/30 text-sky-200' : 'border-border text-muted'}`}>{selectedRun.runId === activeRunId ? t('runWorkspace.live') : viewingLiveSession ? t('runWorkspace.completed') : t('runWorkspace.replay')} · {selectedRun.status}</span>}
+        <button type="button" disabled={!selectedWorkspaceId || historyLoading} onClick={() => void loadMoreRuns()} className="shrink-0 rounded border border-border px-2 py-1 text-[10px] text-muted hover:text-ink disabled:opacity-40">{historyLoading ? t('runWorkspace.loading') : historyHasMore ? t('runWorkspace.moreRuns') : t('runWorkspace.olderRuns')}</button>
       </div>
-      {selectedRun && <div className="mt-2 flex min-w-0 items-center gap-1 overflow-x-auto pb-0.5" aria-label="Node focus">
-        <NodePreset label="All" active={nodeFilter.length === 0} count={selectedRun.nodes.length} onClick={() => applyNodePreset('all')} />
-        <NodePreset label="Running" active={sameMembers(nodeFilter, runningNodes.map((node) => node.nodeRunId))} count={runningNodes.length} disabled={runningNodes.length === 0} onClick={() => applyNodePreset('running')} />
-        <NodePreset label="Attention" active={sameMembers(nodeFilter, attentionNodes.map((node) => node.nodeRunId))} count={attentionNodes.length} disabled={attentionNodes.length === 0} onClick={() => applyNodePreset('attention')} tone="attention" />
+      {selectedRun && <div className="mt-2 flex min-w-0 items-center gap-1 overflow-x-auto pb-0.5" aria-label={t('runWorkspace.nodeFocus')}>
+        <NodePreset label={t('runWorkspace.all')} active={nodeFilter.length === 0} count={selectedRun.nodes.length} onClick={() => applyNodePreset('all')} />
+        <NodePreset label={t('runWorkspace.running')} active={sameMembers(nodeFilter, runningNodes.map((node) => node.nodeRunId))} count={runningNodes.length} disabled={runningNodes.length === 0} onClick={() => applyNodePreset('running')} />
+        <NodePreset label={t('runWorkspace.attention')} active={sameMembers(nodeFilter, attentionNodes.map((node) => node.nodeRunId))} count={attentionNodes.length} disabled={attentionNodes.length === 0} onClick={() => applyNodePreset('attention')} tone="attention" />
         <span className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden="true" />
         {selectedRun.nodes.map((node) => {
           const label = displayNodeLabel(node, selectedRun.nodes);
-          return <button type="button" key={node.nodeRunId} aria-pressed={nodeFilter.includes(node.nodeRunId)} onClick={() => { setNodeFilter([node.nodeRunId]); focusNode(node.nodeRunId); }} className={`max-w-40 shrink-0 truncate rounded-full border px-2 py-1 text-[10px] ${nodeFilter.includes(node.nodeRunId) ? 'border-violet-600 bg-violet-950/30 text-violet-100' : nodeNeedsAttention(node) ? 'border-red-900 text-red-300' : 'border-border text-muted hover:text-ink'}`} title={`${label} · ${node.status}`}>{label} · {node.status}</button>;
+          return <button type="button" key={node.nodeRunId} aria-pressed={nodeFilter.includes(node.nodeRunId)} onClick={() => { setNodeFilter([node.nodeRunId]); focusNode(node.nodeRunId); }} className={`max-w-40 shrink-0 truncate rounded-full border px-2 py-1 text-[10px] ${nodeFilter.includes(node.nodeRunId) ? 'border-accentBorder bg-accentSoft/70 text-accentForeground' : nodeNeedsAttention(node) ? 'border-red-900 text-red-300' : 'border-border text-muted hover:text-ink'}`} title={`${label} · ${node.status}`}>{label} · {node.status}</button>;
         })}
       </div>}
-      {replayLoading && <p role="status" className="mt-2 text-[11px] text-sky-300">Loading complete replay evidence…</p>}
-      {replayError && <p role="alert" className="mt-2 text-[11px] text-red-300">Replay evidence could not be completed: {replayError}</p>}
-      {historyError && <p role="alert" className="mt-2 text-[11px] text-red-300">Older runs could not be loaded: {historyError}</p>}
-      <div className="mt-2 flex items-center gap-1" role="tablist" aria-label="Evidence view" onKeyDown={(event) => {
+      {replayLoading && <p role="status" className="mt-2 text-[11px] text-sky-300">{t('runWorkspace.loadingReplay')}</p>}
+      {replayError && <p role="alert" className="mt-2 text-[11px] text-red-300">{t('runWorkspace.replayFailed', { error: replayError })}</p>}
+      {historyError && <p role="alert" className="mt-2 text-[11px] text-red-300">{t('runWorkspace.historyFailed', { error: historyError })}</p>}
+      <div className="mt-2 flex items-center gap-1" role="tablist" aria-label={t('runWorkspace.evidenceView')} onKeyDown={(event) => {
         if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
         event.preventDefault();
         const next = view === 'conversation' ? 'timeline' : 'conversation';
         setView(next);
         requestAnimationFrame(() => document.getElementById(`${next}-tab`)?.focus());
       }}>
-        <ViewTab id="conversation-tab" controls="conversation-panel" selected={view === 'conversation'} onClick={() => setView('conversation')}>Conversation</ViewTab>
-        <ViewTab id="timeline-tab" controls="timeline-panel" selected={view === 'timeline'} onClick={() => setView('timeline')}>Timeline</ViewTab>
-        <span className="ml-auto text-[10px] text-muted">{selectedRun ? `${selectedRun.nodes.length} agents · ${selectedRun.workflow.name}` : runsLoading ? 'Loading runs…' : 'Ready to start'}</span>
+        <ViewTab id="conversation-tab" controls="conversation-panel" selected={view === 'conversation'} onClick={() => setView('conversation')}>{t('runWorkspace.conversation')}</ViewTab>
+        <ViewTab id="timeline-tab" controls="timeline-panel" selected={view === 'timeline'} onClick={() => setView('timeline')}>{t('runWorkspace.timeline')}</ViewTab>
+        <span className="ml-auto text-[10px] text-muted">{selectedRun ? t('runWorkspace.agentCount', { count: selectedRun.nodes.length, workflow: selectedRun.workflow.name }) : runsLoading ? t('runWorkspace.loadingRuns') : t('runWorkspace.ready')}</span>
       </div>
     </header>
     <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -161,7 +163,7 @@ export function RunWorkspace() {
 }
 
 function ViewTab({ id, controls, selected, onClick, children }: { id: string; controls: string; selected: boolean; onClick(): void; children: string }) {
-  return <button id={id} type="button" role="tab" aria-controls={controls} aria-selected={selected} tabIndex={selected ? 0 : -1} onClick={onClick} className={`rounded px-2.5 py-1 text-xs ${selected ? 'bg-violet-950/50 text-violet-100' : 'text-muted hover:bg-zinc-900 hover:text-ink'}`}>{children}</button>;
+  return <button id={id} type="button" role="tab" aria-controls={controls} aria-selected={selected} tabIndex={selected ? 0 : -1} onClick={onClick} className={`rounded px-2.5 py-1 text-xs ${selected ? 'bg-accentSoft/70 text-accentForeground' : 'text-muted hover:bg-surface hover:text-ink'}`}>{children}</button>;
 }
 
 function NodePreset({ label, active, count, disabled, tone = 'default', onClick }: { label: string; active: boolean; count: number; disabled?: boolean; tone?: 'default' | 'attention'; onClick(): void }) {
@@ -177,8 +179,8 @@ function sameMembers(left: readonly string[], right: readonly string[]): boolean
   return right.length > 0 && left.length === right.length && right.every((value) => left.includes(value));
 }
 
-function formatRunOption(run: RunSnapshot, live: boolean): string {
-  return `${live ? 'Live · ' : ''}${run.workflow.name} · ${run.status} · ${new Date(run.createdAt).toLocaleString()}`;
+function formatRunOption(run: RunSnapshot, liveLabel: string, locale: string): string {
+  return `${liveLabel ? `${liveLabel} · ` : ''}${run.workflow.name} · ${run.status} · ${new Date(run.createdAt).toLocaleString(locale)}`;
 }
 
 function errorMessage(error: unknown): string {

@@ -8,12 +8,13 @@
 
 ## 運作方式
 
-- **專案 + Launchpad** — 每個工作區指向一個目錄(可感知 git)。左側 rail 可在專案選擇與啟動設定間切換且不清除草稿;常用的模式、readiness、任務直接可見,進階階段編輯收在 **Customize**。
+- **專案 + Launchpad** — 每個工作區指向一個目錄(可感知 git)。左側 rail 同時顯示 icon 與文字,可在專案選擇與啟動設定間切換且不清除草稿;常用的模式、readiness、任務直接可見,進階階段編輯收在 **Customize**。
 - **工作流(Workflows)** — 由有序階段組成;每個階段放置 agent 槽位(從進階調色盤拖入;同供應商可放多個實例,每階段 Σ ≤ 12)。每個槽位可設定:模型、推理力度、權限層級、提示模板、數量。
 - **調度者(Orchestrator)** — 一個真實的 CLI agent(任一供應商),接收每個把關階段候選結果的摘要,回覆嚴格 JSON 的閘門決策:前進 / 重試(可指定節點並附加提示)/ 中止。確定性的預算上限;解析失敗時安全降級為前進。
 - **階段隔離** — 每個節點可選 git worktree 隔離;每次嘗試的改動會擷取成二進位 patch,可在 UI 中檢視並套用。
 - **Run Workspace** — 預設的 **Conversation** 讓每個節點的回答、決策、驗證與失敗一眼可讀;**Timeline** 保留原始四類事件、虛擬化捲動、節點/角色/搜尋過濾與持久事件完整回放。
-- **Health & diagnostics** — 以唯讀方式整理 server、provider、workspace、run、驗證與 evidence continuity;只提供安全的 Setup、Inspect、遮罩日誌與 debug bundle。偵測到 CLI 絕不冒充已登入。
+- **Health & diagnostics** — 整理 server、provider、workspace、run、驗證與 evidence continuity;提供安全的 Setup、重新偵測、Inspect、遮罩日誌與 debug bundle。偵測到 CLI 絕不冒充已登入。
+- **語言與主題** — 可跟隨系統或切換 English／繁體中文,並提供會永久記住的午夜深色、日光淺色、紫／金／青極光三套主題。
 
 ## 驗證（證據層）
 
@@ -42,6 +43,8 @@ npm start                      # 在 http://127.0.0.1:7788 提供網頁 UI + API
 
 打開 UI,從 **Projects** 新增工作區(絕對路徑),回到 **Launch**,挑一個內建工作流(Planning / Build / Review / Pipeline),寫下任務並按 Start。只有需要更改階段或 agent 綁定時才打開 **Customize**。
 
+頂部的 **語言・主題** 可覆蓋系統語言並選擇三套主題;兩項選擇在重開後都會保留。
+
 開發模式:`npm run dev`(vite + API 熱重載)。測試:`npm test`。型別檢查:`npm run typecheck`。版本一致性:`npm run verify:version`。建置後的 server 證據套件:`npm run evidence`。
 
 ## 桌面版
@@ -60,6 +63,8 @@ npm start                      # 在 http://127.0.0.1:7788 提供網頁 UI + API
 ## Provider 設定
 
 無法使用的 provider 會在 agent palette 顯示 **Setup**。安裝只有在使用者明確點擊後才會開始,而且只使用 server 端固定 recipe:Claude Code、Codex、Grok 走 npm global install;Windows 的 Antigravity 走 `winget`;其他平台只顯示可複製、由使用者自行執行的 Antigravity 指令。MAT 不會隱性綁入或下載任何 CLI;各 provider 的授權條款與登入仍由其上游工具管理。
+
+Setup 會顯示已經過的安裝時間,安裝程式結束後自動重新偵測,並保留清楚的完成／是否需要重開提示。**重新偵測**只會清除 MAT 本機的 PATH／版本快取,不會再次安裝。Windows 的版本檢查會給冷啟動 CLI shim 15 秒;暫時性失敗只快取 2 秒,成功版本則快取 10 分鐘。
 
 MAT 會在子行程 `PATH` 後補上既有的常見 CLI 位置:Windows 的 `%LOCALAPPDATA%\Antigravity`、`%APPDATA%\npm`;其他平台的 `~/.local/bin`、`/usr/local/bin`、`/opt/homebrew/bin`。這讓桌面 server 找得到常見的使用者層級安裝,但不會把環境變數值寫進診斷紀錄。
 

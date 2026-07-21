@@ -206,8 +206,21 @@ export class ContentCoalescer {
   }
 }
 
-const VERSION_CACHE_TTL_MS = 10 * 60 * 1000;
+const VERSION_SUCCESS_CACHE_TTL_MS = 10 * 60 * 1000;
+const VERSION_FAILURE_CACHE_TTL_MS = 2 * 1000;
 const versionCache = new Map<string, { expiresAt: number; value: Promise<{ ok: boolean; version?: string; detail?: string }> }>();
+
+export function providerVersionProbeTimeoutMs(platform: NodeJS.Platform = process.platform): number {
+  // Windows CLI shims can take several seconds to cold-start after MAT or the
+  // provider was updated. A short probe made a healthy CLI look uninstalled.
+  return platform === 'win32' ? 15_000 : 8_000;
+}
+
+export function providerVersionCacheTtlMs(ok: boolean): number {
+  // A transient failure must never poison detection for ten minutes. Keep only
+  // a tiny failure window to collapse concurrent startup probes.
+  return ok ? VERSION_SUCCESS_CACHE_TTL_MS : VERSION_FAILURE_CACHE_TTL_MS;
+}
 
 export function clearVersionCache(command?: string): void {
   if (command === undefined) versionCache.clear();
@@ -218,6 +231,7 @@ export function probeVersion(command: string): Promise<{ ok: boolean; version?: 
   const now = Date.now();
   const cached = versionCache.get(command);
   if (cached && cached.expiresAt > now) return cached.value;
+  const timeoutMs = providerVersionProbeTimeoutMs();
   const value = new Promise<{ ok: boolean; version?: string; detail?: string }>((resolve) => {
     let settled = false;
     let stdout = '';
@@ -243,8 +257,8 @@ export function probeVersion(command: string): Promise<{ ok: boolean; version?: 
         command,
         args: ['--version'],
         cwd: process.cwd(),
-        timeoutMs: 5000,
-        onTimeout: () => finish({ ok: false, detail: 'version probe timed out after 5s' }),
+        timeoutMs,
+        onTimeout: () => finish({ ok: false, detail: `Version check timed out after ${String(timeoutMs / 1000)}s. The CLI may be starting slowly; retry detection.` }),
       });
     } catch (error) {
       finish({ ok: false, detail: humanizeError(error) });
@@ -260,7 +274,13 @@ export function probeVersion(command: string): Promise<{ ok: boolean; version?: 
       else finish({ ok: false, detail: output || `exit ${String(code)}` });
     });
   });
-  versionCache.set(command, { expiresAt: now + VERSION_CACHE_TTL_MS, value });
+  // Keep an in-flight probe shared, then choose the cache lifetime from its
+  // outcome. clearVersionCache() remains authoritative while it is running.
+  versionCache.set(command, { expiresAt: Number.POSITIVE_INFINITY, value });
+  void value.then((result) => {
+    const cachedValue = versionCache.get(command);
+    if (cachedValue?.value === value) cachedValue.expiresAt = Date.now() + providerVersionCacheTtlMs(result.ok);
+  });
   return value;
 }
 

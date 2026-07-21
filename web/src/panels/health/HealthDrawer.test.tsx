@@ -36,7 +36,7 @@ const run: RunSnapshot = {
 };
 
 const apiMocks = {
-  health: vi.fn(), getProviders: vi.fn(), getServerLog: vi.fn(), getDebugBundle: vi.fn(), installProvider: vi.fn(),
+  health: vi.fn(), getProviders: vi.fn(), refreshProviders: vi.fn(), getServerLog: vi.fn(), getDebugBundle: vi.fn(), installProvider: vi.fn(),
 };
 const api = apiMocks as unknown as ApiClient;
 const mounted: Array<{ container: HTMLDivElement; root: Root }> = [];
@@ -55,6 +55,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   apiMocks.health.mockResolvedValue({ ok: true, version: '0.1.9' });
   apiMocks.getProviders.mockResolvedValue(providers);
+  apiMocks.refreshProviders.mockResolvedValue(providers);
   apiMocks.getServerLog.mockResolvedValue('{"cat":"probe","detail":"[REDACTED_ENV]"}\n');
   apiMocks.getDebugBundle.mockResolvedValue(new Blob(['zip']));
   matStore.setState({
@@ -159,5 +160,20 @@ describe('HealthDrawer', () => {
     await waitFor(() => expect(screen.getByText('Provider check could not refresh')).toBeTruthy());
     expect(screen.getByText('codex: latest CLI check detected it')).toBeTruthy();
     expect(screen.getByText('Provider probe unavailable')).toBeTruthy();
+  });
+
+  it('offers an explicit cache-bypassing provider recheck', async () => {
+    const refreshed = providers.map((provider) => provider.id === 'codex' ? { ...provider, version: 'codex 2.0' } : provider);
+    apiMocks.refreshProviders.mockResolvedValueOnce(refreshed);
+    render(<HealthDrawer open onClose={() => undefined} api={api} />);
+    await waitFor(() => expect(screen.getByText('Local server reachable')).toBeTruthy());
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Recheck providers' }));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(apiMocks.refreshProviders).toHaveBeenCalledOnce());
+    expect(matStore.getState().providers.find((provider) => provider.id === 'codex')?.version).toBe('codex 2.0');
   });
 });

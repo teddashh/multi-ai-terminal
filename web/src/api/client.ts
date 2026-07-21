@@ -14,6 +14,7 @@ export class ApiClient {
   get token(): string | undefined { return typeof this.#token === 'function' ? this.#token() : this.#token; }
   health(): Promise<{ ok: boolean; version: string }> { return this.request('/api/health'); }
   getProviders(): Promise<ProviderInfo[]> { return this.request('/api/providers'); }
+  refreshProviders(): Promise<ProviderInfo[]> { return this.request('/api/providers/refresh', { method: 'POST' }); }
   installProvider(id: string): Promise<ProviderInstallResponse> { return this.request(`/api/providers/${encodeURIComponent(id)}/install`, { method: 'POST' }); }
   getWorkspaces(): Promise<Workspace[]> { return this.request('/api/workspaces'); }
   getWorkspace(id: string): Promise<Workspace> { return this.request(`/api/workspaces/${encodeURIComponent(id)}`); }

@@ -8,12 +8,13 @@ Successor to [multi-ai-chat-desktop](https://github.com/teddashh/multi-ai-chat-d
 
 ## How it works
 
-- **Projects + Launchpad** — each workspace points at a directory (git-aware). The rail switches between project selection and a launch composer without losing drafts; common mode/readiness/task settings stay visible while advanced stage editing lives under **Customize**.
+- **Projects + Launchpad** — each workspace points at a directory (git-aware). The icon-and-text rail switches between project selection and a launch composer without losing drafts; common mode/readiness/task settings stay visible while advanced stage editing lives under **Customize**.
 - **Workflows** — ordered stages; each stage holds agent slots (drag from the advanced palette; multiple same-provider instances allowed, Σ ≤ 12 per stage). Per-slot: model, reasoning effort, permission tier, prompt template, count.
 - **Orchestrator** — a real CLI agent (any provider) that receives a digest of each gated stage's candidates and answers with a strict-JSON gate decision: advance / retry (with per-node targeting + prompt addendum) / abort. Deterministic budget caps; parse failures degrade to safe advance.
 - **Stage isolation** — optional git-worktree isolation per node; each attempt's work is captured as a binary patch you can inspect and apply from the UI.
 - **Run Workspace** — a Narrative-first **Conversation** makes every node's answer, decision, verification, and failure easy to scan. **Timeline** preserves the virtualized raw categories, node/role/search filters, and full replay from the durable event log.
-- **Health & diagnostics** — read-only server, provider, workspace, run, verification, and evidence-continuity findings with safe Setup, inspect, redacted-log, and debug-bundle actions. CLI detection is never presented as proof of sign-in.
+- **Health & diagnostics** — server, provider, workspace, run, verification, and evidence-continuity findings with safe Setup, provider recheck, inspect, redacted-log, and debug-bundle actions. CLI detection is never presented as proof of sign-in.
+- **Language + themes** — follows the system language or switches between English and Traditional Chinese, with persistent Midnight, Daylight, and violet/gold/teal Aurora themes.
 
 ## Verification (evidence plane)
 
@@ -42,6 +43,8 @@ npm start                      # serves web UI + API on http://127.0.0.1:7788
 
 Open the UI, choose **Projects** to add a workspace (absolute path), return to **Launch**, pick a builtin workflow (Planning / Build / Review / Pipeline), write the task, and Start. Use **Customize** only when you need to change stages or agent bindings.
 
+Use **Language · Theme** in the top bar to override the system language or choose one of the three themes. Both choices persist across restarts.
+
 Dev mode: `npm run dev` (vite + API with hot reload). Tests: `npm test`. Typecheck: `npm run typecheck`. Version contract: `npm run verify:version`. Built-server evidence suite: `npm run evidence` after `npm run build`.
 
 ## Desktop app
@@ -60,6 +63,8 @@ When adding a workspace, desktop builds provide a native **Browse…** folder pi
 ## Provider setup
 
 Unavailable providers expose **Setup** in the agent palette. An install starts only after an explicit click and uses a fixed server-side recipe: npm global installs for Claude Code, Codex, and Grok; `winget` for Antigravity on Windows; and a displayed, copyable manual command for Antigravity elsewhere. No CLI is bundled or downloaded implicitly. Provider licenses remain independent, the upstream package manager supplies current releases, and each CLI may still require its own sign-in.
+
+Setup shows elapsed install time, automatically reruns discovery when the installer finishes, and keeps the completion/restart guidance visible. **Retry detection** clears MAT's local PATH/version caches without reinstalling anything. Windows version probes allow cold CLI shims 15 seconds to start; transient failures are cached for only two seconds, while successful versions remain cached for ten minutes.
 
 MAT augments child-process `PATH` with existing well-known CLI locations: `%LOCALAPPDATA%\Antigravity` and `%APPDATA%\npm` on Windows, or `~/.local/bin`, `/usr/local/bin`, and `/opt/homebrew/bin` elsewhere. This lets the desktop server discover common user-level installs without inheriting environment-variable values into diagnostics.
 

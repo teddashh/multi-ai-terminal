@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { apiClient } from '../api/client.js';
 import { ReconnectingWsClient } from '../api/ws.js';
 import { HealthDrawer, healthIssueCount } from '../panels/health/index.js';
+import { InterfacePreferences, useUiPreferences } from '../i18n/UiPreferences.js';
 import { AppShell } from './AppShell.js';
 import { ACTIVE_RUN_STATUSES, matStore, useMatStore } from './store.js';
 
 export function App() {
+  const { t } = useUiPreferences();
   const [bootError, setBootError] = useState<string>();
   const [pendingAbortRunId, setPendingAbortRunId] = useState<string>();
   const [healthOpen, setHealthOpen] = useState(false);
@@ -85,7 +87,7 @@ export function App() {
     setPendingAbortRunId(runId); setBootError(undefined);
     try { matStore.getState().upsertRun(await apiClient.abortRun(runId)); }
     catch (error) {
-      if (matStore.getState().activeRunId === runId) setBootError(error instanceof Error ? error.message : 'Could not abort the run.');
+      if (matStore.getState().activeRunId === runId) setBootError(error instanceof Error ? error.message : t('app.abortFailed'));
     } finally { setPendingAbortRunId((current) => current === runId ? undefined : current); }
   };
 
@@ -96,15 +98,16 @@ export function App() {
     ...(viewedIntegrity ? { evidenceIntegrity: viewedIntegrity } : {}),
   });
 
-  return <main className="flex h-screen min-w-[922px] flex-col overflow-hidden bg-zinc-950 text-ink">
-    <header className="flex min-w-0 items-center gap-3 border-b border-border bg-zinc-950 px-4 py-2">
+  return <main className="flex h-screen min-w-[954px] flex-col overflow-hidden bg-canvas text-ink">
+    <header className="flex min-w-0 items-center gap-3 border-b border-border bg-canvas px-4 py-2">
       <h1 className="shrink-0 text-sm font-semibold tracking-wide">Multi-AI Terminal</h1>
-      <span className="truncate text-xs text-muted">{selectedWorkspace?.name ?? 'No workspace selected'}</span>
+      <span className="truncate text-xs text-muted">{selectedWorkspace?.name ?? t('app.noWorkspace')}</span>
       <div className="ml-auto flex shrink-0 items-center gap-2">
-        <span className={`flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] ${wsConnection === 'open' ? 'border-emerald-900 text-emerald-300' : wsConnection === 'connecting' ? 'border-amber-900 text-amber-300' : 'border-zinc-800 text-muted'}`}><span className={`h-1.5 w-1.5 rounded-full ${wsConnection === 'open' ? 'bg-emerald-400' : wsConnection === 'connecting' ? 'animate-pulse bg-amber-400' : 'bg-zinc-600'}`} />{wsConnection === 'open' ? 'Connected' : wsConnection === 'connecting' ? 'Connecting' : 'Offline'}</span>
+        <span className={`flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] ${wsConnection === 'open' ? 'border-emerald-900 text-emerald-300' : wsConnection === 'connecting' ? 'border-amber-900 text-amber-300' : 'border-border text-muted'}`}><span className={`h-1.5 w-1.5 rounded-full ${wsConnection === 'open' ? 'bg-emerald-400' : wsConnection === 'connecting' ? 'animate-pulse bg-amber-400' : 'bg-muted'}`} />{wsConnection === 'open' ? t('app.connected') : wsConnection === 'connecting' ? t('app.connecting') : t('app.offline')}</span>
         {activeRun && <span className={`rounded-full border px-2 py-1 text-[11px] ${ACTIVE_RUN_STATUSES.has(activeRun.status) ? 'border-sky-800 bg-sky-950/40 text-sky-300' : 'border-border text-muted'}`}><span className={ACTIVE_RUN_STATUSES.has(activeRun.status) ? 'mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-sky-400' : ''} />{activeRun.status}</span>}
-        {activeRun && ACTIVE_RUN_STATUSES.has(activeRun.status) && <button type="button" disabled={pendingAbortRunId === activeRun.runId} onClick={() => void abort()} className="rounded border border-red-900 px-2 py-1 text-xs text-red-300 hover:bg-red-950 disabled:opacity-50">{pendingAbortRunId === activeRun.runId ? 'Aborting…' : 'Abort'}</button>}
-        <button type="button" aria-label="Health" onClick={() => setHealthOpen(true)} className={`flex items-center gap-1.5 rounded border px-2 py-1 text-xs ${healthIssues > 0 ? 'border-amber-800 bg-amber-950/20 text-amber-200' : 'border-border text-muted hover:text-ink'}`}>Health{healthIssues > 0 && <span title={`${healthIssues} health issues`} className="grid min-w-4 place-items-center rounded-full bg-amber-700/70 px-1 text-[9px] text-white">{healthIssues}</span>}</button>
+        {activeRun && ACTIVE_RUN_STATUSES.has(activeRun.status) && <button type="button" disabled={pendingAbortRunId === activeRun.runId} onClick={() => void abort()} className="rounded border border-red-900 px-2 py-1 text-xs text-red-300 hover:bg-red-950 disabled:opacity-50">{pendingAbortRunId === activeRun.runId ? t('app.aborting') : t('app.abort')}</button>}
+        <InterfacePreferences />
+        <button type="button" aria-label={t('app.health')} onClick={() => setHealthOpen(true)} className={`flex items-center gap-1.5 rounded border px-2 py-1 text-xs ${healthIssues > 0 ? 'border-amber-800 bg-amber-950/20 text-amber-200' : 'border-border text-muted hover:text-ink'}`}>{t('app.health')}{healthIssues > 0 && <span title={t('app.healthIssues', { count: healthIssues })} className="grid min-w-4 place-items-center rounded-full bg-amber-700/70 px-1 text-[9px] text-white">{healthIssues}</span>}</button>
       </div>
     </header>
     {bootError && <div role="alert" className="fixed left-1/2 top-12 z-50 -translate-x-1/2 rounded border border-red-900 bg-red-950 px-3 py-2 text-xs text-red-200">{bootError}</div>}

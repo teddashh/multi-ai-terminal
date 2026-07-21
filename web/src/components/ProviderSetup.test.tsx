@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import type { ProviderInfo } from '@mat/shared';
-import { fireEvent, screen, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { act, useState, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,7 +12,7 @@ import { SideDrawer } from './SideDrawer.js';
 
 vi.mock('zustand', () => ({ useStore: (store: { getState(): unknown }, selector: (state: never) => unknown) => selector(store.getState() as never) }));
 
-const apiMocks = { installProvider: vi.fn(), getProviders: vi.fn() };
+const apiMocks = { installProvider: vi.fn(), getProviders: vi.fn(), refreshProviders: vi.fn() };
 const api = apiMocks as unknown as ApiClient;
 const mounted: Array<{ container: HTMLDivElement; root: Root }> = [];
 
@@ -32,6 +32,7 @@ const unavailable: ProviderInfo = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  apiMocks.refreshProviders.mockResolvedValue([unavailable]);
   matStore.setState({ providers: [unavailable] });
 });
 
@@ -110,5 +111,57 @@ describe('ProviderSetupButton', () => {
     act(() => fireEvent.click(screen.getByRole('button', { name: 'Setup grok' })));
     expect(within(screen.getByRole('dialog', { name: 'Setup grok' })).getByRole('button', { name: 'Copy grok sign-in command' }).textContent).toBe('Copy');
     expect(apiMocks.installProvider).not.toHaveBeenCalled();
+  });
+
+  it('bypasses cached detection and reports recovery without requiring a restart', async () => {
+    const detected = { ...unavailable, ok: true, version: 'grok 1.0.0', detail: undefined };
+    apiMocks.refreshProviders.mockResolvedValueOnce([detected]);
+    render(<ProviderSetupButton provider={unavailable} api={api} />);
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Setup grok' })));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Recheck grok detection' }));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByText(/was detected and is ready/)).toBeTruthy());
+    expect(apiMocks.refreshProviders).toHaveBeenCalledOnce();
+    expect(matStore.getState().providers[0]?.ok).toBe(true);
+  });
+
+  it('keeps a clear completion message visible after an automatic post-install recheck', async () => {
+    const detected = { ...unavailable, ok: true, version: 'grok 1.0.0', detail: undefined };
+    apiMocks.installProvider.mockResolvedValueOnce({ ok: true, exitCode: 0, provider: detected });
+    apiMocks.refreshProviders.mockResolvedValueOnce([detected]);
+    render(<ProviderSetupButton provider={unavailable} api={api} />);
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Setup grok' })));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Install grok' }));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByText(/installed and detected/)).toBeTruthy());
+    expect(screen.getByText(/no restart needed/)).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Setup grok' })).toBeTruthy();
+    expect(apiMocks.installProvider).toHaveBeenCalledWith('grok');
+    expect(apiMocks.refreshProviders).toHaveBeenCalledOnce();
+  });
+
+  it('preserves a successful server-side install result when the extra UI refresh fails', async () => {
+    const detected = { ...unavailable, ok: true, version: 'grok 1.0.0', detail: undefined };
+    apiMocks.installProvider.mockResolvedValueOnce({ ok: true, exitCode: 0, provider: detected });
+    apiMocks.refreshProviders.mockRejectedValueOnce(new Error('refresh disconnected'));
+    render(<ProviderSetupButton provider={unavailable} api={api} />);
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Setup grok' })));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Install grok' }));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByText(/installed and detected/)).toBeTruthy());
+    expect(screen.queryByText('refresh disconnected')).toBeNull();
+    expect(matStore.getState().providers[0]?.ok).toBe(true);
   });
 });

@@ -11,7 +11,7 @@ import { WorkflowPanel } from './WorkflowPanel.js';
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const apiMocks = vi.hoisted(() => ({
-  createRun: vi.fn(), duplicateWorkflow: vi.fn(), updateWorkflow: vi.fn(), installProvider: vi.fn(), getProviders: vi.fn(),
+  createRun: vi.fn(), duplicateWorkflow: vi.fn(), updateWorkflow: vi.fn(), installProvider: vi.fn(), getProviders: vi.fn(), refreshProviders: vi.fn(),
 }));
 
 vi.mock('../../api/client.js', () => ({ apiClient: apiMocks }));
@@ -167,7 +167,7 @@ describe('WorkflowPanel', () => {
   it('installs an unavailable provider and refreshes provider state', async () => {
     const refreshed = providers.map((provider) => provider.id === 'grok' ? { ...provider, ok: true, version: 'grok 1.0.0' } : provider);
     apiMocks.installProvider.mockResolvedValueOnce({ ok: true, exitCode: 0, logTail: '', provider: refreshed[1] });
-    apiMocks.getProviders.mockResolvedValueOnce(refreshed);
+    apiMocks.refreshProviders.mockResolvedValueOnce(refreshed);
     renderPanel(<WorkflowPanel />);
     const drawer = await openCustomize();
     const grok = within(drawer).getByRole('button', { name: /grok provider unavailable/ });
@@ -175,7 +175,7 @@ describe('WorkflowPanel', () => {
     act(() => fireEvent.click(within(paletteItem).getByRole('button', { name: 'Setup grok' })));
     await act(async () => { fireEvent.click(within(within(drawer).getByRole('dialog', { name: 'Setup grok' })).getByRole('button', { name: 'Install grok' })); });
     expect(apiMocks.installProvider).toHaveBeenCalledWith('grok');
-    expect(apiMocks.getProviders).toHaveBeenCalledOnce();
+    expect(apiMocks.refreshProviders).toHaveBeenCalledOnce();
     expect(matStore.getState().providers.find((provider) => provider.id === 'grok')?.ok).toBe(true);
   });
 

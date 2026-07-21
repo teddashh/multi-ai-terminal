@@ -27,7 +27,7 @@ import * as runManager from '../engine/runManager.js';
 import { buildDebugBundle, readTail } from '../engine/debugBundle.js';
 import { buildRunReport } from '../engine/report.js';
 import { redactEnvironmentValues } from '../redact.js';
-import { providerInstallPlan, type ProviderInstallPlan } from '../providers/install.js';
+import { providerInstallPlan, providerInstallTimeoutMs, type ProviderInstallPlan } from '../providers/install.js';
 import { clearAugmentedPathCache, spawnManaged, type ManagedProcess } from '../spawn.js';
 import { readEventsAfter } from '../store/eventLog.js';
 import {
@@ -127,6 +127,11 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
 
   app.get('/api/health', wrap(async () => ({ ok: true, version: VERSION })));
   app.get('/api/providers', wrap(async () => dependencies.providers()));
+  app.post('/api/providers/refresh', wrap(async () => {
+    dependencies.providerInstall.clearPathCache();
+    dependencies.providerInstall.clearVersionCache();
+    return dependencies.providers();
+  }));
   app.post('/api/providers/:id/install', wrap(async (request, reply) => {
     const id = parseId(request);
     const providers = await dependencies.providers();
@@ -149,7 +154,7 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
       let managed: ManagedProcess | undefined;
       try {
         managed = dependencies.providerInstall.spawn({
-          command: plan.recipe.command, args: plan.recipe.args, cwd: process.cwd(), timeoutMs: 300_000, shell: false,
+          command: plan.recipe.command, args: plan.recipe.args, cwd: process.cwd(), timeoutMs: providerInstallTimeoutMs(current.id), shell: false,
         });
       } catch (error) {
         appendOutput(error instanceof Error ? error.message : String(error));

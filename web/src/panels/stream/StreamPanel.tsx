@@ -5,12 +5,15 @@ import { apiClient } from '../../api/client.js';
 import { ACTIVE_RUN_STATUSES, matStore, useMatStore } from '../../app/store.js';
 import { EventRow } from '../../components/EventRow.js';
 import { displayNodeLabel } from '../../components/nodeLabel.js';
+import { useUiPreferences } from '../../i18n/UiPreferences.js';
 import { filterStreamEvents, groupToolEvents, reduceFollowState, type FeedItem } from './streamLogic.js';
 
-const ROLE_LABELS: Record<EventRole, string> = { user: 'your', agent: 'agent', tool: 'tool', thinking: 'thinking', system: 'status', decision: 'decision' };
+const ROLE_LABEL_KEYS: Record<EventRole, 'stream.role.user' | 'stream.role.agent' | 'stream.role.tool' | 'stream.role.thinking' | 'stream.role.system' | 'stream.role.decision'> = {
+  user: 'stream.role.user', agent: 'stream.role.agent', tool: 'stream.role.tool', thinking: 'stream.role.thinking', system: 'stream.role.system', decision: 'stream.role.decision',
+};
 const ROLE_STYLE: Record<EventRole, string> = {
-  user: 'border-sky-700 text-sky-200', agent: 'border-zinc-600 text-zinc-200', tool: 'border-amber-700 text-amber-200',
-  thinking: 'border-violet-700 text-violet-200', system: 'border-zinc-700 text-zinc-400', decision: 'border-emerald-700 text-emerald-200',
+  user: 'border-sky-700 text-sky-200', agent: 'border-border text-ink', tool: 'border-amber-700 text-amber-200',
+  thinking: 'border-accentBorder text-accentForeground', system: 'border-border text-muted', decision: 'border-emerald-700 text-emerald-200',
 };
 
 // Referentially stable fallback — a fresh `[]` per selector call re-renders forever (React #185).
@@ -26,6 +29,7 @@ export interface StreamPanelProps {
 }
 
 export function StreamPanel({ embedded = false, hydrating = false, visible = true }: StreamPanelProps = {}) {
+  const { locale, t } = useUiPreferences();
   const activeRunId = useMatStore((state) => state.activeRunId);
   const viewedRunId = useMatStore((state) => state.viewedRunId);
   const selectedWorkspaceId = useMatStore((state) => state.selectedWorkspaceId);
@@ -264,37 +268,37 @@ export function StreamPanel({ embedded = false, hydrating = false, visible = tru
     setNodeFilter(selected.includes(nodeRunId) ? selected.filter((id) => id !== nodeRunId) : [...selected, nodeRunId]);
   };
 
-  return <section className="flex h-full min-h-0 flex-col" aria-label="Stream panel">
+  return <section className="flex h-full min-h-0 flex-col" aria-label={t('stream.panel')}>
     <header className="shrink-0 border-b border-border bg-panel p-3">
       <div className="mb-2 flex items-center gap-2">
-        <h2 className="mr-auto text-xs font-semibold uppercase tracking-wider text-muted">Event Stream · {filteredEvents.length}</h2>
+        <h2 className="mr-auto text-xs font-semibold uppercase tracking-wider text-muted">{t('stream.title', { count: filteredEvents.length })}</h2>
         {!embedded && <>
-          <label className="sr-only" htmlFor="stream-run-selector">Select run</label>
-          <select id="stream-run-selector" value={effectiveRunId ?? ''} onChange={(event) => { if (event.target.value) void selectRun(event.target.value); }} className="max-w-48 rounded border border-border bg-zinc-950 px-2 py-1 text-xs text-ink">
-            {!effectiveRunId && <option value="">No runs</option>}
-            {availableRuns.map((run) => <option key={run.runId} value={run.runId}>{ACTIVE_RUN_STATUSES.has(run.status) ? 'Live · ' : ''}{run.workflow.name} · {run.status} · {formatRunDate(run.createdAt)}</option>)}
+          <label className="sr-only" htmlFor="stream-run-selector">{t('stream.selectRun')}</label>
+          <select id="stream-run-selector" value={effectiveRunId ?? ''} onChange={(event) => { if (event.target.value) void selectRun(event.target.value); }} className="max-w-48 rounded border border-border bg-canvas px-2 py-1 text-xs text-ink">
+            {!effectiveRunId && <option value="">{t('stream.noRuns')}</option>}
+            {availableRuns.map((run) => <option key={run.runId} value={run.runId}>{ACTIVE_RUN_STATUSES.has(run.status) ? `${t('stream.live')} · ` : ''}{run.workflow.name} · {run.status} · {formatRunDate(run.createdAt, locale)}</option>)}
           </select>
-          {historyHasMore && <button type="button" disabled={historyLoading} onClick={() => void loadMoreHistory()} className="rounded border border-border px-2 py-1 text-[10px] text-muted disabled:opacity-50">{historyLoading ? 'Loading…' : 'More runs'}</button>}
+          {historyHasMore && <button type="button" disabled={historyLoading} onClick={() => void loadMoreHistory()} className="rounded border border-border px-2 py-1 text-[10px] text-muted disabled:opacity-50">{historyLoading ? t('stream.loading') : t('stream.moreRuns')}</button>}
         </>}
       </div>
-      {selectedRun && <div className="mb-2 flex gap-1 overflow-x-auto pb-1" aria-label="Node filters">
-        <button type="button" aria-pressed={filters.nodeRunIds.length === 0} onClick={() => setNodeFilter([])} className={`shrink-0 rounded-full border px-2 py-1 text-[10px] ${filters.nodeRunIds.length === 0 ? 'border-sky-600 text-sky-200' : 'border-border text-muted'}`}>All nodes</button>
+      {selectedRun && <div className="mb-2 flex gap-1 overflow-x-auto pb-1" aria-label={t('stream.nodeFilters')}>
+        <button type="button" aria-pressed={filters.nodeRunIds.length === 0} onClick={() => setNodeFilter([])} className={`shrink-0 rounded-full border px-2 py-1 text-[10px] ${filters.nodeRunIds.length === 0 ? 'border-sky-600 text-sky-200' : 'border-border text-muted'}`}>{t('stream.allNodes')}</button>
         {selectedRun.nodes.map((node) => <button type="button" key={node.nodeRunId} aria-pressed={filters.nodeRunIds.includes(node.nodeRunId)} onClick={() => toggleNode(node.nodeRunId)} className={`max-w-32 shrink-0 truncate rounded-full border px-2 py-1 text-[10px] ${filters.nodeRunIds.includes(node.nodeRunId) ? 'border-sky-600 bg-sky-950/30 text-sky-200' : 'border-border text-muted'}`}>{displayNodeLabel(node, selectedRun.nodes)}</button>)}
       </div>}
       <div className="flex flex-wrap items-center gap-1.5">
-        {(Object.keys(ROLE_LABELS) as EventRole[]).map((role) => <button type="button" key={role} aria-pressed={filters.roles.includes(role)} onClick={() => toggleRole(role)} className={`rounded border px-2 py-1 text-[10px] ${filters.roles.includes(role) ? ROLE_STYLE[role] : 'border-border text-zinc-600'}`}>{ROLE_LABELS[role]}</button>)}
-        <label className="ml-auto min-w-28 flex-1 sm:max-w-52"><span className="sr-only">Search events</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search events" className="w-full rounded border border-border bg-zinc-950 px-2 py-1 text-xs text-ink outline-none focus:border-violet-500" /></label>
+        {(Object.keys(ROLE_LABEL_KEYS) as EventRole[]).map((role) => <button type="button" key={role} aria-pressed={filters.roles.includes(role)} onClick={() => toggleRole(role)} className={`rounded border px-2 py-1 text-[10px] ${filters.roles.includes(role) ? ROLE_STYLE[role] : 'border-border text-muted/60'}`}>{t(ROLE_LABEL_KEYS[role])}</button>)}
+        <label className="ml-auto min-w-28 flex-1 sm:max-w-52"><span className="sr-only">{t('stream.search')}</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('stream.search')} className="w-full rounded border border-border bg-canvas px-2 py-1 text-xs text-ink outline-none focus:border-accent" /></label>
       </div>
-      {focusedNodeRunId && <div className="mt-2 flex items-center gap-2 rounded bg-sky-950/30 px-2 py-1 text-[11px] text-sky-200"><span className="truncate">Focused: {focusedNodeLabel(selectedRun, focusedNodeRunId)}</span><button type="button" onClick={() => focusNode(undefined)} className="ml-auto rounded px-1.5 py-0.5 hover:bg-sky-900">Clear</button></div>}
-      {hydrating && <p role="status" className="mt-2 text-xs text-sky-300">Loading complete replay evidence…</p>}
-      {evidenceGaps.length > 0 && <div role="alert" className="mt-2 rounded border border-red-900 bg-red-950/30 px-2 py-1.5 text-xs text-red-200">Evidence gap{evidenceGaps.length === 1 ? '' : 's'}: {evidenceGaps.slice(0, 3).map((gap) => `#${gap.fromSeq}–${gap.toSeq}`).join(', ')}{evidenceGaps.length > 3 ? ` +${evidenceGaps.length - 3} more` : ''}</div>}
+      {focusedNodeRunId && <div className="mt-2 flex items-center gap-2 rounded bg-sky-950/30 px-2 py-1 text-[11px] text-sky-200"><span className="truncate">{t('stream.focused', { node: focusedNodeLabel(selectedRun, focusedNodeRunId) })}</span><button type="button" onClick={() => focusNode(undefined)} className="ml-auto rounded px-1.5 py-0.5 hover:bg-sky-900">{t('stream.clear')}</button></div>}
+      {hydrating && <p role="status" className="mt-2 text-xs text-sky-300">{t('stream.loadingEvidence')}</p>}
+      {evidenceGaps.length > 0 && <div role="alert" className="mt-2 rounded border border-red-900 bg-red-950/30 px-2 py-1.5 text-xs text-red-200">{t('stream.evidenceGap', { unit: t(evidenceGaps.length === 1 ? 'stream.gap' : 'stream.gaps'), ranges: evidenceGaps.slice(0, 3).map((gap) => `#${gap.fromSeq}–${gap.toSeq}`).join(', '), more: evidenceGaps.length > 3 ? t('stream.moreGap', { count: evidenceGaps.length - 3 }) : '' })}</div>}
       {error && <p role="alert" className="mt-2 text-xs text-red-300">{error}</p>}
     </header>
-    {!effectiveRunId ? <div className="p-4 text-xs text-muted">No run yet. Use the run box to start a workflow.</div>
-      : (replayLoading || hydrating) && events.length === 0 ? <div className="animate-pulse p-4 text-xs text-muted">Loading replay…</div>
-      : events.length === 0 ? <div className="flex items-center gap-2 p-4 text-xs text-muted"><span className="h-2 w-2 animate-pulse rounded-full bg-sky-400" />Waiting for events…</div>
+    {!effectiveRunId ? <div className="p-4 text-xs text-muted">{t('stream.noRun')}</div>
+      : (replayLoading || hydrating) && events.length === 0 ? <div className="animate-pulse p-4 text-xs text-muted">{t('stream.loadingReplay')}</div>
+      : events.length === 0 ? <div className="flex items-center gap-2 p-4 text-xs text-muted"><span className="h-2 w-2 animate-pulse rounded-full bg-sky-400" />{t('stream.waiting')}</div>
       : <div ref={scrollRef} onScroll={onScroll} onWheel={markUserScrollIntent} onPointerDown={markUserScrollIntent} className="relative min-h-0 flex-1 overflow-auto overscroll-contain" data-testid="stream-scroll-region">
-        {(events[0]?.seq ?? 1) > 1 && <div role="status" className="border-b border-amber-900/60 bg-amber-950/30 px-4 py-2 text-xs text-amber-200">Older events trimmed from memory — showing from seq {events[0]!.seq}</div>}
+        {(events[0]?.seq ?? 1) > 1 && <div role="status" className="border-b border-amber-900/60 bg-amber-950/30 px-4 py-2 text-xs text-amber-200">{t('stream.trimmed', { seq: events[0]!.seq })}</div>}
         <div className="relative w-full" style={{ height: totalSize }}>
           {virtualizer.getVirtualItems().map((virtualItem) => {
             const item = items[virtualItem.index];
@@ -302,8 +306,8 @@ export function StreamPanel({ embedded = false, hydrating = false, visible = tru
             return <div key={item.key} ref={virtualizer.measureElement} data-index={virtualItem.index} className="absolute left-0 top-0 w-full" style={{ transform: `translateY(${virtualItem.start}px)` }}><FeedItemRow item={item} /></div>;
           })}
         </div>
-        {items.length === 0 && <p className="absolute inset-x-0 top-0 p-4 text-xs text-muted">No events match these filters.</p>}
-        {followableRun && !filters.follow && <button type="button" onClick={jumpToLive} className="sticky bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-sky-600 bg-sky-950 px-3 py-1.5 text-xs text-sky-100 shadow-xl">Jump to live</button>}
+        {items.length === 0 && <p className="absolute inset-x-0 top-0 p-4 text-xs text-muted">{t('stream.noMatch')}</p>}
+        {followableRun && !filters.follow && <button type="button" onClick={jumpToLive} className="sticky bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-sky-600 bg-sky-950 px-3 py-1.5 text-xs text-sky-100 shadow-xl">{t('stream.jumpLive')}</button>}
       </div>}
   </section>;
 }
@@ -368,8 +372,8 @@ function focusedNodeLabel(run: RunSnapshot | undefined, nodeRunId: string): stri
   return node && run ? displayNodeLabel(node, run.nodes) : nodeRunId;
 }
 
-function formatRunDate(timestamp: number): string {
-  return new Date(timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+function formatRunDate(timestamp: number, locale?: string): string {
+  return new Date(timestamp).toLocaleDateString(locale, { month: 'short', day: 'numeric' });
 }
 
 function errorMessage(error: unknown): string {

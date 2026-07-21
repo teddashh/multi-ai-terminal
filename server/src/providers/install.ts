@@ -18,3 +18,9 @@ export function providerInstallPlan(providerId: ProviderId, platform: NodeJS.Pla
   }
   return {};
 }
+
+export function providerInstallTimeoutMs(providerId: ProviderId): number {
+  // winget may spend several minutes acquiring and verifying Antigravity on a
+  // first install. The npm recipes normally complete within the original cap.
+  return providerId === 'agy' ? 10 * 60 * 1000 : 5 * 60 * 1000;
+}
