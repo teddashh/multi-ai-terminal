@@ -60,6 +60,20 @@ The desktop shell runs the exact same bundled server on an ephemeral `127.0.0.1`
 
 When adding a workspace, desktop builds provide a native **Browse…** folder picker. Pure-browser use keeps the manual absolute-path field and does not load the desktop dialog integration.
 
+## Agent-driven launch (agent-ready source release)
+
+This repository can be driven by coding agents such as Claude Code and Codex. [`agent-release.json`](./agent-release.json) is a machine-readable contract (validated against [`agent-release.schema.json`](./agent-release.schema.json)) declaring the entrypoints, permissions, side effects, runtime states, and exit codes of the source-web lane, and matching skills ship in-repo under `.claude/skills/launch-multi-ai-terminal/` and `.agents/skills/launch-multi-ai-terminal/`. The skills are explicit-only: an agent may use them solely when you ask, never implicitly.
+
+```sh
+npm run agent:doctor -- --json           # prerequisites (Node 20+, npm); never installs anything
+npm run agent:launch -- --wait --json    # npm ci if needed, build, start on a free 127.0.0.1 port
+npm run agent:status -- --json           # state + URL; ready only after "[MAT_AGENT] READY url=..."
+npm run agent:stop -- --json             # stops only the identity-verified launcher process tree
+npm run agent:audit -- --json            # declared permissions/side effects vs observed artifacts
+```
+
+The lane is source-web only: no Rust toolchain, no installers, no release-asset downloads. Lifecycle records stay in the gitignored `.agent-runtime/` directory. Lifecycle scripts never read provider credentials, and the skills are forbidden from driving the launched server's provider install, update, or sign-in APIs on your behalf. Do not run this lane while the installed desktop app is open — both use the same data directory (`MAT_DATA_DIR` or `~/.multi-ai-terminal/`), and two servers over one data directory race its stores.
+
 ## Provider setup
 
 Unavailable providers expose **Setup** in the agent palette. An install starts only after an explicit click and uses a fixed server-side recipe: npm global installs for Claude Code, Codex, and Grok; `winget` for Antigravity on Windows; and a displayed, copyable manual command for Antigravity elsewhere. No CLI is bundled or downloaded implicitly. Provider licenses remain independent, the upstream package manager supplies current releases, and each CLI may still require its own sign-in.

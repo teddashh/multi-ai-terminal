@@ -60,6 +60,20 @@ npm start                      # 在 http://127.0.0.1:7788 提供網頁 UI + API
 
 新增工作區時,桌面版提供原生 **Browse…** 資料夾選擇器;純瀏覽器模式仍保留手動輸入絕對路徑,不會載入桌面 dialog integration。
 
+## Agent 驅動啟動(agent-ready 原始碼發行版)
+
+這個 repo 可以由 Claude Code、Codex 等 coding agent 驅動。[`agent-release.json`](./agent-release.json) 是機器可讀的契約(依 [`agent-release.schema.json`](./agent-release.schema.json) 驗證),宣告 source-web 通道的進入點、權限、副作用、runtime 狀態與結束碼;對應的 skill 隨 repo 提供,位於 `.claude/skills/launch-multi-ai-terminal/` 與 `.agents/skills/launch-multi-ai-terminal/`。skill 僅限明確指示:只有你主動要求時 agent 才能使用,永不隱式觸發。
+
+```sh
+npm run agent:doctor -- --json           # 檢查前置需求(Node 20+、npm);永不代為安裝
+npm run agent:launch -- --wait --json    # 需要時 npm ci、建置、在空閒的 127.0.0.1 埠啟動
+npm run agent:status -- --json           # 狀態 + URL;只有出現「[MAT_AGENT] READY url=...」才算就緒
+npm run agent:stop -- --json             # 只停止身分已驗證的 launcher process tree
+npm run agent:audit -- --json            # 宣告的權限/副作用 vs 實際觀察到的產物
+```
+
+此通道僅限 source-web:不用 Rust toolchain、不產生安裝包、不下載 release 資產。生命週期紀錄保存在已被 gitignore 的 `.agent-runtime/`。生命週期腳本永不讀取 provider 憑證;skill 也被禁止代替你操作已啟動 server 的 provider 安裝/更新/登入 API。安裝版桌面 App 開啟時請勿同時執行此通道 — 兩者共用同一資料目錄(`MAT_DATA_DIR` 或 `~/.multi-ai-terminal/`),兩個 server 同時寫入會造成儲存競爭。
+
 ## Provider 設定
 
 無法使用的 provider 會在 agent palette 顯示 **Setup**。安裝只有在使用者明確點擊後才會開始,而且只使用 server 端固定 recipe:Claude Code、Codex、Grok 走 npm global install;Windows 的 Antigravity 走 `winget`;其他平台只顯示可複製、由使用者自行執行的 Antigravity 指令。MAT 不會隱性綁入或下載任何 CLI;各 provider 的授權條款與登入仍由其上游工具管理。

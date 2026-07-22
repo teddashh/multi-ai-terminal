@@ -48,7 +48,8 @@ export function parseArgs(argv: readonly string[], env: NodeJS.ProcessEnv = proc
     else if (flag === '--token' && value) { options.token = value; index += 1; }
     else throw new Error(`Unknown or incomplete argument: ${flag}`);
   }
-  if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65535) throw new Error(`Invalid port: ${options.port}`);
+  // Port 0 asks the OS for an ephemeral port; the bound port is announced on stdout.
+  if (!Number.isInteger(options.port) || options.port < 0 || options.port > 65535) throw new Error(`Invalid port: ${options.port}`);
   if (!options.host.trim()) throw new Error('Invalid host: host cannot be empty');
   return options;
 }
@@ -118,6 +119,18 @@ async function main(): Promise<void> {
   process.once('SIGINT', () => { shutdown().catch((error: unknown) => console.error(`[mat] shutdown failed: ${redactedError(error)}`)); });
   process.once('SIGTERM', () => { shutdown().catch((error: unknown) => console.error(`[mat] shutdown failed: ${redactedError(error)}`)); });
   await app.listen({ port: options.port, host: options.host });
+  console.log(readyLine(options.host, boundPort(app, options.port)));
+}
+
+export function boundPort(app: FastifyInstance, fallback: number): number {
+  const address = app.server.address();
+  return typeof address === 'object' && address !== null ? address.port : fallback;
+}
+
+/** The agent-release contract's readiness marker; it never carries the token. */
+export function readyLine(host: string, port: number): string {
+  const displayHost = host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;
+  return `[MAT_AGENT] READY url=http://${displayHost}:${port}/`;
 }
 
 const entry = process.argv[1] ? resolve(process.argv[1]) : '';

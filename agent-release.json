@@ -1,0 +1,159 @@
+{
+  "$schema": "./agent-release.schema.json",
+  "schemaVersion": 1,
+  "contractVersion": "1.0.0",
+  "kind": "agent-ready-source-release",
+  "product": {
+    "name": "Multi-AI Terminal",
+    "package": "multi-ai-terminal",
+    "repository": "https://github.com/teddashh/multi-ai-terminal",
+    "runtime": "Node.js Fastify server serving the built web UI at a local URL",
+    "distributionLane": "source-web",
+    "platforms": ["windows", "macos", "linux"],
+    "not": ["installer", "release-bundle", "container", "tauri-desktop-window", "remote-gui"]
+  },
+  "trust": {
+    "invocation": "explicit-only",
+    "source": "the checked-out repository and its locked npm dependencies",
+    "warning": "Source launch executes repository code and locked JavaScript dependencies. Review the repository before invoking an Agent Skill. No Rust toolchain is used or required in this lane."
+  },
+  "entrypoints": {
+    "doctor": {
+      "argv": ["node", "scripts/agent/doctor.mjs"],
+      "flags": ["--json"],
+      "sideEffect": "none"
+    },
+    "audit": {
+      "argv": ["node", "scripts/agent/audit.mjs"],
+      "flags": ["--json", "--phase", "--write"],
+      "sideEffect": "writes only an explicitly requested audit file under .agent-runtime"
+    },
+    "launch": {
+      "argv": ["node", "scripts/agent/launch.mjs"],
+      "flags": ["--json", "--dry-run", "--wait", "--timeout-ms", "--port"],
+      "sideEffect": "installs locked project dependencies when absent, builds the shared/server/web workspaces, and starts the MAT server on a loopback port"
+    },
+    "status": {
+      "argv": ["node", "scripts/agent/status.mjs"],
+      "flags": ["--json", "--lines"],
+      "sideEffect": "none"
+    },
+    "stop": {
+      "argv": ["node", "scripts/agent/stop.mjs"],
+      "flags": ["--json", "--clear-invalid-state"],
+      "sideEffect": "stops only the identity-verified repository launcher process tree and removes its same-run state; an explicit recovery flag can remove corrupt state without terminating an unknown process"
+    }
+  },
+  "requirements": {
+    "common": ["Node.js 20+", "npm 10+ (bundled with Node.js)", "a local web browser to open the reported URL"],
+    "windows": ["no additional requirements; this lane never compiles Rust or native code"],
+    "macos": ["no additional requirements; this lane never compiles Rust or native code"],
+    "linux": ["no additional requirements; this lane never compiles Rust or native code"]
+  },
+  "permissions": {
+    "allowedByScripts": [
+      "read repository files",
+      "run prerequisite version checks",
+      "install locked dependencies into this project with npm ci",
+      "use the npm user cache",
+      "build the shared, server, and web workspaces into their dist directories",
+      "start this repository's MAT server on a loopback port and inspect it",
+      "stop only the identity-verified repository launcher process tree"
+    ],
+    "requiresSeparateExplicitApproval": [
+      "install or uninstall host toolchains",
+      "install user-global or system-global packages",
+      "modify PATH or shell profiles",
+      "run winget, brew, apt, rustup, npm --global, sudo, or an elevated installer",
+      "change operating-system security settings"
+    ],
+    "deniedBySkill": [
+      "implicit execution when the repository is opened",
+      "tauri build, installer generation, or any Rust compilation",
+      "release asset download as part of source launch",
+      "provider credential, cookie, storage, or profile access",
+      "driving the launched server's provider install, update, or sign-in APIs on the user's behalf",
+      "unverified process termination",
+      "automatic host rollback or toolchain uninstall",
+      "remote upload of logs or audit records"
+    ]
+  },
+  "sideEffects": {
+    "repositoryLocal": [
+      {
+        "path": "node_modules",
+        "when": "locked project dependencies are absent",
+        "removal": "manual; safe only when no project process is using it",
+        "evidence": ["node_modules/.package-lock.json"]
+      },
+      {
+        "path": "shared/dist",
+        "when": "the shared contracts workspace is built",
+        "removal": "generated; recreated on the next launch",
+        "evidence": ["shared/dist/index.js"]
+      },
+      {
+        "path": "server/dist",
+        "when": "the server workspace is built",
+        "removal": "generated; recreated on the next launch",
+        "evidence": ["server/dist/index.js"]
+      },
+      {
+        "path": "web/dist",
+        "when": "the web workspace is built",
+        "removal": "generated; recreated on the next launch",
+        "evidence": ["web/dist/index.html"]
+      },
+      {
+        "path": ".agent-runtime",
+        "when": "audit, launch, status logging, or receipts are used",
+        "removal": "manual after the repository launcher is stopped",
+        "evidence": [
+          ".agent-runtime/launch.lock",
+          ".agent-runtime/mat-server.json",
+          ".agent-runtime/mat-server.log",
+          ".agent-runtime/last-launch.json",
+          ".agent-runtime/audit-before.json",
+          ".agent-runtime/audit-after.json"
+        ]
+      }
+    ],
+    "userCaches": ["npm may populate its shared content-addressed cache"],
+    "applicationData": [
+      "the running MAT server reads and writes its normal data directory (MAT_DATA_DIR or ~/.multi-ai-terminal) for workspaces, workflows, runs, and evidence",
+      "do not run this lane at the same time as the installed MAT desktop app: two servers over one data directory race its stores"
+    ],
+    "hostConfigurationByScripts": "none; scripts do not install toolchains, modify PATH, elevate privileges, or weaken security settings",
+    "automaticRollback": "none; shared toolchains, caches, and MAT application data must never be removed automatically"
+  },
+  "runtime": {
+    "directory": ".agent-runtime",
+    "stateFile": ".agent-runtime/mat-server.json",
+    "launchLock": ".agent-runtime/launch.lock",
+    "logFile": ".agent-runtime/mat-server.log",
+    "launchReceipt": ".agent-runtime/last-launch.json",
+    "auditBefore": ".agent-runtime/audit-before.json",
+    "auditAfter": ".agent-runtime/audit-after.json",
+    "readyMarker": "[MAT_AGENT] READY",
+    "states": ["not_started", "building", "ready", "failed", "exited", "invalid_state", "foreign_process"]
+  },
+  "exitCodes": {
+    "0": "requested operation succeeded",
+    "1": "prerequisite, runtime, or operational failure",
+    "2": "invalid command usage or contract data",
+    "3": "readiness wait timed out"
+  },
+  "skills": {
+    "version": "1.0.0",
+    "codex": ".agents/skills/launch-multi-ai-terminal/SKILL.md",
+    "codexMetadata": ".agents/skills/launch-multi-ai-terminal/agents/openai.yaml",
+    "claude": ".claude/skills/launch-multi-ai-terminal/SKILL.md",
+    "implicitInvocation": false
+  },
+  "privacy": {
+    "localOnly": true,
+    "logUpload": "never automatic",
+    "auditUpload": "never automatic",
+    "credentials": "never read by Agent lifecycle scripts"
+  }
+}

@@ -9,6 +9,7 @@ coverage/
 .vite/
 *.tsbuildinfo
 .env
+.agent-runtime/
 desktop/resources/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/

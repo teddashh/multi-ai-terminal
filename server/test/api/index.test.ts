@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildServer, parseArgs } from '../../src/index.js';
+import { buildServer, parseArgs, readyLine } from '../../src/index.js';
 import { fakeApiDependencies } from './helpers.js';
 
 const dirs: string[] = [];
@@ -48,6 +48,14 @@ describe('server options and trust boundary', () => {
       MAT_PORT: '9000', MAT_HOST: '127.0.0.1',
     })).toEqual({ port: 7789, host: '0.0.0.0', dataDir: cliDataDir, token: 'cli' });
     expect(() => parseArgs(['--port', '70000'])).toThrow('Invalid port');
+    expect(() => parseArgs(['--port', '-1'])).toThrow('Invalid port');
+    expect(parseArgs(['--port', '0']).port).toBe(0);
+  });
+
+  it('announces readiness with the bound URL and never the token', () => {
+    expect(readyLine('127.0.0.1', 7788)).toBe('[MAT_AGENT] READY url=http://127.0.0.1:7788/');
+    expect(readyLine('0.0.0.0', 43063)).toBe('[MAT_AGENT] READY url=http://127.0.0.1:43063/');
+    expect(readyLine('::', 8080)).toBe('[MAT_AGENT] READY url=http://127.0.0.1:8080/');
   });
 
   it('allows REST without auth when no token is configured', async () => {

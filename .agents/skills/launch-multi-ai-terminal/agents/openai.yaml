@@ -1,0 +1,6 @@
+interface:
+  display_name: "Launch Multi-AI Terminal"
+  short_description: "Audit and run the local MAT web server from source"
+  default_prompt: "Audit the declared effects, check prerequisites, launch this repository's Multi-AI Terminal server, and report the local URL once it is ready."
+policy:
+  allow_implicit_invocation: false

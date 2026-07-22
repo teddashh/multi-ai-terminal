@@ -29,6 +29,9 @@ jobs:
       - run: npm run verify:version
       - run: npm run build
       - run: npm test
+      - run: npm run test:agent
+        env:
+          MAT_AGENT_IT: '1'
       - run: npm run typecheck
       - run: npm run evidence
         if: runner.os == 'Linux'
