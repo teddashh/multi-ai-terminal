@@ -14,6 +14,7 @@ import { configureRunStore, listRuns } from './store/runs.js';
 import { configureWorkflowStore } from './store/workflows.js';
 import { configureWorkspaceStore } from './store/workspaces.js';
 import { redactEnvironmentValues } from './redact.js';
+import { maybeSelfProvision } from './runtime/triggers.js';
 
 export interface ServerOptions { port: number; host: string; dataDir: string | undefined; token: string | undefined }
 
@@ -82,6 +83,7 @@ export async function buildServer(
 
   await registerApiRoutes(app, dependencies.api);
   registerWsHub(app, eventLog, options.token ? { token: options.token } : {});
+  maybeSelfProvision(dataDir);
 
   const here = dirname(fileURLToPath(import.meta.url));
   const webDist = dependencies.webDist ?? resolve(here, '../../web/dist');

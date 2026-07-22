@@ -1,5 +1,7 @@
 import type { AdapterContentEvent } from '@mat/shared';
 import { spawnManaged } from '../spawn.js';
+import { getDataDir } from '../store/dataDir.js';
+import { resolveRuntimeBinary, runtimeBinaryForSpawn } from '../runtime/resolve.js';
 import {
   createLineBuffer,
   parseJsonObject,
@@ -29,8 +31,8 @@ export function buildClaudeArgs(spec: ResolvedNodeSpec): string[] {
 const stringField = (record: Record<string, unknown>, key: string): string | undefined =>
   typeof record[key] === 'string' ? record[key] : undefined;
 
-export function spawnClaude(spec: ResolvedNodeSpec, io: Parameters<Adapter['spawn']>[1]): SpawnedNode {
-  const managed = spawnManaged({ command: 'claude', args: buildClaudeArgs(spec), cwd: spec.cwd, stdin: spec.promptText });
+function spawnClaudeCommand(command: string, spec: ResolvedNodeSpec, io: Parameters<Adapter['spawn']>[1]): SpawnedNode {
+  const managed = spawnManaged({ command, args: buildClaudeArgs(spec), cwd: spec.cwd, stdin: spec.promptText });
   const { child } = managed;
   let sessionRef: string | undefined;
   let usage: NodeOutcome['usage'];
@@ -143,12 +145,16 @@ export function spawnClaude(spec: ResolvedNodeSpec, io: Parameters<Adapter['spaw
   return { pid: child.pid ?? -1, kill: managed.killGroup, completion };
 }
 
+export function spawnClaude(spec: ResolvedNodeSpec, io: Parameters<Adapter['spawn']>[1]): SpawnedNode {
+  return spawnClaudeCommand(spec.runtimeCommand ?? runtimeBinaryForSpawn(getDataDir(), 'claude'), spec, io);
+}
+
 export const claudeAdapter: Adapter = {
   id: 'claude',
   tier: 'rich',
   models: ['sonnet', 'opus', 'haiku'],
   defaultModel: 'sonnet',
-  available: () => probeVersion('claude'),
+  available: async () => { const command = await resolveRuntimeBinary(getDataDir(), 'claude'); return command ? probeVersion(command) : { ok: false }; },
   spawn: spawnClaude,
 };
 

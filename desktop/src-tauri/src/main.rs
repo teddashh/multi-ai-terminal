@@ -213,6 +213,7 @@ fn start_server(window: tauri::WebviewWindow, resources: PathBuf, process: Arc<S
     let port_arg = port.to_string();
     let mut command = Command::new(&node);
     command.arg(&entry).args(["--port", port_arg.as_str(), "--host", "127.0.0.1"])
+        .env("MAT_SELF_PROVISION", "1")
         .stdout(Stdio::piped()).stderr(Stdio::piped());
     sanitize_child_environment(&mut command);
     hide_command_window(&mut command);

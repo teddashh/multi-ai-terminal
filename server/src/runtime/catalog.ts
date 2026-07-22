@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -20,9 +20,16 @@ export type PlatformEntry<F extends RuntimeFamily> = RuntimeCatalog[F]['platform
 
 export const currentPlatformKey = (): string => `${process.platform}-${process.arch}`;
 
+export function catalogPathCandidates(moduleUrl = import.meta.url): string[] {
+  const here = dirname(fileURLToPath(moduleUrl));
+  return [resolve(here, 'runtime-catalog.json'), resolve(here, '../runtime-catalog.json'), resolve(here, '../../../runtime-catalog.json')];
+}
+
 export function catalogPath(): string {
-  const here = dirname(fileURLToPath(import.meta.url));
-  return resolve(here, '../../../runtime-catalog.json');
+  const candidates = catalogPathCandidates();
+  const found = candidates.find(existsSync);
+  if (found) return found;
+  throw new Error(`Runtime catalog not found; tried: ${candidates.join(', ')}`);
 }
 
 export function loadRuntimeCatalog(path = catalogPath()): RuntimeCatalog {

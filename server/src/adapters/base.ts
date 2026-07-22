@@ -8,6 +8,8 @@ import { redactEnvironmentValues } from '../redact.js';
 export interface ResolvedNodeSpec {
   binding: AgentBinding; promptText: string; cwd: string;
   resumeSessionRef?: string;
+  runtimeCommand?: string;
+  runtimeNodeCommand?: string;
 }
 export interface NodeOutcome {
   exitCode: number | null; signal?: string;

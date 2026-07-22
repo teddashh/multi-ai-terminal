@@ -29,10 +29,10 @@ export function App() {
 
   useEffect(() => {
     let live = true;
-    void Promise.all([apiClient.getWorkspaces(), apiClient.getWorkflows(), apiClient.getProviders()]).then(([workspaces, workflows, providers]) => {
+    void Promise.all([apiClient.getWorkspaces(), apiClient.getWorkflows(), apiClient.getProviders(), apiClient.getRuntimes()]).then(([workspaces, workflows, providers, runtimes]) => {
       if (!live) return;
       const state = matStore.getState();
-      state.setWorkspaces(workspaces); state.setWorkflows(workflows); state.setProviders(providers);
+      state.setWorkspaces(workspaces); state.setWorkflows(workflows); state.setProviders(providers); state.setRuntimes(runtimes);
       if (!state.selectedWorkspaceId && workspaces[0]) state.setSelectedWorkspaceId(workspaces[0].id);
     }).catch((error: unknown) => { if (live) setBootError(error instanceof Error ? error.message : BOOT_LOAD_FALLBACK); });
     ws.current = new ReconnectingWsClient({
@@ -46,6 +46,28 @@ export function App() {
     });
     ws.current.connect();
     return () => { live = false; ws.current?.close(); };
+  }, []);
+
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return;
+    const timer = window.setTimeout(() => { void (async () => {
+      const statuses = await apiClient.getRuntimes();
+      for (const family of ['codex', 'claude'] as const) {
+        const status = statuses.find((item) => item.family === family);
+        if (status?.state === 'missing' && status.canInstallManaged) {
+          try {
+            await apiClient.installRuntime(family);
+            const deadline = Date.now() + 10 * 60_000;
+            while (Date.now() < deadline) {
+              await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+              const current = (await apiClient.getRuntimes()).find((item) => item.family === family);
+              if (current?.state !== 'missing') break;
+            }
+          } catch { /* quiet first-run convenience */ }
+        }
+      }
+    })().catch(() => undefined); }, 5_000);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {

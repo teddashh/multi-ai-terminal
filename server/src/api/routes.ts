@@ -16,6 +16,7 @@ import {
   type SteerRequest,
   type ProviderInfo,
   type ProviderId,
+  type RuntimeFamily,
   type WorkflowDef,
   type Workspace,
 } from '@mat/shared';
@@ -33,6 +34,8 @@ import { providerInstallPlan, providerInstallTimeoutMs, providerUpdatePlan, type
 import { cancelSignIn, signInStatus, startSignIn, submitSignInCode } from '../providers/signin.js';
 import { clearAugmentedPathCache, spawnManaged, type ManagedProcess } from '../spawn.js';
 import { readEventsAfter } from '../store/eventLog.js';
+import { getDataDir } from '../store/dataDir.js';
+import { activeRuntimeMutation, clearFamily, installFamily, isManagedRuntimeFamily, runtimeStatus } from '../runtime/triggers.js';
 import {
   deleteRun,
   getRun,
@@ -87,6 +90,7 @@ export interface ApiRouteDependencies {
     submitCode: typeof submitSignInCode;
     cancel: typeof cancelSignIn;
   };
+  runtimes: { status: typeof runtimeStatus; install: typeof installFamily; clear: typeof clearFamily; active: typeof activeRuntimeMutation };
   report: typeof buildRunReport;
   workspaces: {
     list: typeof listWorkspaces; get: typeof getWorkspace; create: typeof createWorkspace;
@@ -109,10 +113,11 @@ export interface ApiRouteDependencies {
   };
 }
 
-const defaultDependencies: ApiRouteDependencies = {
+export const defaultApiRouteDependencies: ApiRouteDependencies = {
   providers: listProviders,
   providerInstall: { plan: providerInstallPlan, updatePlan: providerUpdatePlan, spawn: spawnManaged, clearVersionCache, clearPathCache: clearAugmentedPathCache },
   providerSignIn: { start: startSignIn, status: signInStatus, submitCode: submitSignInCode, cancel: cancelSignIn },
+  runtimes: { status: runtimeStatus, install: installFamily, clear: clearFamily, active: activeRuntimeMutation },
   report: buildRunReport,
   workspaces: { list: listWorkspaces, get: getWorkspace, create: createWorkspace, update: updateWorkspace, delete: deleteWorkspace },
   workflows: { list: listWorkflows, create: createWorkflow, update: updateWorkflow, delete: deleteWorkflow, duplicate: duplicateWorkflow },
@@ -131,13 +136,29 @@ const defaultDependencies: ApiRouteDependencies = {
   },
 };
 
-export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiRouteDependencies = defaultDependencies): Promise<void> {
+export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiRouteDependencies = defaultApiRouteDependencies): Promise<void> {
   let acceptedClientLogs = 0;
   const runningInstalls = new Set<ProviderId>();
   app.setErrorHandler((error, request, reply) => sendError(reply, error, request));
 
   app.get('/api/health', wrap(async () => ({ ok: true, version: VERSION })));
   app.get('/api/providers', wrap(async () => dependencies.providers()));
+  app.get('/api/runtimes', wrap(async () => dependencies.runtimes.status(getDataDir())));
+  const runtimeMutation = async (request: FastifyRequest, reply: FastifyReply, kind: 'install' | 'clear'): Promise<FastifyReply> => {
+    const raw = (request.params as { family?: unknown }).family;
+    if (typeof raw !== 'string' || !isManagedRuntimeFamily(raw)) throw apiError(400, 'BAD_REQUEST', `Unknown managed runtime family: ${String(raw)}`);
+    const family = raw as RuntimeFamily;
+    const status = (await dependencies.runtimes.status(getDataDir())).find((item) => item.family === family)!;
+    // Clear stays available off-matrix: it only deletes local managed bits and must not be gated on installability.
+    if (kind === 'install' && !status.canInstallManaged) throw apiError(400, 'BAD_REQUEST', `Managed ${family} runtime is unsupported on this platform`);
+    const heldBy = dependencies.runtimes.active();
+    if (heldBy) throw apiError(409, 'CONFLICT', `Runtime mutation lock is held by ${heldBy}`);
+    const operation = kind === 'install' ? dependencies.runtimes.install(getDataDir(), family) : dependencies.runtimes.clear(getDataDir(), family);
+    void operation.catch(() => undefined);
+    return reply.code(202).send({ accepted: true, family, operation: kind });
+  };
+  app.post('/api/runtimes/:family/install', wrap((request, reply) => runtimeMutation(request, reply, 'install')));
+  app.post('/api/runtimes/:family/clear', wrap((request, reply) => runtimeMutation(request, reply, 'clear')));
   app.post('/api/providers/refresh', wrap(async () => {
     dependencies.providerInstall.clearPathCache();
     dependencies.providerInstall.clearVersionCache();

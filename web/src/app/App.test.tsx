@@ -22,7 +22,7 @@ vi.mock('zustand', async () => {
 });
 vi.mock('../api/client.js', () => ({
   apiClient: {
-    getWorkspaces: vi.fn(), getWorkflows: vi.fn(), getProviders: vi.fn(), getRuns: mocks.getRuns,
+    getWorkspaces: vi.fn(), getWorkflows: vi.fn(), getProviders: vi.fn(), getRuntimes: vi.fn().mockResolvedValue([]), getRuns: mocks.getRuns,
     abortRun: vi.fn(),
   },
 }));

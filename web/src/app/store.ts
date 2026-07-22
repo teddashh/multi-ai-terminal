@@ -1,4 +1,4 @@
-import type { AgentEvent, EventRole, ProviderInfo, RunSnapshot, WorkflowDef, Workspace, WsServerMsg } from '@mat/shared';
+import type { AgentEvent, EventRole, ProviderInfo, RuntimeStatus, RunSnapshot, WorkflowDef, Workspace, WsServerMsg } from '@mat/shared';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { useStore } from 'zustand';
 import { apiClient, type ApiClient } from '../api/client.js';
@@ -21,6 +21,7 @@ export interface MatState {
   workspaces: Workspace[];
   workflows: WorkflowDef[];
   providers: ProviderInfo[];
+  runtimes: RuntimeStatus[];
   selectedWorkspaceId: string | undefined;
   ephemeralWorkflowEdits: Record<string, WorkflowDef>;
   activeRunId: string | undefined;
@@ -37,6 +38,7 @@ export interface MatActions {
   setWorkspaces(value: Workspace[]): void;
   setWorkflows(value: WorkflowDef[]): void;
   setProviders(value: ProviderInfo[]): void;
+  setRuntimes(value: RuntimeStatus[]): void;
   setSelectedWorkspaceId(id?: string): void;
   setEphemeralWorkflowEdit(id: string, value?: WorkflowDef): void;
   setActiveRunId(id?: string): void;
@@ -157,12 +159,13 @@ export function createMatStore(client: ApiClient = apiClient): StoreApi<MatStore
     };
 
     return ({
-    workspaces: [], workflows: [], providers: [], selectedWorkspaceId: undefined, ephemeralWorkflowEdits: {}, activeRunId: undefined, viewedRunId: undefined, runsLoading: true, runs: {}, events: {},
+    workspaces: [], workflows: [], providers: [], runtimes: [], selectedWorkspaceId: undefined, ephemeralWorkflowEdits: {}, activeRunId: undefined, viewedRunId: undefined, runsLoading: true, runs: {}, events: {},
     wsConnection: 'closed', evidenceIntegrity: {},
     filters: { nodeRunIds: [], roles: allRoles, follow: true }, ui: { focusedNodeRunId: undefined },
     setWorkspaces: (workspaces) => set({ workspaces }),
     setWorkflows: (workflows) => set({ workflows }),
     setProviders: (providers) => set({ providers }),
+    setRuntimes: (runtimes) => set({ runtimes }),
     setSelectedWorkspaceId: (selectedWorkspaceId) => set((state) => {
       if (state.selectedWorkspaceId === selectedWorkspaceId) return state;
       return {
@@ -307,6 +310,7 @@ export function createMatStore(client: ApiClient = apiClient): StoreApi<MatStore
           void client.getProviders().then((providers) => set({ providers })).catch(() => undefined);
         }
       }
+      else if (msg.type === 'runtime:changed') void client.getRuntimes().then((runtimes) => set({ runtimes })).catch(() => undefined);
       else void client.getWorkspaces().then((workspaces) => set({ workspaces })).catch(() => undefined);
     },
     focusNode: (focusedNodeRunId) => set({ ui: { focusedNodeRunId } }),

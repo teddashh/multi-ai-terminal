@@ -1,4 +1,9 @@
-import { spawnManaged } from '../spawn.js';
+import { existsSync } from 'node:fs';
+import { delimiter, dirname, isAbsolute, join } from 'node:path';
+import { augmentedPathEnv, spawnManaged } from '../spawn.js';
+import { getDataDir } from '../store/dataDir.js';
+import { managedBinaryPath } from '../runtime/install.js';
+import { resolveRuntimeBinary, runtimeBinaryForSpawn } from '../runtime/resolve.js';
 import {
   createLineBuffer,
   humanizeError,
@@ -46,8 +51,31 @@ const itemText = (item: Record<string, unknown>): string => {
   return '';
 };
 
-export function spawnCodex(spec: ResolvedNodeSpec, io: Parameters<Adapter['spawn']>[1]): SpawnedNode {
-  const managed = spawnManaged({ command: 'codex', args: buildCodexArgs(spec), cwd: spec.cwd, stdin: spec.promptText });
+function codexChildEnv(command: string, nodeCommand?: string): NodeJS.ProcessEnv {
+  const env = augmentedPathEnv();
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? (process.platform === 'win32' ? 'Path' : 'PATH');
+  const prepends: string[] = [];
+  try {
+    const managed = managedBinaryPath(getDataDir(), 'codex');
+    if (command === managed) {
+      const helper = join(dirname(dirname(managed)), 'codex-path');
+      if (existsSync(helper)) prepends.push(helper);
+    }
+  } catch { /* unsupported platforms retain external discovery */ }
+  // The node dir is appended, never prepended: a shared bin dir (npm -g) also
+  // holds the codex/claude CLIs and would shadow the PATH order that resolved
+  // `command` in the first place. Append still covers a bundled node that is
+  // not on PATH at all.
+  const appends: string[] = [];
+  const node = nodeCommand ?? process.execPath;
+  if (node && isAbsolute(node)) appends.push(dirname(node));
+  env[pathKey] = [...prepends, ...(env[pathKey] ?? '').split(delimiter).filter(Boolean), ...appends]
+    .filter((value, index, all) => all.indexOf(value) === index).join(delimiter);
+  return env;
+}
+
+function spawnCodexCommand(command: string, spec: ResolvedNodeSpec, io: Parameters<Adapter['spawn']>[1]): SpawnedNode {
+  const managed = spawnManaged({ command, args: buildCodexArgs(spec), cwd: spec.cwd, stdin: spec.promptText, env: codexChildEnv(command, spec.runtimeNodeCommand) });
   const { child } = managed;
   let sessionRef: string | undefined;
   let usage: NodeOutcome['usage'];
@@ -167,12 +195,16 @@ export function spawnCodex(spec: ResolvedNodeSpec, io: Parameters<Adapter['spawn
   return { pid: child.pid ?? -1, kill: managed.killGroup, completion };
 }
 
+export function spawnCodex(spec: ResolvedNodeSpec, io: Parameters<Adapter['spawn']>[1]): SpawnedNode {
+  return spawnCodexCommand(spec.runtimeCommand ?? runtimeBinaryForSpawn(getDataDir(), 'codex'), spec, io);
+}
+
 export const codexAdapter: Adapter = {
   id: 'codex',
   tier: 'rich',
   models: ['gpt-5.6-sol'],
   defaultModel: 'gpt-5.6-sol',
-  available: () => probeVersion('codex'),
+  available: async () => { const command = await resolveRuntimeBinary(getDataDir(), 'codex'); return command ? probeVersion(command) : { ok: false }; },
   spawn: spawnCodex,
 };
 

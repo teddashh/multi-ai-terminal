@@ -1,11 +1,12 @@
-import { WsClientMsgSchema, type AgentEvent, type RunSnapshot, type WsServerMsg } from '@mat/shared';
+import { WsClientMsgSchema, type AgentEvent, type RuntimeChangedEvent, type RunSnapshot, type WsServerMsg } from '@mat/shared';
 import type { WebSocket } from '@fastify/websocket';
 import type { FastifyInstance } from 'fastify';
 import type { EventLog } from '../store/eventLog.js';
 import { subscribeRunChanges } from '../store/runs.js';
 import { subscribeWorkspaceChanges } from '../store/workspaces.js';
+import { subscribeRuntimeChanges } from '../runtime/triggers.js';
 
-export interface WsHub { broadcastEvent(event: AgentEvent): void; broadcastRun(run: RunSnapshot): void; close(): void }
+export interface WsHub { broadcastEvent(event: AgentEvent): void; broadcastRun(run: RunSnapshot): void; broadcastRuntime(event: RuntimeChangedEvent): void; close(): void }
 export interface WsHubOptions { token?: string }
 
 interface ClientState {
@@ -36,6 +37,7 @@ export function registerWsHub(app: FastifyInstance, eventLog: EventLog, options:
     broadcastRun(run) {
       for (const client of clients) send(client, { type: 'run', run });
     },
+    broadcastRuntime(event) { for (const client of clients) send(client, { type: 'runtime:changed', event }); },
     close() {
       if (closed) return;
       closed = true;
@@ -43,6 +45,7 @@ export function registerWsHub(app: FastifyInstance, eventLog: EventLog, options:
       unsubscribeEvents();
       unsubscribeRuns();
       unsubscribeWorkspaces();
+      unsubscribeRuntimes();
       for (const client of [...clients]) {
         cleanup(client);
         try { client.socket.close(1001, 'Server shutting down'); } catch { client.socket.terminate(); }
@@ -55,6 +58,7 @@ export function registerWsHub(app: FastifyInstance, eventLog: EventLog, options:
   const unsubscribeWorkspaces = subscribeWorkspaceChanges(() => {
     for (const client of clients) send(client, { type: 'workspaces' });
   });
+  const unsubscribeRuntimes = subscribeRuntimeChanges((event) => hub.broadcastRuntime(event));
 
   const heartbeat = setInterval(() => {
     for (const client of [...clients]) {

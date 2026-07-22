@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { clearVersionCache, probeVersion } from '../adapters/base.js';
 import { loadRuntimeCatalog, type RuntimeCatalog, type RuntimeFamily } from './catalog.js';
@@ -42,6 +43,20 @@ export async function resolveRuntimeBinary(dataDir: string, family: RuntimeFamil
   const found = (await (options.probePath ?? probeVersion)(command)).ok ? command : null;
   cache.set(family, found);
   return found;
+}
+
+/** Spawn is synchronous in the adapter contract. Managed installs are probe-validated before atomic publication; rechecks use the async resolver above. */
+export function runtimeBinaryForSpawn(dataDir: string, family: RuntimeFamily, env: NodeJS.ProcessEnv = process.env): string {
+  const override = env[ENV_NAMES[family]];
+  if (override !== undefined) {
+    if (!isAbsolute(override)) throw new Error(`${ENV_NAMES[family]} must be an absolute path`);
+    return override;
+  }
+  try {
+    const managed = managedBinaryPath(dataDir, family);
+    if (existsSync(managed)) return managed;
+  } catch { /* off-matrix platforms retain PATH discovery */ }
+  return COMMANDS[family];
 }
 
 export function clearRuntimeResolutionCache(family?: RuntimeFamily): void {

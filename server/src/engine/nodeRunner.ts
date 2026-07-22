@@ -11,6 +11,8 @@ import { recordToolUse, resetToolCount } from './digest.js';
 import { diag } from '../diag.js';
 import { clearAuthAlert, setAuthAlert } from '../providers/auth.js';
 import { redactDiagnosticValue, redactEnvironmentValues } from '../redact.js';
+import { getDataDir } from '../store/dataDir.js';
+import { resolveRuntimeBinary } from '../runtime/resolve.js';
 
 export interface NodeExecutionContext {
   runId: string;
@@ -264,6 +266,15 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
       else emitKilledLifecycle(node, context, 'user');
       await persistSafely(node, context);
       return;
+    }
+    if (node.agent.provider === 'claude' || node.agent.provider === 'codex') {
+      const runtimeCommand = await resolveRuntimeBinary(getDataDir(), node.agent.provider);
+      if (!runtimeCommand) throw new Error(`${node.agent.provider} CLI runtime was not found`);
+      spec.runtimeCommand = runtimeCommand;
+      if (node.agent.provider === 'codex') {
+        const nodeCommand = await resolveRuntimeBinary(getDataDir(), 'node');
+        spec.runtimeNodeCommand = nodeCommand && nodeCommand !== 'node' ? nodeCommand : process.execPath;
+      }
     }
     spawned = adapter.spawn(spec, {
       onEvent(event) {

@@ -22,6 +22,7 @@ interface SignInProgress {
 export function ProviderSetupButton({ provider, api = apiClient }: { provider: ProviderInfo; api?: ApiClient }) {
   const { locale, t } = useUiPreferences();
   const setProviders = useMatStore((state) => state.setProviders);
+  const runtime = useMatStore((state) => state.runtimes.find((item) => item.family === provider.id));
   const [open, setOpen] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -123,6 +124,11 @@ export function ProviderSetupButton({ provider, api = apiClient }: { provider: P
   const install = async () => {
     setInstalling(true); setActionStartedAt(Date.now()); setElapsedSeconds(0); setError(undefined); setLogTail(undefined); setNotice(undefined);
     try {
+      if ((provider.id === 'claude' || provider.id === 'codex') && runtime?.canInstallManaged) {
+        await api.installRuntime(provider.id);
+        setNotice({ tone: 'success', text: t('runtime.installAccepted', { provider: provider.id }) });
+        return;
+      }
       const result = await api.installProvider(provider.id);
       if (result.provider) setProviders(matStore.getState().providers.map((candidate) => candidate.id === provider.id ? result.provider! : candidate));
       const refreshed = await refreshAfterAction(result.provider);
@@ -246,6 +252,7 @@ export function ProviderSetupButton({ provider, api = apiClient }: { provider: P
     <button ref={triggerRef} type="button" onClick={() => setOpen((value) => !value)} onKeyDown={closeOnEscape} aria-label={t('provider.setupNamed', { provider: provider.id })} aria-haspopup="dialog" aria-controls={dialogId} aria-expanded={open} className="rounded border border-border px-2 py-1 text-[10px] text-accentForeground hover:border-accent">{t('provider.setup')}</button>
     {open && <div id={dialogId} role="dialog" aria-label={t('provider.setupNamed', { provider: provider.id })} onKeyDown={closeOnEscape} className="absolute right-0 top-full z-40 mt-2 w-72 rounded border border-accent bg-panel p-3 text-left shadow-2xl">
       <div className="flex items-center justify-between"><strong className="text-xs">{t('provider.setupNamed', { provider: provider.id })}</strong><button ref={closeRef} type="button" onClick={close} aria-label={t('provider.closeSetup', { provider: provider.id })} className="text-muted">×</button></div>
+      {runtime && <p className="mt-2 text-[10px] text-muted">{t('runtime.summary', { state: t(runtime.state === 'managed' ? 'runtime.state.managed' : runtime.state === 'external' ? 'runtime.state.external' : runtime.state === 'broken' ? 'runtime.state.broken' : 'runtime.state.missing'), version: runtime.managedVersion ?? '—' })}</p>}
       <p className="mt-2 text-xs text-muted">{provider.version ?? (provider.detail ? displayProviderDetail(provider.id, provider.detail, locale) : t('provider.notDetected'))}</p>
       {provider.authAlert && <p className="mt-2 whitespace-pre-line break-words text-xs text-amber-200">{displayAuthAlertMessage(provider.authAlert.message, locale)}</p>}
       {signInAvailable && <div className="mt-3 rounded border border-border/80 bg-canvas/50 p-2">

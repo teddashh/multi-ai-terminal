@@ -3,19 +3,22 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { loadRuntimeCatalog, platformEntry, runtimeVersion, type RuntimeCatalog } from '../src/runtime/catalog.js';
+import { catalogPathCandidates, loadRuntimeCatalog, platformEntry, runtimeVersion, type RuntimeCatalog } from '../src/runtime/catalog.js';
 import {
   installRuntime, managedBinaryPath, pruneStaleRuntimeVersions, replaceRuntimeDir,
   verifySha256Hex, verifySriSha512,
 } from '../src/runtime/install.js';
 import { clearRuntimeResolutionCache, resolveRuntimeBinary } from '../src/runtime/resolve.js';
 import { readTarEntry, tarEntriesUnder } from '../src/runtime/tar.js';
+import { clearFamily, installFamily, maybeSelfProvision, resetRuntimeTriggersForTest, runtimeStatus, subscribeRuntimeChanges } from '../src/runtime/triggers.js';
 
 const roots: string[] = [];
 afterEach(() => {
   clearRuntimeResolutionCache();
+  resetRuntimeTriggersForTest();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
@@ -105,6 +108,85 @@ describe('runtime catalog', () => {
     expect(() => platformEntry('node', 'plan9-x64', loaded)).toThrow(/unsupported.*plan9-x64/i);
     writeFileSync(path, '{"node":');
     expect(() => loadRuntimeCatalog(path)).toThrow(/malformed runtime catalog/i);
+  });
+
+  it('tries bundle-adjacent, server-adjacent, then repository-root catalog candidates', () => {
+    const base = join(tmpdir(), 'fixture');
+    const moduleUrl = pathToFileURL(join(base, 'server', 'dist', 'runtime', 'catalog.js')).href;
+    expect(catalogPathCandidates(moduleUrl)).toEqual([
+      join(base, 'server', 'dist', 'runtime', 'runtime-catalog.json'),
+      join(base, 'server', 'dist', 'runtime-catalog.json'),
+      join(base, 'runtime-catalog.json'),
+    ]);
+  });
+});
+
+describe('runtime triggers', () => {
+  const deps = (catalog: RuntimeCatalog) => ({ catalog, platform: 'linux' as const, arch: 'x64', probe: async () => false, probeManaged: async () => false, probePath: async () => ({ ok: false }), exists: async () => false });
+
+  it('deduplicates one family and serializes another behind the global lock', async () => {
+    const root = tempRoot(); const catalog = catalogFor(integrity(Buffer.from('x'))); const order: string[] = [];
+    let release!: () => void;
+    const first = new Promise<void>((resolve) => { release = resolve; });
+    const install = vi.fn(async (_dataDir: string, family: string) => { order.push(`start:${family}`); if (family === 'codex') await first; order.push(`end:${family}`); return family; });
+    const codexA = installFamily(root, 'codex', { ...deps(catalog), install: install as never });
+    const codexB = installFamily(root, 'codex', { ...deps(catalog), install: install as never });
+    const claude = installFamily(root, 'claude', { ...deps(catalog), install: install as never });
+    await vi.waitFor(() => expect(order).toEqual(['start:codex'])); release();
+    await Promise.all([codexA, codexB, claude]);
+    expect(install).toHaveBeenCalledTimes(2);
+    expect(order).toEqual(['start:codex', 'end:codex', 'start:claude', 'end:claude']);
+  }, 30_000);
+
+  it('reports managed, broken, external, missing, and degrades off-matrix to PATH', async () => {
+    const root = tempRoot(); const catalog = catalogFor(integrity(Buffer.from('x')));
+    let mode: 'managed' | 'broken' | 'external' | 'missing' = 'managed';
+    const status = () => runtimeStatus(root, {
+      catalog, platform: 'linux', arch: 'x64', probe: async () => mode === 'managed', probeManaged: async () => mode === 'managed',
+      exists: async () => mode === 'broken', probePath: async () => ({ ok: mode === 'external' }),
+    });
+    expect((await status())[0]!.state).toBe('managed'); mode = 'broken'; expect((await status())[0]!.state).toBe('broken');
+    mode = 'external'; clearRuntimeResolutionCache(); expect((await status())[0]!.state).toBe('external');
+    mode = 'missing'; clearRuntimeResolutionCache(); expect((await status())[0]!.state).toBe('missing');
+    clearRuntimeResolutionCache();
+    const offMatrix = await runtimeStatus(root, { catalog, platform: 'aix', arch: 'ppc64', probePath: async () => ({ ok: true }) });
+    expect(offMatrix).toEqual(expect.arrayContaining([expect.objectContaining({ state: 'external', canInstallManaged: false })]));
+  });
+
+  it('keeps the mutation outcome when post-mutation status fails', async () => {
+    const root = tempRoot(); const catalog = catalogFor(integrity(Buffer.from('x')));
+    const install = vi.fn(async () => { throw new Error('install boom'); });
+    const failing = {
+      catalog, platform: 'linux' as const, arch: 'x64',
+      probe: async () => { throw new Error('status boom'); }, probeManaged: async () => { throw new Error('status boom'); },
+      probePath: async () => ({ ok: false }), exists: async () => false,
+    };
+    await expect(installFamily(root, 'codex', { ...failing, install: install as never })).rejects.toThrow('install boom');
+  }, 30_000);
+
+  it('queues a clear behind an in-flight install instead of joining it', async () => {
+    const root = tempRoot(); const catalog = catalogFor(integrity(Buffer.from('x')));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const install = vi.fn(async () => { await gate; return '/fixture/codex'; });
+    const events: unknown[] = []; subscribeRuntimeChanges(() => events.push('changed'));
+    const installing = installFamily(root, 'codex', { ...deps(catalog), install: install as never });
+    const clearing = clearFamily(root, 'codex', deps(catalog));
+    release();
+    expect((await clearing) as unknown).toBeUndefined();
+    await installing;
+    expect(install).toHaveBeenCalledTimes(1);
+    expect(events).toHaveLength(2);
+  }, 30_000);
+
+  it('keeps self-provision disabled unless explicitly flagged and emits a safe changed event', async () => {
+    const root = tempRoot(); const catalog = catalogFor(integrity(Buffer.from('x'))); const install = vi.fn(async () => '/fixture/codex');
+    delete process.env.MAT_SELF_PROVISION;
+    maybeSelfProvision(root, { ...deps(catalog), install: install as never });
+    await Promise.resolve(); expect(install).not.toHaveBeenCalled();
+    const events: unknown[] = []; subscribeRuntimeChanges((event) => events.push(event));
+    await installFamily(root, 'codex', { ...deps(catalog), install: install as never });
+    expect(events).toEqual([{ family: 'codex', state: 'missing', managedVersion: '2.3.4' }]);
   });
 });
 
