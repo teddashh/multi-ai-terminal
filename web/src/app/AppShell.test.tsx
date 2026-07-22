@@ -35,6 +35,10 @@ describe('AppShell', () => {
   it('keeps both Launchpad views mounted and preserves drafts while navigating', () => {
     const container = renderShell(<AppShell />);
     expect(screen.getByTestId('app-shell')).toBeTruthy();
+    const logo = container.querySelector('img[title="Multi-AI Terminal"]');
+    expect(logo?.getAttribute('src')).toContain('app-icon.png');
+    expect(logo?.getAttribute('alt')).toBe('');
+    expect(container.querySelector('nav')?.textContent).not.toContain('MAT');
     const task = screen.getByLabelText('Task draft') as HTMLInputElement;
     act(() => fireEvent.change(task, { target: { value: 'Keep this task' } }));
 

@@ -40,21 +40,28 @@ describe('UI preferences', () => {
     expect(resolveLocale('en', ['zh-TW'])).toBe('en');
   });
 
-  it('starts in system Traditional Chinese and persists language and three-color theme choices', async () => {
+  it('starts in system Traditional Chinese and persists AI-Sister theme choices', async () => {
     act(() => root?.render(<UiPreferencesProvider><Probe /></UiPreferencesProvider>));
 
     expect(screen.getByText('健康狀態')).toBeTruthy();
     expect(screen.getByText('語言・主題')).toBeTruthy();
     expect(document.documentElement.lang).toBe('zh-TW');
 
-    act(() => fireEvent.change(screen.getByLabelText('介面主題'), { target: { value: 'aurora' } }));
-    await waitFor(() => expect(document.documentElement.dataset.theme).toBe('aurora'));
-    expect(JSON.parse(localStorage.getItem('mat-ui-preferences-v1') ?? '{}')).toMatchObject({ language: 'system', theme: 'aurora' });
+    act(() => fireEvent.change(screen.getByLabelText('介面主題'), { target: { value: 'ai-sister' } }));
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe('ai-sister'));
+    expect(screen.getByText('AI-Sister 最終紀念版')).toBeTruthy();
+    expect(JSON.parse(localStorage.getItem('mat-ui-preferences-v1') ?? '{}')).toMatchObject({ language: 'system', theme: 'ai-sister' });
 
     act(() => fireEvent.change(screen.getByLabelText('介面語言'), { target: { value: 'en' } }));
     await waitFor(() => expect(screen.getByText('Health')).toBeTruthy());
     expect(document.documentElement.lang).toBe('en');
-    expect(JSON.parse(localStorage.getItem('mat-ui-preferences-v1') ?? '{}')).toMatchObject({ language: 'en', theme: 'aurora' });
+    expect(JSON.parse(localStorage.getItem('mat-ui-preferences-v1') ?? '{}')).toMatchObject({ language: 'en', theme: 'ai-sister' });
+  });
+
+  it('migrates the legacy aurora preference to AI-Sister and rewrites storage', () => {
+    localStorage.setItem('mat-ui-preferences-v1', JSON.stringify({ language: 'en', theme: 'aurora' }));
+    expect(loadUiPreferences()).toEqual({ language: 'en', theme: 'ai-sister' });
+    expect(JSON.parse(localStorage.getItem('mat-ui-preferences-v1') ?? '{}')).toEqual({ language: 'en', theme: 'ai-sister' });
   });
 
   it('ignores malformed persisted preferences', () => {

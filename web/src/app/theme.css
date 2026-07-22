@@ -79,21 +79,21 @@ html[data-theme='light'] [class~='hover:bg-amber-900']:hover { background-color:
 html[data-theme='light'] :where([class~='hover:bg-sky-900'], [class~='hover:bg-sky-950/40']):hover { background-color: rgb(186 230 253); }
 html[data-theme='light'] [class~='hover:bg-violet-950/40']:hover { background-color: rgb(221 214 254); }
 
-html[data-theme='aurora'] {
+html[data-theme='ai-sister'] {
   color-scheme: dark;
-  --canvas: 8 15 25;
-  --panel: 15 23 42;
-  --surface: 19 30 48;
-  --raised: 29 41 61;
-  --control: 51 65 85;
-  --border: 51 65 85;
-  --ink: 241 245 249;
-  --muted: 174 187 207;
-  --accent: 196 181 253;
-  --accent-soft: 67 35 104;
-  --accent-foreground: 237 233 254;
+  --canvas: 8 6 18;
+  --panel: 17 13 36;
+  --surface: 31 22 61;
+  --raised: 42 30 78;
+  --control: 57 43 91;
+  --border: 72 57 108;
+  --ink: 248 247 255;
+  --muted: 196 189 217;
+  --accent: 167 139 250;
+  --accent-soft: 57 36 103;
+  --accent-foreground: 255 225 163;
   --accent-border: 167 139 250;
-  --on-accent: 31 20 52;
+  --on-accent: 18 13 41;
 }
 
 html, body, #root { min-height: 100%; margin: 0; }
@@ -103,13 +103,30 @@ body {
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   transition: background-color 140ms ease, color 140ms ease;
 }
-html[data-theme='aurora'] body {
+html[data-theme='ai-sister'] body {
   background-image:
-    radial-gradient(circle at 8% 8%, rgb(124 58 237 / 0.18), transparent 31rem),
-    radial-gradient(circle at 78% 4%, rgb(245 158 11 / 0.11), transparent 28rem),
-    radial-gradient(circle at 95% 88%, rgb(20 184 166 / 0.12), transparent 32rem);
+    radial-gradient(circle at 18% 8%, rgb(124 58 237 / 0.22), transparent 34rem),
+    radial-gradient(circle at 82% 0%, rgb(45 212 191 / 0.1), transparent 28rem),
+    radial-gradient(circle at 94% 88%, rgb(246 185 75 / 0.09), transparent 30rem);
   background-attachment: fixed;
 }
+
+.ai-sister-only { display: none; }
+html[data-theme='ai-sister'] .ai-sister-only { display: inline-grid; }
+html[data-theme='ai-sister'] .ai-sister-avatar {
+  width: 1.35rem; height: 1.35rem; flex: 0 0 auto; place-items: center; overflow: hidden;
+  border: 1px solid var(--ai-sister-accent); border-radius: 9999px; background: #130e27;
+  box-shadow: 0 0 0 2px rgb(8 6 18 / 0.92), 0 0 12px var(--ai-sister-shadow);
+}
+html[data-theme='ai-sister'] .ai-sister-avatar img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; user-select: none; }
+html[data-theme='ai-sister'] .ai-sister-edition-card {
+  grid-template-columns: 3rem minmax(0, 1fr); gap: 0.65rem; align-items: center; width: 100%; margin-top: 0.75rem;
+  border: 1px solid rgb(167 139 250 / 0.52); border-radius: 0.5rem; padding: 0.55rem;
+  background: radial-gradient(circle at 94% 12%, rgb(246 185 75 / 0.16), transparent 34%), linear-gradient(135deg, rgb(57 36 103 / 0.86), rgb(14 10 31 / 0.96));
+  box-shadow: 0 10px 24px rgb(4 2 12 / 0.34), inset 0 1px rgb(255 255 255 / 0.06);
+}
+html[data-theme='ai-sister'] .ai-sister-ensemble { width: 3rem; height: 3rem; border: 2px solid rgb(246 185 75 / 0.65); border-radius: 9999px; object-fit: cover; box-shadow: 0 0 18px rgb(139 92 246 / 0.48); }
+html[data-theme='ai-sister'] .ai-sister-badge { color: #f9d78f; font-size: 0.55rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
 ::selection { background: rgb(var(--accent) / 0.32); }

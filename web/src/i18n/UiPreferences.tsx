@@ -1,8 +1,9 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { AiSisterEditionCard } from '../components/AiSisterTheme.js';
 
 export type LanguagePreference = 'system' | 'en' | 'zh-TW';
 export type UiLocale = 'en' | 'zh-TW';
-export type UiTheme = 'dark' | 'light' | 'aurora';
+export type UiTheme = 'dark' | 'light' | 'ai-sister';
 
 interface StoredPreferences {
   language: LanguagePreference;
@@ -34,7 +35,10 @@ const en = {
   'prefs.theme': 'Theme',
   'prefs.theme.dark': 'Midnight',
   'prefs.theme.light': 'Daylight',
-  'prefs.theme.aurora': 'Aurora · three color',
+  'prefs.theme.aiSister': 'AI-Sister Commemorative Edition',
+  'theme.aiSister.badge': 'Final commemorative edition',
+  'theme.aiSister.title': 'AI-Sister Commemorative Edition',
+  'theme.aiSister.subtitle': 'Four voices, one last round.',
   'shell.primary': 'Primary navigation',
   'shell.projects': 'Projects',
   'shell.launch': 'Launch',
@@ -397,7 +401,10 @@ const zhTW: Record<MessageKey, string> = {
   'prefs.theme': '介面主題',
   'prefs.theme.dark': '午夜深色',
   'prefs.theme.light': '日光淺色',
-  'prefs.theme.aurora': '極光三色',
+  'prefs.theme.aiSister': 'AI-Sister 紀念版',
+  'theme.aiSister.badge': 'AI-Sister 最終紀念版',
+  'theme.aiSister.title': 'AI-Sister 紀念版',
+  'theme.aiSister.subtitle': '四位角色，一起完成最後一輪。',
   'shell.primary': '主要導覽',
   'shell.projects': '專案',
   'shell.launch': '啟動',
@@ -785,8 +792,9 @@ export function InterfacePreferences() {
     </summary>
     <div className="absolute right-0 top-full z-50 mt-2 w-60 rounded-lg border border-border bg-raised p-3 shadow-2xl">
       <label className="block text-xs font-medium text-ink"><span className="mb-1 block text-muted">{t('prefs.language')}</span><select aria-label={t('prefs.language')} value={language} onChange={(event) => setLanguage(event.target.value as LanguagePreference)} className="w-full rounded border border-border bg-canvas px-2 py-1.5 text-xs text-ink outline-none focus:border-accent"><option value="system">{t('prefs.language.system')}</option><option value="zh-TW">{t('prefs.language.zhTW')}</option><option value="en">{t('prefs.language.en')}</option></select></label>
-      <label className="mt-3 block text-xs font-medium text-ink"><span className="mb-1 block text-muted">{t('prefs.theme')}</span><select aria-label={t('prefs.theme')} value={theme} onChange={(event) => setTheme(event.target.value as UiTheme)} className="w-full rounded border border-border bg-canvas px-2 py-1.5 text-xs text-ink outline-none focus:border-accent"><option value="dark">{t('prefs.theme.dark')}</option><option value="light">{t('prefs.theme.light')}</option><option value="aurora">{t('prefs.theme.aurora')}</option></select></label>
+      <label className="mt-3 block text-xs font-medium text-ink"><span className="mb-1 block text-muted">{t('prefs.theme')}</span><select aria-label={t('prefs.theme')} value={theme} onChange={(event) => setTheme(event.target.value as UiTheme)} className="w-full rounded border border-border bg-canvas px-2 py-1.5 text-xs text-ink outline-none focus:border-accent"><option value="dark">{t('prefs.theme.dark')}</option><option value="light">{t('prefs.theme.light')}</option><option value="ai-sister">{t('prefs.theme.aiSister')}</option></select></label>
       <div aria-hidden="true" className="mt-3 grid grid-cols-3 gap-1"><span className="h-1.5 rounded-full bg-violet-500" /><span className="h-1.5 rounded-full bg-amber-400" /><span className="h-1.5 rounded-full bg-teal-400" /></div>
+      <AiSisterEditionCard badge={t('theme.aiSister.badge')} title={t('theme.aiSister.title')} subtitle={t('theme.aiSister.subtitle')} />
     </div>
   </details>;
 }
@@ -798,11 +806,13 @@ export function resolveLocale(preference: LanguagePreference, languages: readonl
 
 export function loadUiPreferences(): StoredPreferences {
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as Partial<StoredPreferences> | null;
-    return {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as { language?: unknown; theme?: unknown } | null;
+    const preferences: StoredPreferences = {
       language: parsed && isLanguage(parsed.language) ? parsed.language : 'system',
-      theme: parsed && isTheme(parsed.theme) ? parsed.theme : 'dark',
+      theme: parsed?.theme === 'aurora' ? 'ai-sister' : parsed && isTheme(parsed.theme) ? parsed.theme : 'dark',
     };
+    if (parsed?.theme === 'aurora') localStorage.setItem(STORAGE_KEY, JSON.stringify(preferences));
+    return preferences;
   } catch {
     return { language: 'system', theme: 'dark' };
   }
@@ -813,7 +823,7 @@ function isLanguage(value: unknown): value is LanguagePreference {
 }
 
 function isTheme(value: unknown): value is UiTheme {
-  return value === 'dark' || value === 'light' || value === 'aurora';
+  return value === 'dark' || value === 'light' || value === 'ai-sister';
 }
 
 function interpolate(message: string, variables?: Variables): string {

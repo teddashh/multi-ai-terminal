@@ -3,6 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useMatStore } from '../../app/store.js';
 import { Collapsible } from '../../components/Collapsible.js';
+import { AiSisterAvatar } from '../../components/AiSisterTheme.js';
 import { PROVIDER_COLORS } from '../../components/AgentChip.js';
 import { displayIntegrityMessage, displayNodeLabel, displayToolPhase } from '../../i18n/displayText.js';
 import { useUiPreferences } from '../../i18n/UiPreferences.js';
@@ -135,7 +136,7 @@ export function NarrativeRow({ item }: { item: NarrativeItem }) {
     : item.kind === 'thinking' ? <Collapsible summary={<p className="line-clamp-2 whitespace-pre-wrap text-violet-200">{item.text}</p>}><p className="mt-2 whitespace-pre-wrap break-words text-xs text-violet-100">{item.text}</p></Collapsible>
     : <p className={`whitespace-pre-wrap break-words ${item.kind === 'error' ? 'text-red-100' : item.kind === 'decision' ? 'text-emerald-100' : 'text-ink'}`}>{item.text}</p>;
   return <article data-narrative-key={item.key} data-node-run-id={actor?.nodeRunId ?? undefined} className={`rounded-lg border border-l-[3px] p-3 shadow-sm ${tone}`} style={{ borderLeftColor: providerColor }}>
-    <header className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border/60 pb-2 text-[10px] text-muted"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: providerColor }} aria-hidden="true" /><strong className="text-sm text-ink">{actor?.label ?? t('narrative.run')}</strong>{actor?.provider && <span className="rounded-full border border-border bg-canvas/60 px-1.5 py-0.5 font-medium text-ink">{actor.provider}{actor.model ? ` · ${actor.model}` : ''}</span>}{actor?.stageName && <span className="rounded bg-raised px-1.5 py-0.5">{actor.stageName}</span>}<span>{t('narrative.attempt', { count: item.attempt })}</span><span>#{item.seqStart}{item.seqEnd !== item.seqStart ? `–${item.seqEnd}` : ''}</span><time className="ml-auto" dateTime={new Date(item.tsStart).toISOString()}>{new Date(item.tsStart).toLocaleTimeString(locale, { hour12: false })}</time></header>
+    <header className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border/60 pb-2 text-[10px] text-muted">{actor?.provider && <AiSisterAvatar provider={actor.provider} />}<span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: providerColor }} aria-hidden="true" /><strong className="text-sm text-ink">{actor?.label ?? t('narrative.run')}</strong>{actor?.provider && <span className="rounded-full border border-border bg-canvas/60 px-1.5 py-0.5 font-medium text-ink">{actor.provider}{actor.model ? ` · ${actor.model}` : ''}</span>}{actor?.stageName && <span className="rounded bg-raised px-1.5 py-0.5">{actor.stageName}</span>}<span>{t('narrative.attempt', { count: item.attempt })}</span><span>#{item.seqStart}{item.seqEnd !== item.seqStart ? `–${item.seqEnd}` : ''}</span><time className="ml-auto" dateTime={new Date(item.tsStart).toISOString()}>{new Date(item.tsStart).toLocaleTimeString(locale, { hour12: false })}</time></header>
     {content}
   </article>;
 }

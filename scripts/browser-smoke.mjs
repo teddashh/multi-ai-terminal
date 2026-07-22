@@ -296,6 +296,9 @@ try {
   };
 
   await phase('shell responsiveness and health diagnostics', async () => {
+    const railLogo = page.locator('img[title="Multi-AI Terminal"]');
+    await railLogo.waitFor({ state: 'visible', timeout: 5_000 });
+    if (!await railLogo.getAttribute('src')) throw new Error('Rail app icon did not load.');
     await page.setViewportSize({ width: 1024, height: 640 });
     const assertWorkspaceGeometry = async (state) => {
       const geometry = await page.locator('[data-testid="app-shell"]').evaluate((element) => {
@@ -371,16 +374,18 @@ try {
     const lightCanvas = await page.locator('main').evaluate((element) => getComputedStyle(element).backgroundColor);
     if (lightCanvas === darkCanvas) throw new Error('Daylight theme did not change the application canvas.');
 
-    await page.getByLabel('介面主題').selectOption('aurora');
-    if (await page.locator('html').getAttribute('data-theme') !== 'aurora') throw new Error('Aurora theme was not applied.');
-    const auroraCanvas = await page.locator('main').evaluate((element) => getComputedStyle(element).backgroundColor);
-    if (auroraCanvas === darkCanvas || auroraCanvas === lightCanvas) throw new Error('Aurora theme did not expose a distinct application canvas.');
+    await page.getByLabel('介面主題').selectOption('ai-sister');
+    if (await page.locator('html').getAttribute('data-theme') !== 'ai-sister') throw new Error('AI-Sister theme was not applied.');
+    const aiSisterCanvas = await page.locator('main').evaluate((element) => getComputedStyle(element).backgroundColor);
+    if (aiSisterCanvas === darkCanvas || aiSisterCanvas === lightCanvas) throw new Error('AI-Sister theme did not expose a distinct application canvas.');
+    if (!await page.getByText('AI-Sister 最終紀念版').isVisible()) throw new Error('AI-Sister edition badge was not visible.');
     const persisted = await page.evaluate(() => JSON.parse(localStorage.getItem('mat-ui-preferences-v1') ?? '{}'));
-    if (persisted.language !== 'zh-TW' || persisted.theme !== 'aurora') throw new Error(`UI preferences were not persisted: ${JSON.stringify(persisted)}`);
+    if (persisted.language !== 'zh-TW' || persisted.theme !== 'ai-sister') throw new Error(`UI preferences were not persisted: ${JSON.stringify(persisted)}`);
 
     await page.getByLabel('介面語言').selectOption('en');
     await page.getByLabel('Theme').selectOption('dark');
     await page.getByText('Health', { exact: true }).waitFor({ timeout: 5_000 });
+    if (await page.getByText('Final commemorative edition').isVisible()) throw new Error('AI-Sister edition badge leaked into the dark theme.');
   });
 
   const run = await phase('live run setup', async () => {

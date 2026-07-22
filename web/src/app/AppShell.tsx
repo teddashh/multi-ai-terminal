@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import appIconUrl from '../assets/app-icon.png';
 import { RunPanel } from '../panels/run/RunPanel.js';
 import { WorkflowPanel } from '../panels/workflow/WorkflowPanel.js';
 import { WorkspacePanel } from '../panels/workspace/WorkspacePanel.js';
@@ -110,7 +111,7 @@ function NavigationRail({ launchpadView, launchpadOpen, inspectorOpen, onView, o
 }) {
   const { t } = useUiPreferences();
   return <nav aria-label={t('shell.primary')} className="z-10 flex min-h-0 flex-col items-stretch gap-1 border-r border-border bg-canvas px-2 py-2">
-    <span className="mb-2 grid h-8 place-items-center rounded-lg bg-gradient-to-r from-violet-600 via-amber-500 to-teal-500 text-xs font-black text-white" title="Multi-AI Terminal">MAT</span>
+    <img src={appIconUrl} className="mb-2 h-8 w-8 self-center rounded-lg" title="Multi-AI Terminal" alt="" aria-hidden="true" draggable={false} />
     <RailButton label={t('shell.projects')} selected={launchpadOpen && launchpadView === 'projects'} controls="launchpad-projects" onClick={() => onView('projects')} icon={<ProjectsIcon />} />
     <RailButton label={t('shell.launch')} selected={launchpadOpen && launchpadView === 'launch'} controls="launchpad-launch" onClick={() => onView('launch')} icon={<LaunchIcon />} />
     <div className="my-1 h-px bg-border" />
