@@ -4,7 +4,7 @@ Current release line v0.2.4; updated 2026-07-21 for the agent-ready source relea
 
 ## What this is
 
-MAT is a desktop workbench that orchestrates **headless CLI coding agents** (claude, codex, grok, agy, plus a deterministic `mock`) through declarative multi-stage workflows: parallel fan-out per stage, an LLM orchestrator gating stage transitions, verification contracts producing evidence, handoff context between stages, mid-run steering, and exportable debug bundles. UI is React in a Tauri v2 shell; the server is Fastify driving child processes. **No PTY by design** — adapters speak each CLI's headless/JSON mode only.
+MAT is a desktop workbench that orchestrates **headless CLI coding agents** (claude, codex, grok, agy, plus a deterministic `mock`) through declarative multi-stage workflows: parallel fan-out per stage, an LLM orchestrator gating stage transitions, verification contracts producing evidence, handoff context between stages, mid-run steering, and exportable debug bundles. UI is React in a Tauri v2 shell; the server is Fastify driving child processes. **No PTY by design** — adapters speak each CLI's headless machine interface: today the one-shot JSON/stream CLI modes; the standing direction (see UX references, BAT bullet) adds BAT-style session runtimes (claude Agent SDK, codex `app-server` JSON-RPC), which are equally headless.
 
 The owner and sole user is Ted Huang (`teddashh/multi-ai-terminal` on GitHub). He runs Windows daily; the dev box is Linux. The product thesis (roundtable consensus, 2026-07): the moat is **evidence and handoff quality** — what an agent proved, what the next agent receives — not UI breadth.
 
@@ -31,10 +31,10 @@ The owner and sole user is Ted Huang (`teddashh/multi-ai-terminal` on GitHub). H
 
 ## UX references — principles, not scope
 
-The v1.4 work checked the latest heads available on 2026-07-20 for [TempoTerm](https://github.com/mukiwu/tempo-term) (`0bed0f9`), [Better Agent Terminal](https://github.com/tony1223/better-agent-terminal) (`b09639c`), and MAT's predecessor [multi-ai-chat-desktop](https://github.com/teddashh/multi-ai-chat-desktop) (`4e98c06`, the v1.7.0 merge). They are hierarchy/status/focus interaction references, never architecture or roadmap templates:
+The v1.4 work checked the latest heads available on 2026-07-20 for [TempoTerm](https://github.com/mukiwu/tempo-term) (`0bed0f9`), [Better Agent Terminal](https://github.com/tony1223/better-agent-terminal) (`b09639c`), and MAT's predecessor [multi-ai-chat-desktop](https://github.com/teddashh/multi-ai-chat-desktop) (`4e98c06`, the v1.7.0 merge). TempoTerm and multi-ai-chat-desktop are hierarchy/status/focus interaction references, not architecture templates. BAT is more than that — see its bullet:
 
 - **TempoTerm:** borrow project-first navigation, glanceable agent/worktree status, stable docked panels, and actions placed next to the context they affect. Do not import its PTY, editor, file/Git/SSH, split-pane, or general IDE breadth.
-- **Better Agent Terminal:** borrow a dominant working surface with subordinate workspace/settings panes, presets for the common path, compact status that answers “what is happening?”, and technical detail that expands on demand. Do not import terminal aggregation, SDK session semantics, remote clients, pause/resume, or its feature catalog.
+- **Better Agent Terminal:** Ted's standing instruction (restated 2026-07-22): **hew to BAT for agent-runtime handling and track its updates** — BAT is the architecture reference for provider sessions, not merely a UX reference. At head `0e24800` it drives codex through a persistent `codex app-server` JSON-RPC/JSONL controller (`src-tauri/src/codex_app_server.rs`: threads, `turn/interrupt`, approval policies, idle-connection reaper, `account/rateLimits/read`) and claude through `@anthropic-ai/claude-agent-sdk` in its node-sidecar with a CLI runtime as fallback (dual-runtime). On the UI side, borrow a dominant working surface, presets for the common path, and compact status that expands on demand; do not import terminal aggregation, remote clients, or its full feature catalog. (An earlier revision of this file listed "SDK session semantics" under do-not-import — that was an implementer over-generalization of UI scoping, corrected by Ted on 2026-07-22. Never cite it as an architecture ban.)
 - **multi-ai-chat-desktop:** preserve the owner's familiar conversation-first hierarchy, visible workflow controls, readable results, replay/diagnostic affordances, and streaming UI that does not steal focus or let stale async responses replace a newer choice. Do not reuse its WebView automation runtime or broaden MAT into parallel chat windows.
 
 The synthesis is: adopt the hierarchy/status/focus mental model so setup, diagnosis, and evidence reading feel direct and predictable while keeping MAT headless. Product depth still means trustworthy evidence and handoff, not more panes or terminal emulation.
@@ -114,6 +114,8 @@ Dev-box quirks: prefix `git push`/`gh` with `env -u LD_LIBRARY_PATH`; `gh run vi
 - WebView2 (Windows) renders `<datalist>` as unusable — the reason ModelEditor is a select+custom-input combobox.
 
 ## Deferred scope — do not build unasked
+
+**Not deferred — standing direction (2026-07-22):** BAT-style provider session runtimes: codex via a persistent `codex app-server` controller, claude via the Agent SDK, exec/CLI adapters retained as fallbacks, always driving the user's *discovered* CLIs (MAT does not bundle CLIs — security invariant 1 unchanged), evidence invariants preserved across the new event mapping.
 
 Explicitly deferred by Ted until he asks: pause/resume, human-approval nodes, steer-time agent picker, adapter live contract tests, and multi-pane/canvas layouts. No PTY/interactive-terminal mode — headless only. UI breadth stays deprioritized in favor of evidence/handoff depth. UI i18n is no longer deferred: en + zh-TW are implemented; add another locale only on request.
 
