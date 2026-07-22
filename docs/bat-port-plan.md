@@ -182,7 +182,7 @@ This model is *compatible* with MAT's existing "never reads/writes provider cred
 
 Standing development rules unchanged: never run real provider login commands to probe output; `codex login --device-auth` discards the default-store login the moment it starts; never log values read from the environment.
 
-## 5. Grok / agy — same pattern, CLI transport (task #24)
+## 5. Grok / agy / OpenRouter — same contract, two transport routes (task #24)
 
 BAT has no grok/agy; the directive is uniformity — and the template already exists: **`node-sidecar/src/handlers/codex.mjs` (~850 lines) is BAT's canonical "second provider behind the same contract" module.** Each MAT provider manager copies its shape:
 
@@ -193,6 +193,14 @@ BAT has no grok/agy; the directive is uniformity — and the template already ex
 Two integration models, chosen per provider: **(1) session backend** (claude Agent SDK, codex app-server) — wrap in LiveQuery when the backend accepts a streaming prompt and yields a terminal result frame; **(2) CLI observation** (BAT's debug runtimes are the reference: spawn the CLI, wire hooks to a loopback bridge, tail transcripts, normalize frames). grok/agy start as model-(2)-style managers over their existing streaming-JSON adapters and swap transports without contract change if they ever grow a session interface.
 
 Cross-cutting mechanics ported once into the shared manager layer: FIFO send queue with a cancel token (Esc cancels queued-but-not-live turns), `clientMessageId` idempotency records (retry-safe sends), runtimeStatus lifecycle (`starting` → `waiting_for_api` → cleared on first frame) for the "thinking" indicator, effort mapping with rejection-driven downgrade, model presets with suffix stripping.
+
+**Route B — codex-as-runtime for OpenAI-compatible providers (Ted, 2026-07-22: OpenRouter becomes provider #5).** The open-source codex CLI supports custom model providers over OpenAI-compatible APIs, and BAT already exercises this end-to-end: Fugu models run through the *same* app-server with `modelProvider:"sakana"` in `thread/start` and `SAKANA_API_KEY` injected at spawn. That makes the §2 controller a universal agent runtime — codex's sandbox, tools, approvals, and rollouts, our one event contract:
+
+- **grok**: xAI's API is OpenAI-compatible → grok models can run inside codex's agent loop with `XAI_API_KEY`. The existing grok CLI adapter stays the *default* transport (subscription billing); the codex-runtime route is the opt-in upgrade that buys real session semantics at API-metered prices.
+- **OpenRouter (provider #5)**: an OpenAI-compatible aggregator with no agent runtime of its own — Route B is the only route, and it opens every model OpenRouter carries at once. Tool-calling quality varies per model; that's the user's model choice, surfaced honestly in the UI.
+- **agy**: decided by what it exposes — OpenAI-compatible API → Route B; own CLI only → Route A manager wrap (current adapter), transport swapped later if it ships a machine interface. Spiking this is #24 step 1.
+
+Containment: Route B sessions run the same managed codex binary under a **MAT-owned, config-only CODEX_HOME** (`model_providers` entries only; API keys injected as child env at spawn, never written to disk by MAT) so the user's own `~/.codex` config and auth are untouched, and ChatGPT-account features (login flows, rateLimits) are simply absent there. Spike before building (#24 step 1): confirm the custom-provider mechanism on the pinned codex version — config.toml `model_providers` + `wire_api:"chat"` vs the `modelProvider` thread param — against the managed 0.144.x binary.
 
 ## 6. Evidence-plane mapping (task #25, continuous)
 
@@ -205,7 +213,7 @@ Every session-runtime event stream maps into MAT's evidence plane under the exis
 3. **#21** codex app-server controller (legacy exec adapter stays as an explicit mode).
 4. **#22** claude Agent SDK runtime (legacy CLI adapter stays as an explicit mode).
 5. **#23** auth/account alignment (paired with whichever of #21/#22 it unblocks first).
-6. **#24** grok/agy managers.
+6. **#24** grok/agy managers + OpenRouter as provider #5 via the codex-runtime route (§5 Route B, spike first).
 7. **#25** evidence + tests + release per the release playbook — shipped per phase, not one big bang; each phase releases the day it's green.
 
 ## 8. Tracking BAT updates (跟著他的更新走)
