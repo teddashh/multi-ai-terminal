@@ -158,6 +158,7 @@ Two hard rules BAT's client depends on (MAT's evidence plane will assert them): 
 - Session registry mirrors BAT's `state.mjs`: sessions Map + config Map surviving delete + a `buildSessionMeta` that always emits full shape.
 - Evidence: one mapper from contract events into MAT evidence events, preserving seq authority/immutability/replay; assertions for the two hard rules above.
 - Tests: fake-SDK override driving the full translation table, permission/ask-user round-trips, interrupt-vs-abort semantics, rebuild-with-resume, stub path when SDK unavailable.
+- Known risk carried from #20: the SDK declares a `zod@4` peer while MAT is `zod@3`; the repo pins `legacy-peer-deps=true` so the peer is not auto-installed. Before the first runtime import of the SDK, add a loader smoke test proving module load + a minimal call under the repo's real dependency tree; if the SDK genuinely needs its own zod@4, give *it* a nested copy — never upgrade MAT's zod out from under `shared/`.
 
 ## 4. Auth and account alignment (task #23)
 
