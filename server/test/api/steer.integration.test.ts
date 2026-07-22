@@ -83,6 +83,8 @@ describe('steering integration', () => {
     const workflow = steerWorkflow();
     workflow.maxParallel = 2;
     workflow.stages[0]!.slots[0]!.count = 2;
+    // Attempt-1 nodes must still be alive when the steer kill lands on a loaded CI runner.
+    workflow.stages[0]!.slots[0]!.agent = { ...workflow.stages[0]!.slots[0]!.agent, model: 'slow:400' };
     workflow.orchestrator = { enabled: true, agent: { provider: 'mock', model: 'ok', permission: 'safe' }, gateTimeoutSec: 5 };
     const task = [
       'MOCK_WRITE:evidence.txt',
