@@ -51,7 +51,7 @@ const itemText = (item: Record<string, unknown>): string => {
   return '';
 };
 
-function codexChildEnv(command: string, nodeCommand?: string): NodeJS.ProcessEnv {
+export function codexChildEnv(command: string, nodeCommand?: string): NodeJS.ProcessEnv {
   const env = augmentedPathEnv();
   const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? (process.platform === 'win32' ? 'Path' : 'PATH');
   const prepends: string[] = [];
