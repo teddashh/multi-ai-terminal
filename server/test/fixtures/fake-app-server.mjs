@@ -44,6 +44,12 @@ input.on('line', (line) => {
   const action = Array.isArray(raw) ? (raw[count] ?? raw.at(-1) ?? {}) : raw;
   if (action.notification) later(action.notification.delayMs, () => send({ method: action.notification.method, params: action.notification.params }));
   if (action.serverRequest) later(action.serverRequest.delayMs, () => send({ method: action.serverRequest.method, id: action.serverRequest.id, params: action.serverRequest.params }));
+  for (const entry of action.notifications ?? []) {
+    if (entry.onSpawn !== undefined && entry.onSpawn !== spawnIndex) continue;
+    later(entry.delayMs, () => send(entry.serverRequest
+      ? { method: entry.serverRequest.method, id: entry.serverRequest.id, params: entry.serverRequest.params }
+      : { method: entry.method, ...(entry.id !== undefined ? { id: entry.id } : {}), params: entry.params }));
+  }
   const noReply = action.noReply === true || action.noReplyOnSpawn === spawnIndex;
   const result = action.resultBySpawn?.[spawnIndex] ?? action.result;
   if (!noReply) later(action.delayMs, () => send(action.error
