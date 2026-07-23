@@ -49,6 +49,19 @@ export class CodexThreadManager {
   threadIdFor(sessionKey: string): string | undefined { return this.sessions.get(sessionKey)?.threadId; }
   tokenUsageFor(sessionKey: string): ParsedTokenUsage | undefined { return this.sessions.get(sessionKey)?.tokenUsage; }
 
+  adoptThread(sessionKey: string, threadId: string): void {
+    const state = this.state(sessionKey);
+    if (state.threadId) this.threadOwners.delete(state.threadId);
+    state.threadId = threadId;
+    state.hasCompletedTurn = true;
+    state.generation = this.generation - 1;
+    this.threadOwners.set(threadId, sessionKey);
+  }
+
+  busy(): boolean {
+    return this.approvals.size > 0 || [...this.sessions.values()].some((state) => state.running !== undefined && !state.running.finished);
+  }
+
   startTurn(sessionKey: string, options: CodexTurnOptions): Promise<CodexTurnOutcome> {
     let result!: Promise<CodexTurnOutcome>;
     return this.enqueue(sessionKey, async (state) => {

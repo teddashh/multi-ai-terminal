@@ -148,6 +148,11 @@ describe('claude adapter', () => {
 });
 
 describe('codex adapter', () => {
+  // These fixtures simulate the legacy `codex exec --json` child, which is now
+  // an explicit opt-out behind the app-server session runtime default.
+  beforeAll(() => { process.env.MAT_CODEX_RUNTIME = 'exec'; });
+  afterAll(() => { delete process.env.MAT_CODEX_RUNTIME; });
+
   it('normalizes the basic fixture and camel-cases usage', async () => {
     const { events, outcome } = await runFixture(codexAdapter, spec('codex'), 'codex.jsonl');
     expect(events).toEqual([{ role: 'agent', kind: 'message', text: 'ok' }]);

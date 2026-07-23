@@ -88,6 +88,10 @@ export class CodexConnection {
     return this.slot?.ready === true && !this.slot.lost;
   }
 
+  pid(): number | undefined {
+    return this.slot?.child.pid;
+  }
+
   async request<T = unknown>(method: string, params?: unknown, opts: { timeoutMs?: number } = {}): Promise<T> {
     const slot = await this.ensureReady();
     return this.sendRequest(slot, method, params, opts.timeoutMs ?? DEFAULT_TIMEOUT_MS) as Promise<T>;

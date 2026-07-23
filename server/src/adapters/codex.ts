@@ -4,6 +4,7 @@ import { augmentedPathEnv, spawnManaged } from '../spawn.js';
 import { getDataDir } from '../store/dataDir.js';
 import { managedBinaryPath } from '../runtime/install.js';
 import { resolveRuntimeBinary, runtimeBinaryForSpawn } from '../runtime/resolve.js';
+import { codexSessionRuntime } from '../providers/codex/runtime.js';
 import {
   createLineBuffer,
   humanizeError,
@@ -196,7 +197,12 @@ function spawnCodexCommand(command: string, spec: ResolvedNodeSpec, io: Paramete
 }
 
 export function spawnCodex(spec: ResolvedNodeSpec, io: Parameters<Adapter['spawn']>[1]): SpawnedNode {
+  if (codexRuntimeMode() === 'app-server') return codexSessionRuntime().startRun(spec, io);
   return spawnCodexCommand(spec.runtimeCommand ?? runtimeBinaryForSpawn(getDataDir(), 'codex'), spec, io);
+}
+
+export function codexRuntimeMode(env: NodeJS.ProcessEnv = process.env): 'app-server' | 'exec' {
+  return env.MAT_CODEX_RUNTIME === 'exec' ? 'exec' : 'app-server';
 }
 
 export const codexAdapter: Adapter = {

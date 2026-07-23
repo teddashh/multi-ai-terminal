@@ -48,6 +48,10 @@ export function translateNotification(method: string, params: unknown, outputs: 
   if (method === 'item/commandExecution/outputDelta' && id) { outputs.set(id, `${outputs.get(id) ?? ''}${stripAnsi(string(p.delta ?? p.text) ?? '')}`); return []; }
   if (!item || (method !== 'item/started' && method !== 'item/completed')) return [];
   const type = string(item.type) ?? 'unknown';
+  // Message-family items duplicate content that already streams through the
+  // delta channels (real 0.144.0 wire emits both); surfacing them as tool
+  // rows is pure noise. userMessage is the prompt echo.
+  if (type === 'userMessage' || type === 'agentMessage' || type === 'reasoning') return [];
   const started = method === 'item/started';
   if (type === 'commandExecution') {
     if (started) { outputs.set(id ?? '', ''); return [toolEvent('tool_use', 'Bash', id, { command: item.command, cwd: item.cwd })]; }
