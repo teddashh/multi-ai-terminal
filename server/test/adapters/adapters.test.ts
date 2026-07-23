@@ -102,6 +102,8 @@ async function runFixture(adapter: Adapter, nodeSpec: ResolvedNodeSpec, name: st
 }
 
 describe('claude adapter', () => {
+  beforeAll(() => { process.env.MAT_CLAUDE_RUNTIME = 'cli'; });
+  afterAll(() => { delete process.env.MAT_CLAUDE_RUNTIME; });
   it('normalizes the basic fixture and delivers the prompt through closed stdin', async () => {
     const result = await runFixture(claudeAdapter, spec('claude', { model: 'haiku' }, 'hello stdin'), 'claude.jsonl');
     expect(result.events).toEqual([

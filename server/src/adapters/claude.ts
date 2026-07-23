@@ -2,6 +2,7 @@ import type { AdapterContentEvent } from '@mat/shared';
 import { spawnManaged } from '../spawn.js';
 import { getDataDir } from '../store/dataDir.js';
 import { resolveRuntimeBinary, runtimeBinaryForSpawn } from '../runtime/resolve.js';
+import { claudeSessionRuntime } from '../providers/claude/runtime.js';
 import {
   createLineBuffer,
   parseJsonObject,
@@ -146,7 +147,12 @@ function spawnClaudeCommand(command: string, spec: ResolvedNodeSpec, io: Paramet
 }
 
 export function spawnClaude(spec: ResolvedNodeSpec, io: Parameters<Adapter['spawn']>[1]): SpawnedNode {
+  if (claudeRuntimeMode() === 'sdk') return claudeSessionRuntime().startRun(spec, io);
   return spawnClaudeCommand(spec.runtimeCommand ?? runtimeBinaryForSpawn(getDataDir(), 'claude'), spec, io);
+}
+
+export function claudeRuntimeMode(env = process.env): 'sdk' | 'cli' {
+  return env.MAT_CLAUDE_RUNTIME === 'cli' ? 'cli' : 'sdk';
 }
 
 export const claudeAdapter: Adapter = {
