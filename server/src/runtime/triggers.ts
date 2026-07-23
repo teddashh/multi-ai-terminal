@@ -8,6 +8,7 @@ import { clearRuntimeResolutionCache, resolveRuntimeBinary, type ResolveOptions 
 
 export type ManagedRuntimeFamily = 'claude' | 'codex';
 const FAMILIES: readonly ManagedRuntimeFamily[] = ['claude', 'codex'];
+const SELF_PROVISION_FAMILIES: readonly ManagedRuntimeFamily[] = ['codex', 'claude'];
 type Listener = (event: RuntimeChangedEvent) => void;
 const listeners = new Set<Listener>();
 let active: { family: ManagedRuntimeFamily; promise: Promise<unknown> } | undefined;
@@ -106,10 +107,18 @@ export function clearFamily(dataDir: string, family: ManagedRuntimeFamily, deps:
 export function maybeSelfProvision(dataDir: string, deps: TriggerDependencies = {}): void {
   if (process.env.MAT_SELF_PROVISION !== '1' || selfProvisionStarted) return;
   selfProvisionStarted = true;
-  void runtimeStatus(dataDir, deps).then((statuses) => {
-    const codex = statuses.find((item) => item.family === 'codex');
-    if (codex?.state === 'missing' && codex.canInstallManaged) void installFamily(dataDir, 'codex', deps).catch((error) => console.error(`[mat] managed codex self-provision failed: ${redactEnvironmentValues(error instanceof Error ? error.message : String(error))}`));
-  }).catch((error) => console.error(`[mat] managed runtime status failed: ${redactEnvironmentValues(error instanceof Error ? error.message : String(error))}`));
+  void (async () => {
+    for (const family of SELF_PROVISION_FAMILIES) {
+      try {
+        // Recheck immediately before each mutation: an earlier install or an
+        // external tool becoming available must never be overwritten.
+        const status = (await runtimeStatus(dataDir, deps)).find((item) => item.family === family);
+        if (status?.state === 'missing' && status.canInstallManaged) await installFamily(dataDir, family, deps);
+      } catch (error) {
+        console.error(`[mat] managed ${family} self-provision failed: ${redactEnvironmentValues(error instanceof Error ? error.message : String(error))}`);
+      }
+    }
+  })();
 }
 
 export function resetRuntimeTriggersForTest(): void { active = undefined; reserved = undefined; inFlight.clear(); tail = Promise.resolve(); selfProvisionStarted = false; listeners.clear(); }

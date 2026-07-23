@@ -7,16 +7,21 @@
 //    fails WITHOUT gaining errorReason or registering an auth alert, while
 //    the CLI's own text stays intact in the event transcript and the report
 //    still carries the failure line.
-import { spawn, execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  fetchWithTimeout,
+  isolatedServerEnvironment,
+  launchEvidenceServer,
+} from './harness.mjs';
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const ROOT = process.env.MAT_ROOT ?? REPO_ROOT;
-const PORT = Number(process.env.MAT_PORT ?? 7817);
-const BASE = `http://127.0.0.1:${PORT}`;
+const PORT = Number(process.env.MAT_PORT ?? 0);
+let baseUrl;
 const failures = [];
 const check = (name, ok, detail = '') => {
   failures.push(...(ok ? [] : [name + (detail ? ` — ${detail}` : '')]));
@@ -24,7 +29,8 @@ const check = (name, ok, detail = '') => {
 };
 
 const api = async (path, init) => {
-  const response = await fetch(`${BASE}${path}`, { ...init, headers: { ...(init?.body === undefined ? {} : { 'content-type': 'application/json' }), ...(init?.headers ?? {}) } });
+  if (!baseUrl) throw new Error(`cannot call ${path} before this server reports READY`);
+  const response = await fetchWithTimeout(`${baseUrl}${path}`, { ...init, headers: { ...(init?.body === undefined ? {} : { 'content-type': 'application/json' }), ...(init?.headers ?? {}) } });
   const type = response.headers.get('content-type') ?? '';
   const body = type.includes('json') ? await response.json() : await response.text();
   return { status: response.status, body };
@@ -51,16 +57,18 @@ const gitWorkspace = () => {
 
 const dataDir = mkdtempSync(join(tmpdir(), 'mat-v019-data-'));
 const ws = gitWorkspace();
-const child = spawn(process.execPath, [join(ROOT, 'server/dist/index.js')], {
-  env: { ...process.env, MAT_PORT: String(PORT), MAT_DATA_DIR: dataDir, MAT_HOST: '127.0.0.1' },
-  stdio: ['ignore', 'pipe', 'pipe'],
-});
+const harnessRoot = mkdtempSync(join(tmpdir(), 'mat-v019-harness-'));
 let serverLog = '';
-child.stdout.on('data', (chunk) => { serverLog += chunk; });
-child.stderr.on('data', (chunk) => { serverLog += chunk; });
+let server;
 
 try {
-  await waitFor(async () => { try { return (await api('/api/health')).status === 200 ? true : undefined; } catch { return undefined; } }, 'server health', 15_000);
+  const env = isolatedServerEnvironment({ harnessRoot, dataDir, port: PORT });
+  server = launchEvidenceServer({
+    root: ROOT,
+    env,
+    onOutput: (text) => { serverLog += text; },
+  });
+  baseUrl = await server.ready;
   const expectVersion = process.env.MAT_EXPECT_VERSION ?? '0.1.9';
   const health = (await api('/api/health')).body;
   check(`H: server reports ${expectVersion}`, health.version === expectVersion, String(health.version));
@@ -101,9 +109,21 @@ try {
   check('instrument completed', false, String(error?.stack ?? error));
   console.error('--- server log tail ---\n' + serverLog.slice(-2000));
 } finally {
-  child.kill('SIGTERM');
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  for (const dir of [dataDir, ws]) { try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best effort */ } }
+  try {
+    await server?.stop();
+  } catch (error) {
+    check('H: server process tree closes', false, String(error?.message ?? error));
+  }
+  for (const dir of [dataDir, ws, harnessRoot]) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch (error) {
+      check('H: temporary evidence directories are removed', false, String(error?.message ?? error));
+    }
+  }
+  if ([dataDir, ws, harnessRoot].some((dir) => existsSync(dir))) {
+    check('H: temporary evidence directories are removed', false);
+  }
 }
 
 console.log(failures.length === 0 ? '\nALL CHECKS PASSED' : `\n${failures.length} FAILURES:\n${failures.join('\n')}`);

@@ -6,6 +6,7 @@ import { managedBinaryPath } from '../runtime/install.js';
 import { resolveRuntimeBinary, runtimeBinaryForSpawn } from '../runtime/resolve.js';
 import { codexSessionRuntime } from '../providers/codex/runtime.js';
 import { configuredOpenAiKey } from '../providers/codex/apiKey.js';
+import { redactEnvironmentValues, redactJsonValue } from '../redact.js';
 import {
   createLineBuffer,
   humanizeError,
@@ -44,6 +45,9 @@ export function buildCodexArgs(spec: ResolvedNodeSpec): string[] {
 
 const stringField = (record: Record<string, unknown>, key: string): string | undefined =>
   typeof record[key] === 'string' ? record[key] : undefined;
+const usageNumber = (value: unknown): number | undefined => (
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+);
 
 const itemText = (item: Record<string, unknown>): string => {
   if (typeof item.text === 'string') return item.text;
@@ -86,12 +90,30 @@ export function codexExecEnv(command: string, nodeCommand?: string): NodeJS.Proc
 }
 
 function spawnCodexCommand(command: string, spec: ResolvedNodeSpec, io: Parameters<Adapter['spawn']>[1]): SpawnedNode {
-  const managed = spawnManaged({ command, args: buildCodexArgs(spec), cwd: spec.cwd, stdin: spec.promptText, env: codexExecEnv(command, spec.runtimeNodeCommand) });
+  const childEnv = codexExecEnv(command, spec.runtimeNodeCommand);
+  const managed = spawnManaged({ command, args: buildCodexArgs(spec), cwd: spec.cwd, stdin: spec.promptText, env: childEnv });
   const { child } = managed;
   let sessionRef: string | undefined;
   let usage: NodeOutcome['usage'];
   let resultText = '';
   let reportedError: string | undefined;
+  const safeText = (value: string): string => redactEnvironmentValues(value, childEnv);
+  const emitEvent = (event: Parameters<typeof io.onEvent>[0]): void => {
+    io.onEvent({
+      ...event,
+      text: safeText(event.text),
+      ...(event.tool ? {
+        tool: {
+          ...event.tool,
+          name: safeText(event.tool.name),
+          ...(event.tool.toolCallId !== undefined ? { toolCallId: safeText(event.tool.toolCallId) } : {}),
+          ...(event.tool.input !== undefined ? { input: safeText(event.tool.input) } : {}),
+          ...(event.tool.output !== undefined ? { output: safeText(event.tool.output) } : {}),
+        },
+      } : {}),
+      ...(event.data ? { data: redactJsonValue(event.data, childEnv) } : {}),
+    });
+  };
 
   const handleItem = (eventType: string, item: Record<string, unknown>): void => {
     const itemType = stringField(item, 'type') ?? 'unknown';
@@ -99,14 +121,14 @@ function spawnCodexCommand(command: string, spec: ResolvedNodeSpec, io: Paramete
     if (itemType === 'command_execution') {
       const command = stringField(item, 'command') ?? '';
       if (eventType === 'item.started') {
-        io.onEvent({
+        emitEvent({
           role: 'tool', kind: 'tool_use', text: command,
           tool: { ...(id ? { toolCallId: id } : {}), name: 'shell', input: stringifyToolValue(command) },
         });
       } else if (eventType === 'item.completed') {
         const output = stringField(item, 'aggregated_output') ?? '';
         const exitCode = typeof item.exit_code === 'number' ? item.exit_code : undefined;
-        io.onEvent({
+        emitEvent({
           role: 'tool', kind: 'tool_result', text: output,
           tool: {
             ...(id ? { toolCallId: id } : {}), name: 'shell', output: stringifyToolValue(output),
@@ -119,25 +141,25 @@ function spawnCodexCommand(command: string, spec: ResolvedNodeSpec, io: Paramete
     if (itemType === 'agent_message') {
       if (eventType !== 'item.completed') return;
       const text = itemText(item);
-      resultText = text;
-      io.onEvent({ role: 'agent', kind: 'message', text });
+      resultText = safeText(text);
+      emitEvent({ role: 'agent', kind: 'message', text });
       return;
     }
     if (itemType === 'reasoning') {
       if (eventType !== 'item.completed') return;
       const text = itemText(item);
-      if (text) io.onEvent({ role: 'thinking', kind: 'thinking', text });
+      if (text) emitEvent({ role: 'thinking', kind: 'thinking', text });
       return;
     }
 
     const serialized = stringifyToolValue(item);
     if (eventType === 'item.started') {
-      io.onEvent({
+      emitEvent({
         role: 'tool', kind: 'tool_use', text: itemType,
         tool: { ...(id ? { toolCallId: id } : {}), name: itemType, input: serialized },
       });
     } else if (eventType === 'item.completed') {
-      io.onEvent({
+      emitEvent({
         role: 'tool', kind: 'tool_result', text: itemType,
         tool: { ...(id ? { toolCallId: id } : {}), name: itemType, output: serialized },
       });
@@ -147,7 +169,8 @@ function spawnCodexCommand(command: string, spec: ResolvedNodeSpec, io: Paramete
   const handleRecord = (record: Record<string, unknown>): void => {
     const type = stringField(record, 'type');
     if (type === 'thread.started') {
-      sessionRef = stringField(record, 'thread_id');
+      const value = stringField(record, 'thread_id');
+      sessionRef = value === undefined ? undefined : safeText(value);
       return;
     }
     if (type === 'item.started' || type === 'item.completed') {
@@ -161,27 +184,29 @@ function spawnCodexCommand(command: string, spec: ResolvedNodeSpec, io: Paramete
       const rawUsage = record.usage;
       if (rawUsage && typeof rawUsage === 'object' && !Array.isArray(rawUsage)) {
         const value = rawUsage as Record<string, unknown>;
+        const inputTokens = usageNumber(value.input_tokens);
+        const outputTokens = usageNumber(value.output_tokens);
         usage = {
-          ...(typeof value.input_tokens === 'number' ? { inputTokens: value.input_tokens } : {}),
-          ...(typeof value.output_tokens === 'number' ? { outputTokens: value.output_tokens } : {}),
+          ...(inputTokens !== undefined ? { inputTokens } : {}),
+          ...(outputTokens !== undefined ? { outputTokens } : {}),
         };
       }
       return;
     }
     if (type === 'turn.failed' || type === 'error') {
-      reportedError = humanizeError(
+      reportedError = safeText(humanizeError(
         stringField(record, 'message') ?? (record.error === undefined ? `${type}` : record.error),
         'codex',
-      );
+      ));
     }
   };
 
   const stdout = createLineBuffer((line) => {
-    io.onRaw(line, 'out');
+    io.onRaw(safeText(line), 'out');
     const record = parseJsonObject(line);
     if (record) handleRecord(record);
   });
-  const stderr = createLineBuffer((line) => io.onRaw(line, 'err'));
+  const stderr = createLineBuffer((line) => io.onRaw(safeText(line), 'err'));
   child.stdout?.on('data', (chunk: Buffer) => stdout.push(chunk));
   child.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk));
 
@@ -191,7 +216,9 @@ function spawnCodexCommand(command: string, spec: ResolvedNodeSpec, io: Paramete
     child.once('close', (code, signal) => {
       stdout.end();
       stderr.end();
-      const error = spawnError ? humanizeError(spawnError, 'codex') : (reportedError ?? (code ? humanizeError(`Codex exited ${code}`, 'codex') : undefined));
+      const error = spawnError
+        ? safeText(humanizeError(spawnError, 'codex'))
+        : (reportedError ?? (code ? safeText(humanizeError(`Codex exited ${code}`, 'codex')) : undefined));
       resolve({
         exitCode: code,
         ...(signal ? { signal } : {}),
@@ -218,6 +245,7 @@ export function codexRuntimeMode(env: NodeJS.ProcessEnv = process.env): 'app-ser
 export const codexAdapter: Adapter = {
   id: 'codex',
   tier: 'rich',
+  runtimeFamily: 'codex',
   models: ['gpt-5.6-sol'],
   defaultModel: 'gpt-5.6-sol',
   available: async () => { const command = await resolveRuntimeBinary(getDataDir(), 'codex'); return command ? probeVersion(command) : { ok: false }; },

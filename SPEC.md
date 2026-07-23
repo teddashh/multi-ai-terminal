@@ -1,19 +1,19 @@
 # Multi-AI Terminal — Product & Engineering Spec (v1.5)
 
-> v1.1 incorporates the 4-model panel review (codex gpt-5.6-sol, agy Gemini 3.1 Pro, grok 4.5, Claude Fable 5 — all verdicts: revise; findings merged, see docs/spec-review-panel.md). The normative v1.2 evidence-plane, v1.3 steering/debug-plane, v1.4 evidence-workbench UX, and v1.5 provider-recovery/localized-UI amendments are integrated below and summarized at the end.
-> Base date: 2026-07-18. Amended through 2026-07-21.
+> v1.1 incorporates the 4-model panel review (codex gpt-5.6-sol, agy Gemini 3.1 Pro, grok 4.5, Claude Fable 5 — all verdicts: revise; findings merged, see docs/spec-review-panel.md). The normative v1.2 evidence-plane, v1.3 steering/debug-plane, v1.4 evidence-workbench UX, and v1.5 provider-recovery/localized-UI amendments are integrated below and summarized at the end. The BAT-runtime alignment is integrated through product v0.2.10.
+> Base date: 2026-07-18. Amended through 2026-07-23.
 
 ## 0. What this is
 
-**Multi-AI Terminal (MAT)** is a workflow-orchestration workbench for **CLI coding agents** (claude, codex, grok, agy). The user composes a workflow (e.g. *Planning Mode*: Orchestrator → Round-Table candidates → Final Reviewer), drags agents onto workflow checkpoints, and watches every agent's live, categorized message stream (**your / agent / tool / thinking**), while a real LLM orchestrator monitors the run and decides advance/retry at each gate.
+**Multi-AI Terminal (MAT)** is a workflow-orchestration workbench for **headless coding-agent runtimes** (claude, codex, grok, agy, and OpenRouter through Codex-as-runtime). The user composes a workflow (e.g. *Planning Mode*: Orchestrator → Round-Table candidates → Final Reviewer), drags agents onto workflow checkpoints, and watches every agent's live, categorized message stream (**your / agent / tool / thinking**), while a real LLM orchestrator monitors the run and decides advance/retry at each gate.
 
 Successor concept to `multi-ai-chat-desktop` (webchat orchestration), rebuilt on the CLI/agent-SDK path. **Not** a terminal emulator, **not** a fork of better-agent-terminal.
 
 ### Decisions locked by the 12-round design debate (do not relitigate)
 
 1. **Do not reuse multi-ai-chat-desktop's runtime** (webview automation). Borrow only UI mental model + design tokens.
-2. **Single primary data stream = headless JSONL.** Every workflow node runs its CLI non-interactively. No interactive PTY, no ANSI parsing, no xterm.js in v1. *(Note: the debated "read-only raw-PTY pane" fallback for non-JSONL CLIs is superseded by the `plain` tier in §4.4 — same observability, less machinery.)*
-3. **Per-provider adapters normalize output to one internal event schema.** Hard-coded mappings per CLI. CLIs without JSON output (agy) are `plain` tier: stdout streams in as chunked agent text.
+2. **Single primary data stream = a headless machine interface.** Workflow nodes use JSONL CLI output, Codex app-server JSON-RPC/JSONL, or the Claude Agent SDK; none uses an interactive PTY, ANSI terminal parsing, or xterm.js. *(The debated "read-only raw-PTY pane" fallback for non-JSONL CLIs is superseded by the `plain` tier in §4.4 — same observability, less machinery.)*
+3. **Per-provider runtimes normalize output to one evidence schema.** Native translators plus the single manager bridge own hard-coded mappings. Providers without structured output (agy) remain `plain` tier: stdout streams in as chunked agent text.
 4. **Presentation layer is a styled message panel** (React list, four categories + status). This is the product's differentiation, written from scratch.
 5. **Orchestrator = a real LLM agent, minimum-branch.** Deterministic trunk (fan-out stage → join → gate → next stage); the LLM decides only at gates: advance / retry(nodes, addendum) / abort, emitting a machine-parseable decision + rationale (decision log is first-class UI data).
 6. **Turn-based coordination via job queue + files.** No realtime stdin injection. Fan-in compares normalized events/artifacts.
@@ -32,7 +32,7 @@ The user opens MAT in the Tauri desktop app or from a headless dev box via brows
 
 **Topology: single Node.js server process + browser UI, packaged in a Tauri v2 desktop shell.**
 
-- Server: **Node ≥ 20, TypeScript, Fastify** (REST + WebSocket + static hosting). Spawns agent CLIs as child processes, parses stdout line-by-line, persists + broadcasts normalized events.
+- Server: **Node ≥ 20, TypeScript, Fastify** (REST + WebSocket + static hosting). Drives headless CLI, Agent SDK, and JSON-RPC app-server runtimes, persists normalized evidence, and broadcasts only after durable append.
 - Frontend: **React 18 + Vite + TypeScript + Tailwind CSS + zustand + @dnd-kit/core + @tanstack/react-virtual**. Backend touchpoints ONLY via `web/src/api/client.ts` (REST) and `web/src/api/ws.ts` (WS).
 - Shared package: **zod schemas + TS types** consumed by both sides.
 - Monorepo: npm workspaces (`shared/`, `server/`, `web/`). ESM, TS strict. Engines `>=20`.
@@ -52,14 +52,16 @@ multi-ai-terminal/
 ├── tools/evidence/             # built-server and extracted-artifact black-box instruments
 ├── shared/
 │   └── src/
-│       ├── events.ts workflow.ts run.ts providers.ts api.ts   # types + zod (normative, §3)
+│       ├── events.ts providerEvents.ts workflow.ts run.ts providers.ts api.ts   # types + zod (§3)
 │       ├── presets/planning.json build.json review.json       # §10
 │       └── index.ts
 ├── server/
 │   ├── src/
 │   │   ├── index.ts            # mat-server [--port 7788] [--host 127.0.0.1] [--data-dir …] [--token …]
-│   │   ├── spawn.ts            # §4.6 sanitized-env process-group spawn
-│   │   ├── adapters/           # base.ts claude.ts codex.ts grok.ts agy.ts mock.ts registry.ts
+│   │   ├── spawn.ts            # §4.7 sanitized-env process-group spawn
+│   │   ├── runtime/            # pinned catalog installer, resolver, mutation triggers
+│   │   ├── providers/          # contract.ts + claude/codex/grok/agy/openrouter managers
+│   │   ├── adapters/           # base.ts claude.ts codex.ts grok.ts agy.ts openrouter.ts mock.ts registry.ts
 │   │   ├── engine/             # runManager.ts stageRunner.ts nodeRunner.ts digest.ts worktree.ts
 │   │   ├── orchestrator/       # gate.ts decision.ts prompts.ts
 │   │   ├── store/              # dataDir.ts workspaces.ts workflows.ts runs.ts eventLog.ts
@@ -116,18 +118,34 @@ export interface AgentEvent {
 4. **eventLog.append is the single writer** (§7): per-run FIFO queue; assigns `id/seq/ts`; appends durably to `events.jsonl`; ONLY THEN `wsHub.broadcast(event)`. Synchronous interface: `appendEvent(runId, partial): AgentEvent`.
 5. **Events are immutable.** Streaming deltas (grok tokens, agy stdout) are coalesced per (nodeRunId, kind) and flushed on kind-change, ≥1500 ms, or ≥2 KB buffer — each flush appends a NEW event with `data:{continued:true}` after the first. The Narrative projection and digest builder may merge only adjacent, identity-compatible continuation events into one readable/logical block. Timeline retains every source event with its original `id` and `seq`; tool halves and duplicate prompts may receive adjacent-only visual grouping, but the representation must expand back into monotonically increasing source sequence order.
 6. Non-JSON stdout lines from `rich`-tier CLIs are silently skipped for normalization but always land in the raw log.
-7. Every raw stdout/stderr line is appended verbatim to `raw/<nodeRunId>.a<attempt>.jsonl` as `{s:'out'|'err', l:string, ts:number}`.
+7. Every raw stdout/stderr line is appended to `raw/<nodeRunId>.a<attempt>.jsonl` as `{s:'out'|'err', l:string, ts:number}` after source-aware environment-value redaction. Ordering and stream identity are preserved; secrets are not.
+
+### 3.1.1 Internal provider-manager surface
+
+`shared/src/providerEvents.ts` defines BAT's provider-neutral, strict 19-event manager surface. The historical `claude:*` namespace is intentionally shared by every provider:
+
+`claude:message`, `claude:tool-use`, `claude:tool-result`, `claude:stream`, `claude:status`, `claude:result`, `claude:turn-end`, `claude:error`, `claude:rate-limit`, `claude:task`, `claude:permission-request`, `claude:permission-resolved`, `claude:ask-user`, `claude:ask-user-resolved`, `claude:modeChange`, `claude:history`, `claude:resume-loading`, `claude:session-reset`, and `claude:worktree-info`.
+
+This manager contract is not a second durable event log:
+
+1. Every provider event carries `sessionId`. Every `claude:status` carries one full `ProviderSessionMeta` snapshot; consumers never merge partial status patches. Every started provider turn terminates with exactly one `claude:turn-end` (`completed | error | interrupted | aborted`).
+2. `server/src/providers/contract.ts` owns the single provider-to-evidence bridge. It canonicalizes common tool names (`Bash`, `Edit`, `WebSearch`, `TodoWrite`), projects content and technical status, suppresses provider-history replay, and folds provider terminal metadata into `NodeOutcome.providerTurn`.
+3. The adapter IO boundary remains §3.1 rule 1: adapters emit content only. Current production managers feed `AdapterContentEvent` through `acceptContent()`; the richer event shapes are validated compatibility ingress reserved for future native manager emitters and do not make those features reachable today. Neither path stamps durable identity or appends lifecycle events.
+4. `nodeRunner` remains the sole lifecycle mapper and durable writer for provider evidence. Provider `result`, fatal `error`, and `turn-end` metadata enrich the one engine-owned terminal result/error path; they never create a parallel provider-owned lifecycle sequence. Technical provider state is emitted as system/status evidence and does not mutate `NodeRun.status`.
+5. `eventLog.append` remains the only authority for durable `id`, `seq`, and `ts`, and still appends before broadcast. Provider ids/timestamps are provenance only. MAT's `events.jsonl`, not `claude:history`, is replay authority.
+
+Contract tests live at `server/test/providers/contract.test.ts`. The independent built-server instrument is `tools/evidence/repro-runtime-contract.mjs`, backed by `tools/evidence/fake-codex-runtime.mjs`.
 
 ### 3.2 Workflow definition
 
 ```ts
 // shared/src/workflow.ts
-export type ProviderId = 'claude' | 'codex' | 'grok' | 'agy' | 'mock';
+export type ProviderId = 'claude' | 'codex' | 'grok' | 'agy' | 'openrouter' | 'mock';
 export interface AgentBinding {
   provider: ProviderId;
   model?: string;                       // free text; UI suggests via /api/providers
   effort?: 'low' | 'medium' | 'high' | 'xhigh';   // mapped per provider; ignored where N/A
-  permission: 'safe' | 'auto' | 'full';           // §4.5
+  permission: 'safe' | 'auto' | 'full';           // §4.6
   systemPromptAppend?: string;
   maxTurns?: number;
 }
@@ -250,16 +268,25 @@ export type WsServerMsg =
 export interface ResolvedNodeSpec {          // built by nodeRunner; the ONLY spawn input
   binding: AgentBinding; promptText: string; cwd: string;
   resumeSessionRef?: string;                 // orchestrator only in v1
+  runtimeCommand?: string;                   // nodeRunner-resolved managed/external runtime
+  runtimeNodeCommand?: string;               // Node used by Codex helper scripts
 }
 export interface NodeOutcome {
   exitCode: number | null; signal?: string;
   sessionRef?: string; usage?: Usage;        // camelCase; adapters convert CLI casing
   resultText?: string;                       // accumulated by the adapter during streaming
   error?: string;
+  providerTurn?: {                           // terminal manager metadata; not a second lifecycle event
+    event: 'claude:turn-end'; sessionId: string;
+    reason: 'completed' | 'error' | 'interrupted' | 'aborted';
+    status: ProviderSessionMeta;
+  };
 }
 export interface SpawnedNode { pid: number; kill(sig?: NodeJS.Signals): void; completion: Promise<NodeOutcome> }
 export interface Adapter {
   id: ProviderId; tier: 'rich' | 'plain';
+  runtimeFamily?: 'claude' | 'codex';
+  environmentCredential?(): { name: string; configured: boolean };
   available(): Promise<{ ok: boolean; version?: string; detail?: string }>;
   spawn(spec: ResolvedNodeSpec, io: { onEvent(e: AdapterContentEvent): void;
                                       onRaw(line: string, stream: 'out'|'err'): void }): SpawnedNode;
@@ -268,31 +295,38 @@ export interface Adapter {
 ```
 
 - Adapters accumulate agent text internally; `NodeOutcome.resultText` = final agent message (never assume the CLI's terminal event carries it).
-- Prompt delivery (ARG_MAX safety): claude & codex via **stdin**; grok via `--prompt-file`; agy via argv (cap 200 KB, else error event).
-- Binary resolution: `registry.ts` maps provider → binary name on PATH. No executable overrides in v1.
+- The adapter callback remains content-only. `ProviderTurnBridge` wraps every real provider at the engine boundary and owns manager status/terminal projection; `mock` remains deliberately exempt.
+- Prompt delivery (ARG_MAX safety): Claude Agent SDK and Codex app-server use their machine protocols; legacy claude/codex transports use stdin; grok uses `--prompt-file`; agy uses argv (cap 200 KB, else a failed outcome).
+- Binary resolution: `MAT_<FAMILY>_BIN` absolute override → catalog-pinned managed path → PATH-discovered runtime. On desktop startup, missing supported managed artifacts may be bootstrapped automatically; every artifact is verified before publication and stored below `<dataDir>/runtimes/`.
 
-### 4.1 claude (rich) — verified 2026-07-18, claude-code 2.1.214 (fixtures: claude.jsonl, claude-tool.jsonl)
+### 4.1 claude (rich) — Agent SDK session runtime; legacy CLI fixture path
 
-```
+The production path uses `@anthropic-ai/claude-agent-sdk` with a per-session streaming `LiveQuery`, resume/rebuild semantics, interrupt support, and the resolved catalog-pinned `claude` executable. `MAT_CLAUDE_RUNTIME=cli` is an explicit legacy mode, not an automatic failover. Its verified one-shot invocation remains:
+
+```sh
 <prompt on stdin> claude -p --output-format stream-json --verbose \
   [--model M] [--permission-mode PM] [--max-turns N] [--resume SESSION_ID]
 ```
 - `--verbose` REQUIRED with `-p` stream-json.
-- Mapping: `system/init` → capture sessionRef; `assistant.message.content[]`: `text`→agent/message, `thinking`→thinking/thinking, `tool_use`→tool/tool_use (toolCallId=id, input JSON-stringified, 4 KB truncate); `user.message.content[].tool_result`→tool/tool_result (toolCallId=tool_use_id, 4 KB truncate); `result`→outcome {exitCode 0, usage {inputTokens:usage.input_tokens, outputTokens:usage.output_tokens, costUsd:total_cost_usd}, resultText: result ?? accumulated}. Skip `rate_limit_event`, `system/*` others (raw log only).
-- effort: not mapped v1. Resume: `--resume <sessionRef>` + new prompt on stdin.
+- Legacy mapping: `system/init` → capture sessionRef; `assistant.message.content[]`: `text`→agent/message, `thinking`→thinking/thinking, `tool_use`→tool/tool_use (toolCallId=id, input JSON-stringified, 4 KB truncate); `user.message.content[].tool_result`→tool/tool_result (toolCallId=tool_use_id, 4 KB truncate); `result`→outcome {exitCode 0, usage {inputTokens:usage.input_tokens, outputTokens:usage.output_tokens, costUsd:total_cost_usd}, resultText: result ?? accumulated}. Skip `rate_limit_event`, `system/*` others (raw log only).
+- Legacy effort is not mapped. Legacy resume uses `--resume <sessionRef>` + a new prompt on stdin; the Agent SDK runtime owns production session continuity.
 
-### 4.2 codex (rich) — verified, codex-cli 0.144.0 (fixtures: codex.jsonl, codex-tool.jsonl, codex.dirty.jsonl)
+### 4.2 codex (rich) — persistent app-server runtime; legacy CLI fixture path
 
-```
+The production path is one lazy shared `codex app-server` JSON-RPC/JSONL controller with per-session serialization, thread ownership/resume, turn interrupt, stale-event filtering, approval handling, and idle recycle. `MAT_CODEX_RUNTIME=exec` is the explicit one-shot legacy mode. Its verified invocation remains:
+
+```sh
 codex exec --json -m gpt-5.6-sol [-c model_reasoning_effort=E] --cd <CWD> \
   --sandbox <MODE> --skip-git-repo-check -      (prompt on stdin via '-'; never leave stdin open)
 ```
-- Mapping: `thread.started`→sessionRef=thread_id; `item.started {item.type:'command_execution'}`→tool/tool_use (toolCallId=item.id, name 'shell', input=command); `item.completed {command_execution}`→tool/tool_result (output=aggregated_output, isError=exit_code≠0); `item.completed {agent_message}`→agent/message (resultText=last); `item.*` reasoning→thinking; unknown item types→tool rows named by item.type; `turn.completed`→usage {inputTokens, outputTokens}; `turn.failed`/`error`→error.
+- Legacy mapping: `thread.started`→sessionRef=thread_id; `item.started {item.type:'command_execution'}`→tool/tool_use (toolCallId=item.id, name 'shell', input=command); `item.completed {command_execution}`→tool/tool_result (output=aggregated_output, isError=exit_code≠0); `item.completed {agent_message}`→agent/message (resultText=last); `item.*` reasoning→thinking; unknown item types→tool rows named by item.type; `turn.completed`→usage {inputTokens, outputTokens}; `turn.failed`/`error`→error.
 - `--skip-git-repo-check` always (non-git workspaces are supported).
 - effort map low|medium|high|xhigh → `-c model_reasoning_effort=<v>`.
 - Resume (orchestrator only): `codex exec resume <thread_id> --json -m <same> -c model_reasoning_effort=<same> --cd <same> --sandbox <same> --skip-git-repo-check -` — ALL flags re-passed explicitly.
 
 ### 4.3 grok (rich) — verified, Grok Build TUI headless (fixtures: grok.jsonl, grok-tool.jsonl)
+
+The streaming-JSON transport is wrapped by the common FIFO `CliSessionManager`; the manager preserves resumable-session serialization and normalizes killed/error outcomes without changing the transport's observable event tier.
 
 ```
 grok --prompt-file <FILE> --output-format streaming-json [-m grok-4.5] \
@@ -306,6 +340,8 @@ grok --prompt-file <FILE> --output-format streaming-json [-m grok-4.5] \
 
 ### 4.4 agy (plain) — verified; Antigravity CLI, no JSON mode (fixture: agy.log)
 
+The plain-text transport is wrapped by the same FIFO `CliSessionManager` but remains non-resumable. The manager does not invent tool evidence or a richer native protocol.
+
 ```
 agy -p "<PROMPT>" --model "Gemini 3.1 Pro (High)" [--print-timeout 45m] [--dangerously-skip-permissions]
 ```
@@ -313,15 +349,21 @@ agy -p "<PROMPT>" --model "Gemini 3.1 Pro (High)" [--print-timeout 45m] [--dange
 - Model catalog (from CLI): `Gemini 3.5 Flash (Medium|High|Low)`, `Gemini 3.1 Pro (Low|High)`, `Claude Sonnet 4.6 (Thinking)`, `Claude Opus 4.6 (Thinking)`, `GPT-OSS 120B (Medium)`. effort picks the matching (High|Low) display-name variant when the base model matches; else ignored.
 - No resume v1. Default stall floor 600 s (§5).
 
-### 4.5 Permission tier mapping (implementer: verify each flag against `--help`; nearest safe equivalent + comment if absent)
+### 4.5 openrouter (rich) — Codex-as-runtime
 
-| tier | claude | codex | grok | agy |
-|------|--------|-------|------|-----|
-| safe | `--permission-mode plan` | `--sandbox read-only` | `--permission-mode plan` | (prompt-level read-only instruction) |
-| auto (default) | `--permission-mode acceptEdits` | `--sandbox workspace-write` | `--permission-mode acceptEdits` | — |
-| full | `--dangerously-skip-permissions` | `--sandbox danger-full-access` | `--permission-mode bypassPermissions` | `--dangerously-skip-permissions` |
+OpenRouter has no CLI or agent runtime of its own. MAT drives it through the same persistent Codex app-server with `modelProvider:'openrouter'`, a fixed OpenAI-compatible provider config under an isolated `<dataDir>/openrouter-codex-home`, and `OPENROUTER_API_KEY` passed only to the child environment. No OpenAI/Codex OAuth credential is copied into that home, and MAT never persists or exposes the OpenRouter key value.
 
-### 4.6 spawn.ts — process hygiene
+`GET /api/providers/openrouter/models` loads the bounded public catalog with live/stale/fallback provenance. The UI first selects a model group and then a version. The selected version id — including a `~vendor/model-latest` alias or a pinned vendor slug — is the exact request slug persisted in `AgentBinding.model` and sent to `thread/start`/`turn/start`; MAT must not reconstruct it from a display label. Custom exact slugs remain available. Tool quality and supported features vary by the selected upstream model and are surfaced honestly.
+
+### 4.6 Permission tier mapping (implementer: verify each flag against `--help`; nearest safe equivalent + comment if absent)
+
+| tier | claude | codex | grok | agy | openrouter |
+|------|--------|-------|------|-----|------------|
+| safe | `--permission-mode plan` | `--sandbox read-only` | `--permission-mode plan` | prompt-level read-only instruction | Codex `read-only` sandbox |
+| auto (default) | `--permission-mode acceptEdits` | `--sandbox workspace-write` | `--permission-mode acceptEdits` | — | Codex `workspace-write` sandbox |
+| full | `--dangerously-skip-permissions` | `--sandbox danger-full-access` | `--permission-mode bypassPermissions` | `--dangerously-skip-permissions` | Codex `danger-full-access` sandbox |
+
+### 4.7 spawn.ts — process hygiene
 
 - env: inherit minus `LD_LIBRARY_PATH` (BAT AppImage breaks child TLS); ensure PATH includes `~/.local/bin`, `/usr/local/bin`.
 - `stdio: ['pipe'|'ignore','pipe','pipe']` per adapter (stdin pipe only to write the prompt, then end()).
@@ -330,7 +372,7 @@ agy -p "<PROMPT>" --model "Gemini 3.1 Pro (High)" [--print-timeout 45m] [--dange
 - Incremental line buffer (partial lines, multi-line chunks, CRLF).
 - Per-attempt hard timeout (stage.timeoutSec) → group-kill + `failed` (detail 'timeout').
 
-### 4.7 mock (rich)
+### 4.8 mock (rich)
 
 Deterministic scripted adapter for tests/demo. Model string programs it: `ok` (thinking→tool_use→tool_result→message→result), `fail` (error + exit 1), `slow:<ms>` (delays between events), `noisy` (many coalescable chunks). **Echo mode (all models)**: if `promptText` contains the marker `MOCK_REPLY:`, the final agent message text is everything after the marker — this lets engine tests script orchestrator decisions through prompt templates. Used by engine/API tests and `--demo`.
 
@@ -460,8 +502,8 @@ Evidence workbench: an 84 px icon+text navigation rail, collapsible Launchpad, c
 - Engine (mock adapter): happy 2-stage fan-out 3; retry loop honoring budgets + `status:retry` boundaries + user-event synthesis per attempt; all-fail; abort mid-stage; stall mark+recover; worktree lifecycle incl. retry re-add and untracked-file patch capture (real temp git repo); crash sweep (simulated stale run.json).
 - API: fastify inject — full run lifecycle with mock provider, WS order = after-append, afterSeq catch-up, retry-stage validity matrix, apply-patch 3way conflict path, token auth on/off.
 - Browser smoke: `npm run smoke:browser` launches the built server and production React bundle in real Chrome/Chromium; it guards mount, compact shell geometry, visible navigation labels, zh-TW and three-theme persistence, Health semantics, Narrative-first rendering, Timeline scrolling/follow mode, live switching/completion, verification/report, steering, and debug export. CI must keep this on Linux and Windows because jsdom missed the React #185 black screen.
-- Artifact evidence: `npm run evidence` runs every `tools/evidence/repro-v01{6,7,8,9}.mjs` black-box instrument. Release acceptance reruns the suite against the extracted `.deb` with `MAT_ROOT` and `MAT_EXPECT_VERSION`.
-- **Acceptance**: `npm ci && npm run verify:version && npm run build && npm test && npm run typecheck && npm run evidence && npm run smoke:browser` green on the applicable CI lanes; `npm start` serves UI; §1 story executes with real CLIs; a finished run replays after server restart; crash sweep leaves no orphan processes/worktrees.
+- Artifact evidence: `npm run evidence` runs five independent black-box instruments: `tools/evidence/repro-v016.mjs`, `repro-v017.mjs`, `repro-v018.mjs`, `repro-v019.mjs`, and `repro-runtime-contract.mjs`. The last uses `fake-codex-runtime.mjs` to prove OpenRouter's exact model/provider routing, canonical evidence projection, redaction, and restart replay without a real credential or provider request. Release acceptance reruns the complete suite against the extracted `.deb` with `MAT_ROOT` and `MAT_EXPECT_VERSION`.
+- **Acceptance**: `npm ci && npm run verify:version && npm run build && npm test && npm run typecheck && npm run evidence && npm run smoke:browser` green on the applicable CI lanes; `npm start` serves UI; §1 story executes with real provider runtimes; a finished run replays after server restart; crash sweep leaves no orphan processes/worktrees.
 
 ## 12. Historical build-phase module ownership (codex fleet; non-normative)
 
@@ -519,6 +561,12 @@ This amendment changes presentation and web-local state only. It adds no PTY, in
 
 A field debug bundle proved that healthy Codex and Grok Windows shims could exceed the former five-second cold version probe, after which the failure was mislabeled as unavailable and cached for ten minutes. Version probes now allow 15 seconds on Windows and eight elsewhere, share only in-flight work, cache successful results for ten minutes, and cache failures for two seconds. `POST /api/providers/refresh` takes no user input, clears augmented-PATH and version caches, and reruns discovery. The UI exposes this as **Retry detection** in Setup and **Recheck providers** in Health; neither action installs software or changes a run.
 
-Agy's fixed Windows `winget` recipe may run for several minutes, so its fixed timeout is ten minutes while npm recipes remain five. Setup shows elapsed time, automatically rechecks on completion, and keeps an explicit ready/no-restart or installed-but-not-detected/restart-once result visible. The original security boundary remains unchanged: installation requires an explicit click, runs only a fixed server recipe, and accepts no command input.
+Agy's fixed Windows `winget` recipe may run for several minutes, so its provider-specific timeout is ten minutes. Setup shows elapsed time, automatically rechecks on completion, and keeps an explicit ready/no-restart or installed-but-not-detected/restart-once result visible. The security boundary remains unchanged: installation requires an explicit click, runs only a fixed server recipe, and accepts no command input. The later managed-runtime amendment supersedes the old Claude/Codex Setup path with catalog-pinned, integrity-verified artifacts under the MAT data directory.
 
 The chrome follows the system language or persists English/Traditional Chinese, and persists one of Midnight, Daylight, or violet/gold/teal Aurora. Navigation icons have visible text; Conversation cards strengthen node label, provider/model, stage, attempt, sequence, time, and provider-color identity. These preferences and translations are web-local only and add no shared persisted schema or engine behavior.
+
+## BAT provider-runtime alignment (released through v0.2.10)
+
+Product releases v0.2.5–v0.2.9 added the catalog-pinned managed Claude/Codex runtime layer, persistent Codex app-server and Claude Agent SDK production paths, and BAT-aligned Codex/Claude account handling. Desktop startup may quietly bootstrap missing supported managed runtimes; downloads are pinned and integrity-verified before atomic publication under the data directory. Provider-specific recipes remain fixed server-side actions and accept no command input.
+
+Product v0.2.10 wraps Grok and Agy transports in the common manager pattern, adds OpenRouter through Codex-as-runtime, and adds the canonical manager/evidence bridge defined in §3.1.1.

@@ -4,7 +4,7 @@ import { useUiPreferences } from '../i18n/UiPreferences.js';
 import { AiSisterAvatar } from './AiSisterTheme.js';
 
 export const PROVIDER_COLORS: Record<ProviderId, string> = {
-  claude: '#d97706', codex: '#10a37f', agy: '#4285f4', grok: '#e11d48', mock: '#71717a',
+  claude: '#d97706', codex: '#10a37f', agy: '#4285f4', grok: '#e11d48', openrouter: '#6366f1', mock: '#71717a',
 };
 
 export interface AgentChipProps { agent: AgentBinding; label?: string; count?: number; className?: string }

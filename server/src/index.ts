@@ -16,6 +16,7 @@ import { configureWorkspaceStore } from './store/workspaces.js';
 import { redactEnvironmentValues } from './redact.js';
 import { maybeSelfProvision } from './runtime/triggers.js';
 import { syncActiveFromSharedHome } from './providers/codex/accounts.js';
+import { disposeProviderRuntimes } from './providers/dispose.js';
 
 export interface ServerOptions { port: number; host: string; dataDir: string | undefined; token: string | undefined }
 
@@ -109,6 +110,43 @@ async function stopEngine(abort: typeof abortRun): Promise<void> {
   await Promise.allSettled(activeRuns.map((run) => abort(run.runId)));
 }
 
+interface ShutdownDependencies {
+  stopEngine: () => Promise<void>;
+  syncActiveAccount: () => void | Promise<void>;
+  disposeProviderRuntimes: () => Promise<void>;
+}
+
+const defaultShutdownDependencies: ShutdownDependencies = {
+  stopEngine: () => stopEngine(abortRun),
+  syncActiveAccount: () => { syncActiveFromSharedHome(); },
+  disposeProviderRuntimes,
+};
+
+export async function shutdownServer(
+  app: Pick<FastifyInstance, 'close'>,
+  overrides: Partial<ShutdownDependencies> = {},
+): Promise<void> {
+  const dependencies = { ...defaultShutdownDependencies, ...overrides };
+  const failures: unknown[] = [];
+  const attempt = async (operation: () => void | Promise<void>): Promise<void> => {
+    try { await operation(); } catch (error) { failures.push(error); }
+  };
+
+  await attempt(dependencies.stopEngine);
+  await Promise.race([
+    Promise.resolve().then(dependencies.syncActiveAccount).catch(() => undefined),
+    new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 1_000);
+      timer.unref();
+    }),
+  ]);
+  await attempt(dependencies.disposeProviderRuntimes);
+  await attempt(() => app.close());
+
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, 'Server shutdown failed');
+}
+
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   const app = await buildServer(options);
@@ -116,15 +154,7 @@ async function main(): Promise<void> {
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    await stopEngine(abortRun);
-    await Promise.race([
-      Promise.resolve().then(() => { syncActiveFromSharedHome(); }).catch(() => undefined),
-      new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, 1_000);
-        timer.unref();
-      }),
-    ]);
-    await app.close();
+    await shutdownServer(app);
   };
   process.once('SIGINT', () => { shutdown().catch((error: unknown) => console.error(`[mat] shutdown failed: ${redactedError(error)}`)); });
   process.once('SIGTERM', () => { shutdown().catch((error: unknown) => console.error(`[mat] shutdown failed: ${redactedError(error)}`)); });

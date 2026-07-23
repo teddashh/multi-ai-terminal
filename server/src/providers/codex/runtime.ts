@@ -22,7 +22,20 @@ export interface CodexSessionRuntime {
   dispose(): Promise<void>;
 }
 
-interface RuntimeOverrides {
+export interface CodexRuntimeConnectionProfile {
+  codexHome: string;
+  apiKey?: string;
+  extraEnv?: Readonly<Record<string, string | undefined>>;
+}
+
+export interface CodexRuntimeProfile {
+  providerName: 'codex' | 'openrouter';
+  defaultModel: string;
+  modelProvider?: string;
+  prepareConnection(dataDir: string): CodexRuntimeConnectionProfile | Promise<CodexRuntimeConnectionProfile>;
+}
+
+export interface CodexRuntimeOverrides {
   createConnection?: (config: CodexConnectionConfig) => CodexConnection;
   resolveBinary?: typeof resolveRuntimeBinary;
   subscribe?: typeof subscribeRuntimeChanges;
@@ -36,7 +49,7 @@ class SessionRuntime implements CodexSessionRuntime {
   private readonly runs = new Map<string, SpawnIo>();
   private readonly unsubscribe: () => void;
 
-  constructor(private readonly overrides: RuntimeOverrides) {
+  constructor(private readonly profile: CodexRuntimeProfile, private readonly overrides: CodexRuntimeOverrides) {
     this.unsubscribe = (overrides.subscribe ?? subscribeRuntimeChanges)((event) => {
       if (event.family !== 'codex') return;
       this.runtimeChanged = true;
@@ -51,7 +64,7 @@ class SessionRuntime implements CodexSessionRuntime {
     let killed = false;
     const completion = this.run(sessionKey, spec).then((outcome) => this.mapOutcome(outcome), (error): NodeOutcome => ({
       exitCode: 1,
-      error: redactEnvironmentValues(humanizeError(error, 'codex')),
+      error: redactEnvironmentValues(humanizeError(error, this.profile.providerName)),
     })).finally(async () => {
       if (this.runs.get(sessionKey) === io) this.runs.delete(sessionKey);
       if (this.runtimeChanged && this.runs.size === 0) await this.retirePair();
@@ -101,7 +114,8 @@ class SessionRuntime implements CodexSessionRuntime {
     if (spec.resumeSessionRef && !manager.ownsSession(sessionKey)) manager.adoptThread(sessionKey, spec.resumeSessionRef);
     return manager.startTurn(sessionKey, {
       prompt: spec.promptText,
-      model: spec.binding.model ?? DEFAULT_CODEX_MODEL,
+      model: spec.binding.model ?? this.profile.defaultModel,
+      ...(this.profile.modelProvider ? { modelProvider: this.profile.modelProvider } : {}),
       ...(spec.binding.effort !== undefined ? { effort: spec.binding.effort } : {}),
       cwd: spec.cwd,
       approvalPolicy: 'never',
@@ -112,7 +126,7 @@ class SessionRuntime implements CodexSessionRuntime {
   private mapOutcome(outcome: Awaited<ReturnType<CodexThreadManager['startTurn']>>): NodeOutcome {
     if (outcome.status === 'completed') return { exitCode: 0, ...(outcome.threadId ? { sessionRef: outcome.threadId } : {}), ...(outcome.usage ? { usage: outcome.usage } : {}), ...(outcome.resultText ? { resultText: outcome.resultText } : {}) };
     if (outcome.status === 'interrupted') return { exitCode: null, signal: 'SIGTERM', ...(outcome.threadId ? { sessionRef: outcome.threadId } : {}) };
-    return { exitCode: 1, error: outcome.error ?? 'Codex turn failed', ...(outcome.threadId ? { sessionRef: outcome.threadId } : {}) };
+    return { exitCode: 1, error: outcome.error ?? `${this.profile.providerName} turn failed`, ...(outcome.threadId ? { sessionRef: outcome.threadId } : {}) };
   }
 
   private ensureSetup(): Promise<void> {
@@ -132,13 +146,19 @@ class SessionRuntime implements CodexSessionRuntime {
     const command = (await resolve(getDataDir(), 'codex')) ?? runtimeBinaryForSpawn(getDataDir(), 'codex');
     const resolvedNode = await resolve(getDataDir(), 'node');
     const nodeCommand = resolvedNode && resolvedNode !== 'node' && isAbsolute(resolvedNode) ? resolvedNode : process.execPath;
-    const configuredKey = configuredOpenAiKey();
+    const connectionProfile = await this.profile.prepareConnection(getDataDir());
+    const redactionEnvironment: NodeJS.ProcessEnv = {
+      ...process.env,
+      ...connectionProfile.extraEnv,
+      ...(connectionProfile.apiKey !== undefined ? { OPENAI_API_KEY: connectionProfile.apiKey } : {}),
+    };
     let manager!: CodexThreadManager;
     const config: CodexConnectionConfig = {
       command,
       nodeCommand,
-      codexHome: sharedCodexHome(),
-      ...(configuredKey ? { apiKey: configuredKey.key } : {}),
+      codexHome: connectionProfile.codexHome,
+      ...(connectionProfile.apiKey !== undefined ? { apiKey: connectionProfile.apiKey } : {}),
+      ...(connectionProfile.extraEnv ? { extraEnv: connectionProfile.extraEnv } : {}),
       purpose: 'session',
       clientInfo: { name: 'multi-ai-terminal', title: 'Multi-AI Terminal', version: VERSION },
       onNotification: (method, params) => manager.handleNotification(method, params),
@@ -151,23 +171,52 @@ class SessionRuntime implements CodexSessionRuntime {
       onEvent: (sessionKey, event) => this.runs.get(sessionKey)?.onEvent(event),
       onStatus: (sessionKey, status) => {
         const io = this.runs.get(sessionKey);
-        if (status === 'reconnecting') io?.onRaw('[codex] reconnecting…', 'err');
-        else if (status === 'ready') io?.onRaw('[codex] ready', 'err');
+        if (status === 'reconnecting') io?.onRaw(`[${this.profile.providerName}] reconnecting…`, 'err');
+        else if (status === 'ready') io?.onRaw(`[${this.profile.providerName}] ready`, 'err');
       },
+    }, {
+      errorProvider: this.profile.providerName,
+      redactionEnvironment,
     });
     this.connection = connection;
     this.manager = manager;
   }
 }
 
-let singleton: SessionRuntime | undefined;
-let testOverrides: RuntimeOverrides = {};
+let singleton: CodexSessionRuntime | undefined;
+let testOverrides: CodexRuntimeOverrides = {};
 
-export function codexSessionRuntime(): CodexSessionRuntime {
-  return singleton ??= new SessionRuntime(testOverrides);
+const standardCodexProfile: CodexRuntimeProfile = {
+  providerName: 'codex',
+  defaultModel: DEFAULT_CODEX_MODEL,
+  prepareConnection: () => {
+    const configuredKey = configuredOpenAiKey();
+    return {
+      codexHome: sharedCodexHome(),
+      ...(configuredKey ? { apiKey: configuredKey.key } : {}),
+    };
+  },
+};
+
+export function createCodexSessionRuntime(
+  profile: CodexRuntimeProfile,
+  overrides: CodexRuntimeOverrides = {},
+): CodexSessionRuntime {
+  return new SessionRuntime(profile, overrides);
 }
 
-export function resetCodexSessionRuntimeForTest(overrides: RuntimeOverrides = {}): void {
+export function codexSessionRuntime(): CodexSessionRuntime {
+  return singleton ??= createCodexSessionRuntime(standardCodexProfile, testOverrides);
+}
+
+/** Dispose only an already-created production singleton; never create one during shutdown. */
+export async function disposeCodexSessionRuntime(): Promise<void> {
+  const previous = singleton;
+  singleton = undefined;
+  await previous?.dispose();
+}
+
+export function resetCodexSessionRuntimeForTest(overrides: CodexRuntimeOverrides = {}): void {
   const previous = singleton;
   singleton = undefined;
   testOverrides = overrides;

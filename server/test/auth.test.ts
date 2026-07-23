@@ -20,6 +20,7 @@ describe('provider auth alerts', () => {
     expect(signInCommand('claude')).toBe('claude   (then /login inside the session)');
     expect(signInCommand('grok')).toBe('grok login   (browser) · grok login --device-code (headless) · or set XAI_API_KEY');
     expect(signInCommand('agy')).toBe('agy   (sign-in starts automatically; /logout to clear)');
+    expect(signInCommand('openrouter')).toBeUndefined();
     expect(signInCommand('mock')).toBeUndefined();
   });
 });

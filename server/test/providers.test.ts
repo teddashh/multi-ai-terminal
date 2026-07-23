@@ -20,6 +20,7 @@ describe('provider install recipes', () => {
     expect(providerInstallPlan('claude', 'linux')).toEqual({ recipe: { command: 'npm', args: ['install', '-g', '@anthropic-ai/claude-code'] } });
     expect(providerInstallPlan('codex', 'win32')).toEqual({ recipe: { command: 'npm', args: ['install', '-g', '@openai/codex'] } });
     expect(providerInstallPlan('grok', 'darwin')).toEqual({ recipe: { command: 'npm', args: ['install', '-g', '@xai-official/grok'] } });
+    expect(providerInstallPlan('openrouter', 'linux')).toEqual({});
     expect(providerInstallPlan('mock', 'linux')).toEqual({});
   });
 
@@ -39,6 +40,7 @@ describe('provider install recipes', () => {
     expect(providerUpdatePlan('codex', 'linux')).toEqual(providerInstallPlan('codex', 'linux'));
     expect(providerUpdatePlan('agy', 'win32')).toEqual(providerInstallPlan('agy', 'win32'));
     expect(providerUpdatePlan('agy', 'linux').recipe).toBeUndefined();
+    expect(providerUpdatePlan('openrouter', 'linux')).toEqual({});
     expect(providerUpdatePlan('mock', 'linux')).toEqual({});
   });
 });

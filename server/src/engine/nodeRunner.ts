@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { AdapterContentEvent, NodeRun, RunStatus, Stage, Usage } from '@mat/shared';
+import type { AdapterContentEvent, NodeRun, ProviderTurnEndReason, RunStatus, Stage, Usage } from '@mat/shared';
 import { getAdapter } from '../adapters/registry.js';
 import type { NodeOutcome, ResolvedNodeSpec, SpawnedNode } from '../adapters/base.js';
 import type { Adapter } from '../adapters/base.js';
@@ -16,6 +16,7 @@ import { activeSignInProvider } from '../providers/signin.js';
 import { redactDiagnosticValue, redactEnvironmentValues } from '../redact.js';
 import { getDataDir } from '../store/dataDir.js';
 import { resolveRuntimeBinary } from '../runtime/resolve.js';
+import { ProviderTurnBridge, type ProviderTechnicalEvidence } from '../providers/contract.js';
 
 export interface NodeExecutionContext {
   runId: string;
@@ -172,6 +173,29 @@ function appendContent(node: NodeRun, context: NodeExecutionContext, event: Adap
   }, { trustedData: true });
 }
 
+function appendProviderTechnical(node: NodeRun, context: NodeExecutionContext, event: ProviderTechnicalEvidence): void {
+  // ProviderTurnBridge has already separated trusted event/category fields
+  // from redacted provider payloads. nodeRunner remains the sole lifecycle
+  // writer and these technical statuses never mutate NodeRun.status.
+  lifecycle(node, context, 'status', event.text, event.data);
+}
+
+function providerTurnEvidence(turn: NodeOutcome['providerTurn']): Record<string, unknown> {
+  return turn ? {
+    providerEvent: turn.event,
+    providerSessionId: turn.sessionId,
+    turnReason: turn.reason,
+    providerStatus: turn.status,
+  } : {};
+}
+
+function providerTerminationReason(reason: LiveNode['killedReason']): ProviderTurnEndReason | undefined {
+  if (reason === 'timeout') return 'error';
+  if (reason === 'abort' || reason === 'gate-timeout') return 'aborted';
+  if (reason !== undefined) return 'interrupted';
+  return undefined;
+}
+
 export async function runNode(node: NodeRun, stage: Stage, promptText: string): Promise<void> {
   const context = contexts.get(node);
   if (!context) throw new Error(`No execution context registered for ${node.nodeRunId}`);
@@ -257,8 +281,38 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
     cwd: node.cwd,
     ...(context.resumeSessionRef ? { resumeSessionRef: context.resumeSessionRef } : {}),
   };
-  let readyForContent = false;
-  const pendingContent: AdapterContentEvent[] = [];
+  let readyForProviderEvidence = false;
+  const pendingProviderEvidence: Array<
+    { type: 'content'; event: AdapterContentEvent }
+    | { type: 'technical'; event: ProviderTechnicalEvidence }
+  > = [];
+  const receiveContent = (event: AdapterContentEvent): void => {
+    if (!readyForProviderEvidence) {
+      pendingProviderEvidence.push({ type: 'content', event });
+      return;
+    }
+    activity();
+    appendContent(node, context, event);
+  };
+  const receiveTechnical = (event: ProviderTechnicalEvidence): void => {
+    if (!readyForProviderEvidence) {
+      pendingProviderEvidence.push({ type: 'technical', event });
+      return;
+    }
+    activity();
+    appendProviderTechnical(node, context, event);
+  };
+  // The deterministic mock remains exempt from real-provider manager
+  // behaviors; evidence instruments depend on its exact event sequence.
+  const providerTurn = node.agent.provider === 'mock'
+    ? undefined
+    : new ProviderTurnBridge({
+      provider: node.agent.provider,
+      sessionId: `provider:${context.runId}:${node.nodeRunId}:a${node.attempt}`,
+      spec,
+      sink: { onContent: receiveContent, onTechnical: receiveTechnical },
+    });
+  let providerTurnStarted = false;
   try {
     // Parallel same-account CLI sessions race single-use OAuth refresh-token rotation.
     await providerSpawnSlot(node.agent.provider);
@@ -275,37 +329,78 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
     if (node.agent.provider === 'codex' && activeSignInProvider() === 'codex') {
       throw new Error('codex sign-in is in progress; retry after it completes');
     }
-    if (node.agent.provider === 'claude' || node.agent.provider === 'codex') {
-      const runtimeCommand = await resolveRuntimeBinary(getDataDir(), node.agent.provider);
-      if (!runtimeCommand) throw new Error(`${node.agent.provider} CLI runtime was not found`);
+    if (adapter.runtimeFamily) {
+      const runtimeCommand = await resolveRuntimeBinary(getDataDir(), adapter.runtimeFamily);
+      if (!runtimeCommand) {
+        const runtimeName = node.agent.provider === adapter.runtimeFamily
+          ? `${node.agent.provider} CLI runtime`
+          : `${node.agent.provider} requires the ${adapter.runtimeFamily} CLI runtime`;
+        throw new Error(`${runtimeName} was not found`);
+      }
       spec.runtimeCommand = runtimeCommand;
-      if (node.agent.provider === 'codex') {
+      if (adapter.runtimeFamily === 'codex') {
         const nodeCommand = await resolveRuntimeBinary(getDataDir(), 'node');
         spec.runtimeNodeCommand = nodeCommand && nodeCommand !== 'node' ? nodeCommand : process.execPath;
       }
     }
-    spawned = adapter.spawn(spec, {
+    providerTurnStarted = providerTurn !== undefined;
+    providerTurn?.start();
+    const transport = adapter.spawn(spec, {
       onEvent(event) {
         appendOutputTail(event.text);
-        if (!readyForContent) { pendingContent.push(event); return; }
-        activity();
-        appendContent(node, context, event);
+        if (providerTurn) providerTurn.acceptContent(event);
+        else receiveContent(event);
       },
       onRaw(line, stream) {
         appendOutputTail(line);
         appendFileSync(rawPath, `${JSON.stringify({ s: stream, l: redactEnvironmentValues(line), ts: Date.now() })}\n`, 'utf8');
-        if (readyForContent) activity();
+        if (readyForProviderEvidence) activity();
       },
     });
+    spawned = {
+      pid: transport.pid,
+      kill: (signal) => transport.kill(signal),
+      completion: providerTurn
+        ? Promise.resolve(transport.completion).then(
+          (outcome) => providerTurn.finish(
+            outcome,
+            providerTerminationReason(liveNodes.get(key)?.killedReason),
+          ),
+          (error: unknown) => providerTurn.finish(
+            {
+              exitCode: 1,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            providerTerminationReason(liveNodes.get(key)?.killedReason),
+          ),
+        )
+        : transport.completion,
+    };
   } catch (error) {
     const detail = redactEnvironmentValues(humanizeError(error));
+    const failedTurn = providerTurnStarted
+      ? providerTurn?.finish({ exitCode: null, error: detail }, 'error').providerTurn
+      : undefined;
+    // A transport may emit synchronous content before throwing. Preserve that
+    // evidence, plus the bridge's final full status, without inventing a
+    // spawned/running lifecycle for a child that never came up.
+    readyForProviderEvidence = true;
+    for (const pending of pendingProviderEvidence) {
+      if (pending.type === 'content') appendContent(node, context, pending.event);
+      else appendProviderTechnical(node, context, pending.event);
+    }
+    pendingProviderEvidence.length = 0;
     node.status = 'failed';
     node.startedAt = Date.now();
     node.endedAt = Date.now();
     node.exitCode = null;
     node.resultText = detail;
     node.error = detail;
-    lifecycle(node, context, 'error', detail, { status: 'failed', exitCode: null });
+    lifecycle(node, context, 'error', detail, {
+      status: 'failed',
+      exitCode: null,
+      ...providerTurnEvidence(failedTurn),
+    });
     await persistSafely(node, context);
     return;
   }
@@ -332,11 +427,13 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
     current.killedReason = 'timeout';
     current.spawned.kill('SIGTERM');
   }, stage.timeoutSec * 1000);
-  readyForContent = true;
-  for (const event of pendingContent) {
+  readyForProviderEvidence = true;
+  for (const pending of pendingProviderEvidence) {
     activity();
-    appendContent(node, context, event);
+    if (pending.type === 'content') appendContent(node, context, pending.event);
+    else appendProviderTechnical(node, context, pending.event);
   }
+  pendingProviderEvidence.length = 0;
   await persistSafely(node, context);
 
   let outcome: NodeOutcome;
@@ -354,7 +451,10 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
   delete node.pid;
   node.endedAt = Date.now();
   node.exitCode = outcome.exitCode;
-  if (outcome.sessionRef !== undefined) node.sessionRef = outcome.sessionRef;
+  const sessionRef = outcome.sessionRef !== undefined
+    ? redactEnvironmentValues(outcome.sessionRef)
+    : undefined;
+  if (sessionRef !== undefined) node.sessionRef = sessionRef;
   const usage = mergeUsage(node.usage, outcome.usage);
   if (usage !== undefined) node.usage = usage;
   const outcomeError = outcome.error === undefined ? undefined : redactEnvironmentValues(humanizeError(outcome.error, node.agent.provider));
@@ -397,7 +497,8 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
   lifecycle(node, context, 'result', node.resultText ?? '', {
     exitCode: outcome.exitCode,
     ...(outcome.usage ? { usage: outcome.usage } : {}),
-    ...(outcome.sessionRef ? { sessionRef: outcome.sessionRef } : {}),
+    ...(sessionRef ? { sessionRef } : {}),
+    ...providerTurnEvidence(outcome.providerTurn),
   });
 
   try { await context.finalize?.(); } catch (error) {

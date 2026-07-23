@@ -5,7 +5,7 @@ import { degradedDecision, tryParseDecision } from './decision.js';
 import { killActiveNode, registerNodeContext, runNode } from '../engine/nodeRunner.js';
 import { diag } from '../diag.js';
 
-const RESUMABLE = new Set(['claude', 'codex', 'grok']);
+const RESUMABLE = new Set(['claude', 'codex', 'grok', 'openrouter']);
 const hasNodeStatus = (node: NodeRun, status: NodeRun['status']): boolean => node.status === status;
 
 class GateTimeoutError extends Error {}

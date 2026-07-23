@@ -1,16 +1,19 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AgentEvent, NodeRun, ProviderId, Stage } from '@mat/shared';
+import { ProviderSessionMetaSchema, type AgentEvent, type NodeRun, type ProviderId, type Stage } from '@mat/shared';
 import type { Adapter, NodeOutcome, SpawnedNode } from '../../src/adapters/base.js';
 import { EventLog, configureEventLog } from '../../src/store/eventLog.js';
 import { emitRetryBoundary, killActiveNode, markNodeKilled, registerNodeContext, resetNodeForRetry, runNode } from '../../src/engine/nodeRunner.js';
 import { clearAllAuthAlerts, getAuthAlert } from '../../src/providers/auth.js';
 import { mockAdapter } from '../../src/adapters/mock.js';
+import { codexAdapter } from '../../src/adapters/codex.js';
 import { clearProviderSpawnSlots } from '../../src/adapters/base.js';
+import { setOpenAiKey } from '../../src/providers/codex/apiKey.js';
 import { resetSignInForTests, setSignInRecipeForTests, setSignInTimingForTests, startSignIn } from '../../src/providers/signin.js';
+import { createFakeExecutable } from '../helpers/fakeExecutable.js';
 
 const dirs: string[] = [];
 const oldDataDir = process.env.MAT_DATA_DIR;
@@ -59,6 +62,76 @@ describe('node runner lifecycle', () => {
     expect(node.status).toBe('done');
     expect(node.pid).toBeUndefined();
     expect(persisted.count).toBeGreaterThanOrEqual(2);
+  });
+
+  it('maps a real provider turn through one canonical evidence boundary', async () => {
+    const adapter = adapterFrom((_spec, io) => {
+      io.onEvent({ role: 'thinking', kind: 'thinking', text: 'inspect' });
+      io.onEvent({
+        role: 'tool',
+        kind: 'tool_use',
+        text: 'shell',
+        tool: { toolCallId: 'tool-1', name: 'shell', input: '{"command":"pwd"}' },
+      });
+      io.onEvent({
+        role: 'tool',
+        kind: 'tool_result',
+        text: '/repo',
+        tool: { toolCallId: 'tool-1', name: 'shell', output: '/repo', isError: false },
+      });
+      io.onEvent({ role: 'agent', kind: 'message', text: 'answer' });
+      return {
+        pid: 12345,
+        kill() {},
+        completion: Promise.resolve({
+          exitCode: 0,
+          sessionRef: 'thread-1',
+          usage: { inputTokens: 4, outputTokens: 2 },
+          resultText: 'answer',
+        }),
+      };
+    }, 'openrouter');
+    const result = setup(adapter);
+    result.node.agent = {
+      provider: 'openrouter',
+      model: 'openai/gpt-test-20260723',
+      permission: 'safe',
+    };
+
+    await runNode(result.node, stage, 'rendered prompt');
+
+    const events = result.events();
+    expect(events.map((event) => event.seq)).toEqual(events.map((_, index) => index + 1));
+    expect(events.slice(0, 3).map((event) => [event.role, event.kind, event.data?.status])).toEqual([
+      ['user', 'message', undefined],
+      ['system', 'status', 'spawned'],
+      ['system', 'status', 'running'],
+    ]);
+    const providerStatuses = events.filter((event) => event.data?.providerEvent === 'claude:status');
+    expect(providerStatuses).toHaveLength(3);
+    expect(providerStatuses.every((event) => ProviderSessionMetaSchema.safeParse(event.data?.providerStatus).success)).toBe(true);
+    expect(events.filter((event) => event.kind === 'tool_use')[0]?.tool).toMatchObject({
+      toolCallId: 'tool-1',
+      name: 'Bash',
+    });
+    expect(events.filter((event) => event.kind === 'tool_result')[0]?.tool).toMatchObject({
+      toolCallId: 'tool-1',
+      name: 'Bash',
+      output: '/repo',
+    });
+    const terminal = events.filter((event) => event.kind === 'result');
+    expect(terminal).toHaveLength(1);
+    expect(terminal[0]?.data).toMatchObject({
+      providerEvent: 'claude:turn-end',
+      turnReason: 'completed',
+      providerStatus: {
+        model: 'openai/gpt-test-20260723',
+        sdkSessionId: 'thread-1',
+        inputTokens: 4,
+        outputTokens: 2,
+        isStreaming: false,
+      },
+    });
   });
 
   it('emits retry boundaries and uses the fully re-rendered addendum prompt on a fresh attempt', async () => {
@@ -113,8 +186,9 @@ describe('node runner lifecycle', () => {
         killSignal = signal;
         resolve({ exitCode: null, signal, error: 'killed by timeout' });
       },
-    }));
+    }), 'openrouter');
     const { node, events } = setup(adapter);
+    node.agent = { provider: 'openrouter', permission: 'safe' };
     const running = runNode(node, { ...stage, timeoutSec: 0.01 }, 'prompt');
     await vi.advanceTimersByTimeAsync(11);
     await running;
@@ -124,6 +198,14 @@ describe('node runner lifecycle', () => {
       role: 'system',
       kind: 'error',
       data: expect.objectContaining({ status: 'failed', detail: 'timeout' }),
+    }));
+    expect(events()).toContainEqual(expect.objectContaining({
+      role: 'system',
+      kind: 'result',
+      data: expect.objectContaining({
+        providerEvent: 'claude:turn-end',
+        turnReason: 'error',
+      }),
     }));
   });
 
@@ -150,13 +232,22 @@ describe('node runner lifecycle', () => {
   });
 
   it('normalizes synchronous spawn failures and nonzero outcomes into lifecycle error events', async () => {
-    let setupResult = setup(adapterFrom(() => { throw new Error('spawn exploded'); }));
+    let setupResult = setup(adapterFrom(() => { throw new Error('spawn exploded'); }, 'openrouter'));
+    setupResult.node.agent = { provider: 'openrouter', permission: 'safe' };
     await runNode(setupResult.node, stage, 'prompt');
     expect(setupResult.node.status).toBe('failed');
     expect(setupResult.node.error).toBe('spawn exploded');
     expect(setupResult.events()).toContainEqual(expect.objectContaining({
-      role: 'system', kind: 'error', text: 'spawn exploded', data: expect.objectContaining({ status: 'failed' }),
+      role: 'system',
+      kind: 'error',
+      text: 'spawn exploded',
+      data: expect.objectContaining({
+        status: 'failed',
+        providerEvent: 'claude:turn-end',
+        turnReason: 'error',
+      }),
     }));
+    expect(setupResult.events().filter((event) => event.data?.providerEvent === 'claude:turn-end')).toHaveLength(1);
 
     setupResult = setup(adapterFrom(() => ({
       pid: 12346,
@@ -339,6 +430,7 @@ describe('node runner lifecycle', () => {
           kill() {},
           completion: Promise.resolve({
             exitCode: 1,
+            sessionRef: `session-${sentinel}`,
             resultText: `Use API key ${sentinel}`,
             error: `provider rejected ${sentinel}`,
           }),
@@ -356,6 +448,7 @@ describe('node runner lifecycle', () => {
       await runNode(result.node, stage, `prompt contains ${sentinel}`);
 
       expect(spawnedPrompt).toBe(`prompt contains ${sentinel}`);
+      expect(result.node.sessionRef).toBe('session-[REDACTED_ENV]');
       expect(result.node.errorReason).toBe('grok is not signed in.\nFix: grok login   (browser) · grok login --device-code (headless) · or set XAI_API_KEY');
       const raw = await readFile(join(process.env.MAT_DATA_DIR!, 'runs', 'run', 'raw', `${result.node.nodeRunId}.a1.jsonl`), 'utf8');
       const persisted = JSON.stringify({ node: result.node, events: result.events(), snapshots, raw });
@@ -364,6 +457,60 @@ describe('node runner lifecycle', () => {
     } finally {
       if (prior === undefined) delete process.env.MAT_TEST_API_TOKEN;
       else process.env.MAT_TEST_API_TOKEN = prior;
+    }
+  }, 30_000);
+
+  it('redacts a file-sourced Codex key before legacy exec evidence reaches nodeRunner', async () => {
+    const sentinel = 'file-only-codex-key-canary';
+    const result = setup(codexAdapter);
+    result.node.agent = { provider: 'codex', permission: 'safe' };
+    const dataDir = process.env.MAT_DATA_DIR!;
+    const fakeBin = join(dataDir, 'fake-bin');
+    mkdirSync(fakeBin, { recursive: true });
+    const command = createFakeExecutable(fakeBin, 'codex-file-key-fixture', `
+const key = process.env.OPENAI_API_KEY || '';
+if (process.argv.includes('--version')) {
+  console.log('codex-fixture 1.0.0');
+  process.exit(0);
+}
+process.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: 'thread-' + key }) + '\\n');
+process.stdout.write(JSON.stringify({ type: 'item.completed', item: { id: 'message-1', type: 'agent_message', text: 'answer ' + key } }) + '\\n');
+process.stdout.write(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: -1, output_tokens: 2 } }) + '\\n');
+process.stderr.write('stderr ' + key + '\\n');
+`);
+    setOpenAiKey(sentinel, { dataDir });
+
+    const priorMode = process.env.MAT_CODEX_RUNTIME;
+    const priorCodexBin = process.env.MAT_CODEX_BIN;
+    const priorNodeBin = process.env.MAT_NODE_BIN;
+    const priorOpenAiKey = process.env.OPENAI_API_KEY;
+    process.env.MAT_CODEX_RUNTIME = 'exec';
+    process.env.MAT_CODEX_BIN = command;
+    process.env.MAT_NODE_BIN = process.execPath;
+    delete process.env.OPENAI_API_KEY;
+    try {
+      await runNode(result.node, stage, 'prompt');
+
+      const rawPath = join(dataDir, 'runs', 'run', 'raw', `${result.node.nodeRunId}.a1.jsonl`);
+      const persisted = JSON.stringify({
+        node: result.node,
+        events: result.events(),
+        raw: readFileSync(rawPath, 'utf8'),
+      });
+      expect(result.node).toMatchObject({
+        status: 'done',
+        sessionRef: 'thread-[REDACTED_ENV]',
+        resultText: 'answer [REDACTED_ENV]',
+        usage: { outputTokens: 2 },
+      });
+      expect(result.node.usage).not.toHaveProperty('inputTokens');
+      expect(persisted).not.toContain(sentinel);
+      expect(persisted).toContain('[REDACTED_ENV]');
+    } finally {
+      if (priorMode === undefined) delete process.env.MAT_CODEX_RUNTIME; else process.env.MAT_CODEX_RUNTIME = priorMode;
+      if (priorCodexBin === undefined) delete process.env.MAT_CODEX_BIN; else process.env.MAT_CODEX_BIN = priorCodexBin;
+      if (priorNodeBin === undefined) delete process.env.MAT_NODE_BIN; else process.env.MAT_NODE_BIN = priorNodeBin;
+      if (priorOpenAiKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = priorOpenAiKey;
     }
   }, 30_000);
 

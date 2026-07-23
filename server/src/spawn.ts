@@ -115,18 +115,19 @@ export function sanitizedEnvironment(
   options: EnvironmentOptions = {},
 ): NodeJS.ProcessEnv {
   const platform = options.platform ?? process.platform;
-  const env = { ...(options.env ?? process.env), ...overrides };
+  const source = options.env ?? process.env;
+  const env = mergeEnvironmentVariables(source, overrides, platform);
   delete env.LD_LIBRARY_PATH;
 
   const overridePathKey = Object.keys(overrides).find((key) => key.toLowerCase() === 'path');
-  const inheritedPathKey = Object.keys(options.env ?? process.env).find((key) => key.toLowerCase() === 'path');
+  const inheritedPathKey = Object.keys(source).find((key) => key.toLowerCase() === 'path');
   const pathKey = platform === 'win32'
     ? (overridePathKey ?? inheritedPathKey ?? 'Path')
     : 'PATH';
   const pathValue = overridePathKey
     ? overrides[overridePathKey]
     : inheritedPathKey
-      ? (options.env ?? process.env)[inheritedPathKey]
+      ? source[inheritedPathKey]
       : undefined;
 
   if (platform === 'win32') {
@@ -139,6 +140,32 @@ export function sanitizedEnvironment(
   return env;
 }
 
+/** Remove inherited names with Windows' case-insensitive environment semantics. */
+export function unsetEnvironmentVariables(
+  environment: NodeJS.ProcessEnv,
+  names: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+): void {
+  const targets = new Set(names.map((name) => platform === 'win32' ? name.toLowerCase() : name));
+  for (const name of Object.keys(environment)) {
+    if (targets.has(platform === 'win32' ? name.toLowerCase() : name)) delete environment[name];
+  }
+}
+
+/** Merge overrides using the target platform's environment-name semantics. */
+export function mergeEnvironmentVariables(
+  base: NodeJS.ProcessEnv,
+  overrides: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
+  const merged = { ...base };
+  for (const [name, value] of Object.entries(overrides)) {
+    unsetEnvironmentVariables(merged, [name], platform);
+    if (value !== undefined) merged[name] = value;
+  }
+  return merged;
+}
+
 export function spawnManaged(options: SpawnProcessOptions): ManagedProcess {
   const windows = process.platform === 'win32';
   // cross-spawn's Windows ENOENT heuristic treats any shell exit code 1 as
@@ -146,10 +173,8 @@ export function spawnManaged(options: SpawnProcessOptions): ManagedProcess {
   // the real exit event. Shell commands need no .cmd/PATHEXT shim, so bypass it.
   const spawnImpl: typeof spawnChild = options.shell ? spawnChild : (crossSpawn as typeof spawnChild);
   const baseEnv = augmentedPathEnv();
-  const explicitPathKey = Object.keys(options.env ?? {}).find((key) => key.toLowerCase() === 'path');
-  if (explicitPathKey) for (const key of Object.keys(baseEnv)) if (key.toLowerCase() === 'path') delete baseEnv[key];
-  const childEnv = sanitizedEnvironment({ ...baseEnv, ...options.env });
-  for (const key of options.unsetEnv ?? []) delete childEnv[key];
+  const childEnv = sanitizedEnvironment(options.env, { env: baseEnv });
+  unsetEnvironmentVariables(childEnv, options.unsetEnv ?? [], process.platform);
   const child = spawnImpl(options.command, options.args, {
     cwd: options.cwd,
     detached: !windows,

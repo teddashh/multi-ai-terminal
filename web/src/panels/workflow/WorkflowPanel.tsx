@@ -8,8 +8,8 @@ import {
   useSensors,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import type { AgentBinding, ProviderInfo, Slot, Stage, WorkflowDef } from '@mat/shared';
-import { useEffect, useRef, useState } from 'react';
+import type { AgentBinding, OpenRouterModelCatalog, OpenRouterModelGroup, OpenRouterModelVersion, ProviderInfo, Slot, Stage, WorkflowDef } from '@mat/shared';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient, type ApiClient } from '../../api/client.js';
 import { ACTIVE_RUN_STATUSES, matStore, useMatStore } from '../../app/store.js';
 import { AgentChip } from '../../components/AgentChip.js';
@@ -89,6 +89,7 @@ export function WorkflowPanel({ api = apiClient }: WorkflowPanelProps) {
   const unavailableBindings = workflow ? unavailableProviderBindings(workflow, providers, locale) : [];
   const providerPreflightError = unavailableBindings.length > 0 ? unavailableBindings.join('\n') : undefined;
   const authWarnings = workflow ? workflowAuthWarnings(workflow, providers) : [];
+  const credentialWarnings = workflow ? workflowCredentialWarnings(workflow, providers) : [];
   const verificationWarnings = workflow ? workflowVerificationWarnings(workflow, selectedWorkspace?.verifyCommand, locale) : [];
 
   useEffect(() => {
@@ -200,9 +201,17 @@ export function WorkflowPanel({ api = apiClient }: WorkflowPanelProps) {
 
             <div className="mt-3 space-y-1.5" aria-label={t('workflow.providerReadiness')}>
               {boundProviders.map((provider) => <div key={provider.id} className="flex items-center gap-2 rounded border border-border/80 bg-canvas/60 px-2 py-1.5">
-                <span className={`h-2 w-2 rounded-full ${!provider.ok ? 'bg-red-400' : provider.authAlert ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                <span className={`h-2 w-2 rounded-full ${!provider.ok ? 'bg-red-400' : provider.authAlert || provider.environmentCredential?.configured === false ? 'bg-amber-400' : 'bg-emerald-400'}`} />
                 <span className="text-xs font-medium text-ink">{provider.id}</span>
-                <span className="min-w-0 flex-1 truncate text-[10px] text-muted">{provider.id === 'mock' ? t('workflow.mockProvider') : !provider.ok ? (provider.detail ? displayProviderDetail(provider.id, provider.detail, locale) : t('workflow.unavailable')) : provider.authAlert ? t('workflow.authFailure') : `${t('workflow.cliDetected')}${provider.version ? ` · ${provider.version}` : ''}`}</span>
+                <span className="min-w-0 flex-1 truncate text-[10px] text-muted">{provider.id === 'mock'
+                  ? t('workflow.mockProvider')
+                  : !provider.ok
+                    ? (provider.detail ? displayProviderDetail(provider.id, provider.detail, locale) : t('workflow.unavailable'))
+                    : provider.environmentCredential?.configured === false
+                      ? t('workflow.credentialMissing', { name: provider.environmentCredential.name })
+                      : provider.authAlert
+                        ? t('workflow.authFailure')
+                        : `${provider.runtimeFamily ? t('workflow.runtimeDetected', { family: provider.runtimeFamily }) : t('workflow.cliDetected')}${provider.version ? ` · ${provider.version}` : ''}`}</span>
                 <ProviderSetupButton provider={provider} api={api} />
               </div>)}
               {boundProviders.length === 0 && <p className="text-[11px] text-muted">{t('workflow.discoveryLoading')}</p>}
@@ -213,6 +222,7 @@ export function WorkflowPanel({ api = apiClient }: WorkflowPanelProps) {
             {providerPreflightError && <p className="mt-2 whitespace-pre-line text-xs text-red-300">{providerPreflightError}</p>}
             {verificationWarnings.length > 0 && <div className="mt-2 rounded border border-amber-800 bg-amber-950/30 p-2 text-xs text-amber-200" role="status"><strong>{t('workflow.verifyWarning')}</strong><ul className="mt-1 list-inside list-disc space-y-0.5">{verificationWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div>}
             {authWarnings.length > 0 && <p className="mt-2 text-xs text-amber-300" role="status">{t('workflow.signInWarning', { warnings: authWarnings.join(' · ') })}</p>}
+            {credentialWarnings.length > 0 && <p className="mt-2 text-xs text-amber-300" role="status">{t('workflow.credentialWarning', { warnings: credentialWarnings.join(' · ') })}</p>}
             {baseWorkflow?.builtin && edits[baseWorkflow.id] && <p className="mt-2 text-[11px] text-amber-200">{t('workflow.runScoped')}</p>}
             {!baseWorkflow?.builtin && edits[workflow.id] && <p className="mt-2 text-[11px] text-amber-200">{t('workflow.unsaved')}</p>}
             <button type="button" onClick={() => void startRun()} disabled={!task.trim() || !!activeRun || !!invalidStage || !!providerPreflightError || actionPending || runsLoading} className="mt-3 w-full rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-onAccent shadow-lg shadow-violet-950/30 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40">{actionPending || runsLoading ? t('workflow.working') : t('workflow.start')}</button>
@@ -226,8 +236,8 @@ export function WorkflowPanel({ api = apiClient }: WorkflowPanelProps) {
           <p className="text-sm text-muted">{t('workflow.advancedHelp')}</p>
           {baseWorkflow?.builtin && edits[baseWorkflow.id] && <div className="mt-3 flex items-center justify-between gap-2 rounded border border-amber-800 bg-amber-950/30 p-2 text-xs text-amber-200"><span>{t('workflow.editingCopy')}</span><button type="button" disabled={actionPending} onClick={() => void duplicateBuiltin()} className="rounded border border-amber-700 px-2 py-1 font-medium hover:bg-amber-900 disabled:opacity-50">{t('workflow.duplicateSave')}</button></div>}
           {!baseWorkflow?.builtin && edits[workflow.id] && <div className="mt-3 flex items-center justify-between rounded border border-border bg-surface p-2 text-xs"><span className="text-muted">{t('workflow.unsavedEdits')}</span><button type="button" disabled={actionPending} onClick={() => void saveCustom()} className="rounded border border-accent px-2 py-1 text-accentForeground disabled:opacity-50">{t('workflow.saveChanges')}</button></div>}
-          <section className="mt-4"><h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">{t('workflow.stages')}</h3><div className="space-y-3">{workflow.stages.map((stage) => <StageEditor key={stage.id} workflow={workflow} stage={stage} providers={providers} openSlot={openSlot} onOpenSlot={(id) => setOpenSlot((current) => current === id ? undefined : id)} onUpdate={(update) => updateStage(stage.id, update)} />)}</div></section>
-          <section className="relative mt-4 rounded border border-border bg-canvas/60 p-3"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted">{t('workflow.orchestrator')}</h3><label className="mt-2 flex items-center justify-between gap-2 text-xs"><span className="text-muted">{t('workflow.enabled')}</span><input type="checkbox" checked={workflow.orchestrator.enabled} onChange={(event) => commit((copy) => { copy.orchestrator.enabled = event.target.checked; })} /></label><button type="button" onClick={() => setOrchestratorOpen((value) => !value)} className="mt-2 w-full rounded bg-surface px-2 py-1.5 text-left text-xs hover:bg-raised" aria-expanded={orchestratorOpen}>{bindingSummary(workflow.orchestrator.agent, locale)}</button>{orchestratorOpen && <BindingEditor title={t('workflow.orchestratorBinding')} binding={workflow.orchestrator.agent} providers={providers} onChange={(agent) => commit((copy) => { copy.orchestrator.agent = agent; })} onClose={() => setOrchestratorOpen(false)} />}</section>
+          <section className="mt-4"><h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">{t('workflow.stages')}</h3><div className="space-y-3">{workflow.stages.map((stage) => <StageEditor key={stage.id} workflow={workflow} stage={stage} providers={providers} api={api} openSlot={openSlot} onOpenSlot={(id) => setOpenSlot((current) => current === id ? undefined : id)} onUpdate={(update) => updateStage(stage.id, update)} />)}</div></section>
+          <section className="relative mt-4 rounded border border-border bg-canvas/60 p-3"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted">{t('workflow.orchestrator')}</h3><label className="mt-2 flex items-center justify-between gap-2 text-xs"><span className="text-muted">{t('workflow.enabled')}</span><input type="checkbox" checked={workflow.orchestrator.enabled} onChange={(event) => commit((copy) => { copy.orchestrator.enabled = event.target.checked; })} /></label><button type="button" onClick={() => setOrchestratorOpen((value) => !value)} className="mt-2 w-full rounded bg-surface px-2 py-1.5 text-left text-xs hover:bg-raised" aria-expanded={orchestratorOpen}>{bindingSummary(workflow.orchestrator.agent, locale)}</button>{orchestratorOpen && <BindingEditor title={t('workflow.orchestratorBinding')} binding={workflow.orchestrator.agent} providers={providers} api={api} onChange={(agent) => commit((copy) => { copy.orchestrator.agent = agent; })} onClose={() => setOrchestratorOpen(false)} />}</section>
           <section aria-labelledby="agent-palette-heading" className="mt-4 rounded border border-border bg-canvas/60 p-3"><h3 id="agent-palette-heading" className="text-xs font-semibold uppercase tracking-wide text-muted">{t('workflow.agentPalette')}</h3><p className="mt-1 text-[11px] text-muted">{t('workflow.paletteHelp')}</p><div className="mt-2 flex flex-wrap gap-2">{providers.map((provider) => <PaletteAgent key={provider.id} provider={provider} api={api} />)}</div><div className="mt-3 grid grid-cols-[1fr_1fr_auto] gap-2"><select aria-label={t('workflow.stage')} value={fallbackStage} onChange={(event) => setFallbackStage(event.target.value)} className="min-w-0 rounded border border-border bg-canvas px-2 py-1.5 text-xs"><option value="">{t('workflow.stage')}</option>{workflow.stages.map((stage) => <option key={stage.id} value={stage.id} disabled={stageAgentCount(stage) >= MAX_STAGE_AGENTS}>{displayStageName(workflow, stage, locale)}</option>)}</select><select aria-label={t('workflow.provider')} value={fallbackProvider} onChange={(event) => setFallbackProvider(event.target.value)} className="min-w-0 rounded border border-border bg-canvas px-2 py-1.5 text-xs"><option value="">{t('workflow.provider')}</option>{providers.map((provider) => <option key={provider.id} value={provider.id} disabled={!provider.ok}>{provider.id}{provider.ok ? '' : ` (${t('workflow.unavailableSuffix')})`}</option>)}</select><button type="button" onClick={() => appendProvider(fallbackStage, fallbackProvider)} disabled={!fallbackStage || !fallbackProvider} className="rounded border border-accent px-2 py-1.5 text-xs text-accentForeground disabled:opacity-40">{t('workflow.addAgent')}</button></div></section>
         </>}
       </SideDrawer>
@@ -236,11 +246,11 @@ export function WorkflowPanel({ api = apiClient }: WorkflowPanelProps) {
 }
 
 interface StageEditorProps {
-  workflow: WorkflowDef; stage: Stage; providers: ProviderInfo[]; openSlot: string | undefined;
+  workflow: WorkflowDef; stage: Stage; providers: ProviderInfo[]; api: ApiClient; openSlot: string | undefined;
   onOpenSlot(id: string): void; onUpdate(update: (stage: Stage) => Stage): void;
 }
 
-function StageEditor({ workflow, stage, providers, openSlot, onOpenSlot, onUpdate }: StageEditorProps) {
+function StageEditor({ workflow, stage, providers, api, openSlot, onOpenSlot, onUpdate }: StageEditorProps) {
   const { locale, t } = useUiPreferences();
   const stageName = displayStageName(workflow, stage, locale);
   const { setNodeRef, isOver } = useDroppable({ id: `stage-${stage.id}`, data: { stageId: stage.id } });
@@ -257,14 +267,14 @@ function StageEditor({ workflow, stage, providers, openSlot, onOpenSlot, onUpdat
       {stage.slots.map((slot) => {
         const popoverId = `${stage.id}:${slot.id}`;
         const slotLabel = displaySlotLabel(workflow, slot.id, slot.label, locale);
-        return <div key={slot.id} className="relative"><button type="button" onClick={() => onOpenSlot(popoverId)} aria-expanded={openSlot === popoverId} className="rounded-full outline-none ring-accent focus:ring-2"><AgentChip agent={slot.agent} label={slotLabel} count={slot.count} /></button>{openSlot === popoverId && <SlotEditor workflow={workflow} stage={stage} slot={slot} providers={providers} onChange={(update) => updateSlot(slot.id, update)} onRemove={() => onUpdate((current) => ({ ...current, slots: current.slots.filter((item) => item.id !== slot.id) }))} onClose={() => onOpenSlot(popoverId)} />}</div>;
+        return <div key={slot.id} className="relative"><button type="button" onClick={() => onOpenSlot(popoverId)} aria-expanded={openSlot === popoverId} className="rounded-full outline-none ring-accent focus:ring-2"><AgentChip agent={slot.agent} label={slotLabel} count={slot.count} /></button>{openSlot === popoverId && <SlotEditor workflow={workflow} stage={stage} slot={slot} providers={providers} api={api} onChange={(update) => updateSlot(slot.id, update)} onRemove={() => onUpdate((current) => ({ ...current, slots: current.slots.filter((item) => item.id !== slot.id) }))} onClose={() => onOpenSlot(popoverId)} />}</div>;
       })}
       {stage.slots.length === 0 && <span className="text-xs text-red-300">{t('workflow.dropAgent')}</span>}
     </div>
   </section>;
 }
 
-function SlotEditor({ workflow, stage, slot, providers, onChange, onRemove, onClose }: { workflow: WorkflowDef; stage: Stage; slot: Slot; providers: ProviderInfo[]; onChange(update: (slot: Slot) => Slot): void; onRemove(): void; onClose(): void }) {
+function SlotEditor({ workflow, stage, slot, providers, api, onChange, onRemove, onClose }: { workflow: WorkflowDef; stage: Stage; slot: Slot; providers: ProviderInfo[]; api: ApiClient; onChange(update: (slot: Slot) => Slot): void; onRemove(): void; onClose(): void }) {
   const { locale, t } = useUiPreferences();
   const slotLabel = displaySlotLabel(workflow, slot.id, slot.label, locale);
   const provider = providers.find((item) => item.id === slot.agent.provider);
@@ -272,7 +282,7 @@ function SlotEditor({ workflow, stage, slot, providers, onChange, onRemove, onCl
   const editAgent = (update: (agent: AgentBinding) => void) => onChange((current) => { const agent = { ...current.agent }; update(agent); return { ...current, agent }; });
   return <div role="dialog" aria-label={t('workflow.editSlot', { slot: slotLabel })} className="absolute left-0 top-full z-30 mt-2 w-72 rounded border border-accent bg-panel p-3 shadow-2xl">
     <div className="flex items-center justify-between"><strong className="text-xs">{slotLabel}</strong><button type="button" onClick={onClose} aria-label={t('workflow.closeSlot')} className="text-muted hover:text-ink">×</button></div>
-    <ModelEditor key={slot.agent.provider} model={slot.agent.model} models={provider?.models ?? []} onChange={(model) => editAgent((agent) => { if (model) agent.model = model; else delete agent.model; })} />
+    <ProviderModelEditor key={slot.agent.provider} provider={provider} model={slot.agent.model} api={api} onChange={(model) => editAgent((agent) => { if (model) agent.model = model; else delete agent.model; })} />
     <label className="mt-2 block text-xs text-muted">{t('workflow.effort')}<select value={slot.agent.effort ?? ''} onChange={(event) => editAgent((agent) => { if (event.target.value) agent.effort = event.target.value as NonNullable<AgentBinding['effort']>; else delete agent.effort; })} className="mt-1 w-full rounded border border-border bg-canvas px-2 py-1.5 text-ink"><option value="">{t('workflow.defaultOption')}</option>{(['low', 'medium', 'high', 'xhigh'] as const).map((effort) => <option key={effort} value={effort}>{displayEffort(effort, locale)}</option>)}</select></label>
     <div className="mt-2 text-xs text-muted">{t('workflow.count')}<div className="mt-1 inline-flex items-center rounded border border-border bg-canvas"><button type="button" aria-label={t('workflow.decreaseCount')} disabled={slot.count <= 1} onClick={() => onChange((current) => ({ ...current, count: current.count - 1 }))} className="px-3 py-1 disabled:opacity-30">−</button><output className="min-w-8 text-center text-ink">{slot.count}</output><button type="button" aria-label={t('workflow.increaseCount')} disabled={!canIncrease} onClick={() => onChange((current) => ({ ...current, count: current.count + 1 }))} className="px-3 py-1 disabled:opacity-30">+</button></div></div>
     <label className="mt-2 block text-xs text-muted">{t('workflow.permission')}<select value={slot.agent.permission} onChange={(event) => editAgent((agent) => { agent.permission = event.target.value as AgentBinding['permission']; })} className="mt-1 w-full rounded border border-border bg-canvas px-2 py-1.5 text-ink">{(['safe', 'auto', 'full'] as const).map((permission) => <option key={permission} value={permission}>{displayPermission(permission, locale)}</option>)}</select></label>
@@ -281,20 +291,154 @@ function SlotEditor({ workflow, stage, slot, providers, onChange, onRemove, onCl
   </div>;
 }
 
-function BindingEditor({ title, binding, providers, onChange, onClose }: { title: string; binding: AgentBinding; providers: ProviderInfo[]; onChange(value: AgentBinding): void; onClose(): void }) {
+function BindingEditor({ title, binding, providers, api, onChange, onClose }: { title: string; binding: AgentBinding; providers: ProviderInfo[]; api: ApiClient; onChange(value: AgentBinding): void; onClose(): void }) {
   const { locale, t } = useUiPreferences();
   const provider = providers.find((item) => item.id === binding.provider);
   const edit = (update: (copy: AgentBinding) => void) => { const copy = { ...binding }; update(copy); onChange(copy); };
   return <div role="dialog" aria-label={title} className="absolute left-0 top-full z-30 mt-2 w-full rounded border border-accent bg-panel p-3 shadow-2xl">
     <div className="flex items-center justify-between"><strong className="text-xs">{title}</strong><button type="button" onClick={onClose} aria-label={t('workflow.closeOrchestrator')} className="text-muted">×</button></div>
     <label className="mt-2 block text-xs text-muted">{t('workflow.provider')}<select value={binding.provider} onChange={(event) => { const next = providers.find((item) => item.id === event.target.value); if (next) onChange({ ...binding, provider: next.id, model: next.defaultModel }); }} className="mt-1 w-full rounded border border-border bg-canvas px-2 py-1.5 text-ink">{providers.map((item) => <option key={item.id} value={item.id} disabled={!item.ok}>{item.id}</option>)}</select></label>
-    <ModelEditor key={binding.provider} model={binding.model} models={provider?.models ?? []} onChange={(model) => edit((copy) => { if (model) copy.model = model; else delete copy.model; })} />
+    <ProviderModelEditor key={binding.provider} provider={provider} model={binding.model} api={api} onChange={(model) => edit((copy) => { if (model) copy.model = model; else delete copy.model; })} />
     <label className="mt-2 block text-xs text-muted">{t('workflow.effort')}<select value={binding.effort ?? ''} onChange={(event) => edit((copy) => { if (event.target.value) copy.effort = event.target.value as NonNullable<AgentBinding['effort']>; else delete copy.effort; })} className="mt-1 w-full rounded border border-border bg-canvas px-2 py-1.5 text-ink"><option value="">{t('workflow.defaultOption')}</option>{(['low', 'medium', 'high', 'xhigh'] as const).map((effort) => <option key={effort} value={effort}>{displayEffort(effort, locale)}</option>)}</select></label>
     <label className="mt-2 block text-xs text-muted">{t('workflow.permission')}<select value={binding.permission} onChange={(event) => onChange({ ...binding, permission: event.target.value as AgentBinding['permission'] })} className="mt-1 w-full rounded border border-border bg-canvas px-2 py-1.5 text-ink">{(['safe', 'auto', 'full'] as const).map((permission) => <option key={permission} value={permission}>{displayPermission(permission, locale)}</option>)}</select></label>
   </div>;
 }
 
 const CUSTOM_MODEL = '__custom__';
+
+function ProviderModelEditor({ provider, model, api, onChange }: {
+  provider: ProviderInfo | undefined;
+  model: string | undefined;
+  api: ApiClient;
+  onChange(model?: string): void;
+}) {
+  if (provider?.id === 'openrouter') {
+    return <OpenRouterModelEditor provider={provider} model={model} api={api} onChange={onChange} />;
+  }
+  return <ModelEditor model={model} models={provider?.models ?? []} onChange={onChange} />;
+}
+
+function fallbackOpenRouterCatalog(provider: ProviderInfo): OpenRouterModelCatalog {
+  const ids = [...new Set([provider.defaultModel, ...provider.models].filter((value) => value.length > 0))];
+  return {
+    source: 'fallback',
+    groups: ids.map((id) => ({
+      id,
+      label: id,
+      defaultVersion: id,
+      versions: [{
+        id,
+        label: id,
+        kind: id.startsWith('~') ? 'latest' : 'current',
+        supportsTools: true,
+      }],
+    })),
+  };
+}
+
+function findOpenRouterSelection(groups: readonly OpenRouterModelGroup[], model: string | undefined): {
+  group: OpenRouterModelGroup;
+  version: OpenRouterModelVersion;
+} | undefined {
+  if (!model) return undefined;
+  for (const group of groups) {
+    const version = group.versions.find((candidate) => candidate.id === model);
+    if (version) return { group, version };
+  }
+  return undefined;
+}
+
+function OpenRouterModelEditor({ provider, model, api, onChange }: {
+  provider: ProviderInfo;
+  model: string | undefined;
+  api: ApiClient;
+  onChange(model?: string): void;
+}) {
+  const { t } = useUiPreferences();
+  const fallback = useMemo(() => fallbackOpenRouterCatalog(provider), [provider.defaultModel, provider.models]);
+  const [catalog, setCatalog] = useState<OpenRouterModelCatalog>(fallback);
+  const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+  const [customSelected, setCustomSelected] = useState(false);
+  const customRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let current = true;
+    setCatalog(fallback);
+    setLoading(true);
+    setLoaded(false);
+    void api.getOpenRouterModels().then((next) => {
+      if (current) setCatalog(next.groups.length > 0 ? next : fallback);
+    }).catch(() => {
+      if (current) setCatalog(fallback);
+    }).finally(() => {
+      if (current) {
+        setLoading(false);
+        setLoaded(true);
+      }
+    });
+    return () => { current = false; };
+  }, [api, fallback]);
+
+  const selection = findOpenRouterSelection(catalog.groups, model);
+  const isUnknownModel = loaded && model !== undefined && model !== '' && selection === undefined;
+  const showCustom = customSelected || isUnknownModel;
+  const selectedGroup = showCustom ? undefined : selection?.group;
+  const selectedVersion = showCustom ? undefined : selection?.version;
+
+  // Once an existing/custom slug opens the escape hatch, keep it open even if
+  // the user types through a catalog value on the way to a longer variant.
+  useEffect(() => {
+    if (isUnknownModel) setCustomSelected(true);
+  }, [isUnknownModel]);
+  useEffect(() => {
+    if (showCustom) customRef.current?.focus();
+  }, [showCustom]);
+
+  const versionLabel = (version: OpenRouterModelVersion): string => {
+    const kind = t(version.kind === 'latest'
+      ? 'workflow.openRouterVersionLatest'
+      : version.kind === 'pinned'
+        ? 'workflow.openRouterVersionPinned'
+        : 'workflow.openRouterVersionCurrent');
+    const detail = version.kind === 'latest' ? kind : `${kind} · ${version.label}`;
+    return version.supportsTools ? detail : `${detail} · ${t('workflow.openRouterToolsUnknown')}`;
+  };
+
+  return <div className="mt-2">
+    <label className="block text-xs text-muted">{t('workflow.model')}
+      <select aria-label={t('workflow.model')} value={showCustom ? CUSTOM_MODEL : (selectedGroup?.id ?? '')} onChange={(event) => {
+        const value = event.target.value;
+        if (value === CUSTOM_MODEL) {
+          setCustomSelected(true);
+          onChange(undefined);
+          return;
+        }
+        setCustomSelected(false);
+        if (!value) {
+          onChange(undefined);
+          return;
+        }
+        const group = catalog.groups.find((candidate) => candidate.id === value);
+        onChange(group?.defaultVersion);
+      }} className="mt-1 w-full rounded border border-border bg-canvas px-2 py-1.5 text-ink">
+        <option value="">{t('workflow.defaultOption')}</option>
+        {catalog.groups.map((group) => <option key={group.id} value={group.id}>{group.label}</option>)}
+        <option value={CUSTOM_MODEL}>{t('workflow.customOption')}</option>
+      </select>
+    </label>
+    <label className="mt-2 block text-xs text-muted">{t('workflow.version')}
+      <select aria-label={t('workflow.version')} disabled={!selectedGroup} value={selectedVersion?.id ?? ''} onChange={(event) => onChange(event.target.value || undefined)} className="mt-1 w-full rounded border border-border bg-canvas px-2 py-1.5 text-ink disabled:cursor-not-allowed disabled:opacity-50">
+        {!selectedGroup && <option value="">{t('workflow.selectModelFirst')}</option>}
+        {selectedGroup?.versions.map((version) => <option key={version.id} value={version.id}>{versionLabel(version)}</option>)}
+      </select>
+    </label>
+    {loading && <p className="mt-1 text-[10px] text-muted" role="status">{t('workflow.openRouterCatalogLoading')}</p>}
+    {!loading && catalog.source === 'stale' && <p className="mt-1 text-[10px] text-amber-200" role="status">{t('workflow.openRouterCatalogStale')}</p>}
+    {!loading && catalog.source === 'fallback' && <p className="mt-1 text-[10px] text-amber-200" role="status">{t('workflow.openRouterCatalogFallback')}</p>}
+    {showCustom && <input ref={customRef} aria-label={t('workflow.customModel')} value={model ?? ''} onChange={(event) => onChange(event.target.value || undefined)} className="mt-2 w-full rounded border border-border bg-canvas px-2 py-1.5 text-ink" />}
+  </div>;
+}
 
 function ModelEditor({ model, models, onChange }: { model: string | undefined; models: string[]; onChange(model?: string): void }) {
   const { t } = useUiPreferences();
@@ -326,15 +470,20 @@ function PaletteAgent({ provider, api }: { provider: ProviderInfo; api: ApiClien
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: `provider-${provider.id}`, data: { providerId: provider.id }, disabled: !provider.ok });
   const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
   const localizedDetail = provider.detail ? displayProviderDetail(provider.id, provider.detail, locale) : undefined;
+  const credentialMissing = provider.environmentCredential?.configured === false;
   const unavailable = localizedDetail ? t('workflow.providerUnavailableDetail', { detail: localizedDetail }) : t('workflow.providerUnavailable');
-  const title = provider.authAlert?.message ?? (provider.ok ? t('workflow.dragProvider', { provider: provider.id, version: provider.version ? ` · ${provider.version}` : '' }) : unavailable);
+  const title = credentialMissing
+    ? t('workflow.credentialMissing', { name: provider.environmentCredential!.name })
+    : provider.authAlert?.message ?? (provider.ok ? t('workflow.dragProvider', { provider: provider.id, version: provider.version ? ` · ${provider.version}` : '' }) : unavailable);
   const providerLabel = provider.ok
     ? t('workflow.providerAriaReady', { provider: provider.id })
     : t('workflow.providerAriaUnavailable', { provider: provider.id, detail: localizedDetail ?? t('workflow.notDetected') });
-  const ariaLabel = provider.authAlert
-    ? `${providerLabel}${locale === 'zh-TW' ? '・' : ' '}${t('workflow.authenticationRequired')}`
-    : providerLabel;
-  return <span title={title} className="relative inline-flex items-center gap-1"><button ref={setNodeRef} type="button" style={style} {...listeners} {...attributes} disabled={!provider.ok} aria-label={ariaLabel} className={`rounded-full text-left ${provider.ok ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed grayscale opacity-40'} ${provider.authAlert && provider.ok ? 'ring-1 ring-amber-500' : ''} ${isDragging ? 'z-50 opacity-70' : ''}`}><AgentChip agent={{ provider: provider.id, model: provider.defaultModel, permission: 'auto' }} /></button>{provider.authAlert && <span className="rounded border border-amber-700 bg-amber-950/50 px-1 py-0.5 text-[9px] font-medium text-amber-300">{t('workflow.auth')}</span>}{provider.version && <span className="max-w-24 truncate text-[10px] text-muted">{provider.version}</span>}<ProviderSetupButton provider={provider} api={api} /></span>;
+  const ariaLabel = credentialMissing
+    ? `${providerLabel}${locale === 'zh-TW' ? '・' : ' '}${t('workflow.environmentCredentialRequired')}`
+    : provider.authAlert
+      ? `${providerLabel}${locale === 'zh-TW' ? '・' : ' '}${t('workflow.authenticationRequired')}`
+      : providerLabel;
+  return <span title={title} className="relative inline-flex items-center gap-1"><button ref={setNodeRef} type="button" style={style} {...listeners} {...attributes} disabled={!provider.ok} aria-label={ariaLabel} className={`rounded-full text-left ${provider.ok ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed grayscale opacity-40'} ${(provider.authAlert || credentialMissing) && provider.ok ? 'ring-1 ring-amber-500' : ''} ${isDragging ? 'z-50 opacity-70' : ''}`}><AgentChip agent={{ provider: provider.id, model: provider.defaultModel, permission: 'auto' }} /></button>{provider.authAlert && !credentialMissing && <span className="rounded border border-amber-700 bg-amber-950/50 px-1 py-0.5 text-[9px] font-medium text-amber-300">{t('workflow.auth')}</span>}{credentialMissing && <span className="rounded border border-amber-700 bg-amber-950/50 px-1 py-0.5 text-[9px] font-medium text-amber-300">{t('workflow.credential')}</span>}{provider.version && <span className="max-w-24 truncate text-[10px] text-muted">{provider.version}</span>}<ProviderSetupButton provider={provider} api={api} /></span>;
 }
 
 function bindingSummary(binding: AgentBinding, locale: UiLocale): string {
@@ -354,7 +503,10 @@ export function unavailableProviderBindings(workflow: WorkflowDef, providers: re
 }
 
 export function workflowReadiness(workflow: WorkflowDef, providers: readonly ProviderInfo[]): { ready: number; required: number } {
-  const availability = new Map(providers.map((provider) => [provider.id, provider.ok]));
+  const availability = new Map(providers.map((provider) => [
+    provider.id,
+    provider.ok && provider.environmentCredential?.configured !== false,
+  ]));
   const bindings = workflow.stages.flatMap((stage) => stage.slots.flatMap((slot) => Array.from({ length: slot.count }, () => slot.agent.provider)));
   if (workflow.orchestrator.enabled) bindings.push(workflow.orchestrator.agent.provider);
   return { ready: bindings.filter((provider) => availability.get(provider) === true).length, required: bindings.length };
@@ -369,7 +521,17 @@ function providersForWorkflow(workflow: WorkflowDef): Array<ProviderInfo['id']> 
 function workflowAuthWarnings(workflow: WorkflowDef, providers: readonly ProviderInfo[]): string[] {
   const used = new Set(workflow.stages.flatMap((stage) => stage.slots.map((slot) => slot.agent.provider)));
   if (workflow.orchestrator.enabled) used.add(workflow.orchestrator.agent.provider);
-  return providers.filter((provider) => used.has(provider.id) && provider.authAlert).map((provider) => provider.authAlert!.message.split('\n', 1)[0]!);
+  return providers
+    .filter((provider) => used.has(provider.id) && provider.authAlert && provider.environmentCredential?.configured !== false)
+    .map((provider) => provider.authAlert!.message.split('\n', 1)[0]!);
+}
+
+function workflowCredentialWarnings(workflow: WorkflowDef, providers: readonly ProviderInfo[]): string[] {
+  const used = new Set(workflow.stages.flatMap((stage) => stage.slots.map((slot) => slot.agent.provider)));
+  if (workflow.orchestrator.enabled) used.add(workflow.orchestrator.agent.provider);
+  return providers
+    .filter((provider) => used.has(provider.id) && provider.environmentCredential?.configured === false)
+    .map((provider) => `${provider.id}: ${provider.environmentCredential!.name}`);
 }
 
 export function workflowVerificationWarnings(workflow: WorkflowDef, verifyCommand?: string, locale: UiLocale = 'en'): string[] {

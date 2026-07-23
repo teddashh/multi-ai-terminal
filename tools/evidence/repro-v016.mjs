@@ -8,16 +8,21 @@
 //   advance→retry on evidence ('[engine] requireVerified' rationale), rerun the
 //   candidate (attempt 2), then exhaust budget → honest degraded advance; node
 //   verification 'failed' with the boom marker in outputTail.
-import { spawn, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  fetchWithTimeout,
+  isolatedServerEnvironment,
+  launchEvidenceServer,
+} from './harness.mjs';
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const ROOT = process.env.MAT_ROOT ?? REPO_ROOT;
-const PORT = Number(process.env.MAT_PORT ?? 7813);
-const BASE = `http://127.0.0.1:${PORT}`;
+const PORT = Number(process.env.MAT_PORT ?? 0);
+let baseUrl;
 const failures = [];
 const check = (name, ok, detail = '') => {
   failures.push(...(ok ? [] : [name + (detail ? ` — ${detail}` : '')]));
@@ -25,7 +30,8 @@ const check = (name, ok, detail = '') => {
 };
 
 const api = async (path, init) => {
-  const response = await fetch(`${BASE}${path}`, {
+  if (!baseUrl) throw new Error(`cannot call ${path} before this server reports READY`);
+  const response = await fetchWithTimeout(`${baseUrl}${path}`, {
     ...init,
     headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
   });
@@ -62,20 +68,19 @@ const mockSlot = (id, promptTemplate) => ({ id, label: id, agent: { provider: 'm
 const dataDir = mkdtempSync(join(tmpdir(), 'mat-evidence-data-'));
 const wsA = gitWorkspace();
 const wsB = gitWorkspace();
-const child = spawn(process.execPath, [join(ROOT, 'server/dist/index.js')], {
-  env: { ...process.env, MAT_PORT: String(PORT), MAT_DATA_DIR: dataDir, MAT_HOST: '127.0.0.1' },
-  stdio: ['ignore', 'pipe', 'pipe'],
-});
+const harnessRoot = mkdtempSync(join(tmpdir(), 'mat-v016-harness-'));
 let serverLog = '';
-child.stdout.on('data', (chunk) => { serverLog += chunk; });
-child.stderr.on('data', (chunk) => { serverLog += chunk; });
+let server;
 
 try {
-  const ready = Date.now() + 15_000;
-  for (;;) {
-    try { await api('/api/health'); break; }
-    catch { if (Date.now() > ready) throw new Error(`server never became healthy\n${serverLog}`); await new Promise((r) => setTimeout(r, 200)); }
-  }
+  const env = isolatedServerEnvironment({ harnessRoot, dataDir, port: PORT });
+  server = launchEvidenceServer({
+    root: ROOT,
+    env,
+    onOutput: (text) => { serverLog += text; },
+  });
+  baseUrl = await server.ready;
+  await api('/api/health');
 
   // ---------- Scenario A ----------
   const workspaceA = await api('/api/workspaces', { method: 'POST', body: JSON.stringify({
@@ -152,7 +157,22 @@ try {
   console.error(serverLog.slice(-2000));
   process.exitCode = 1;
 } finally {
-  child.kill('SIGTERM');
-  setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } }, 2000).unref();
-  for (const dir of [dataDir, wsA, wsB]) { try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best effort */ } }
+  try {
+    await server?.stop();
+  } catch (error) {
+    console.error('INSTRUMENT CLEANUP ERROR:', error);
+    process.exitCode = 1;
+  }
+  for (const dir of [dataDir, wsA, wsB, harnessRoot]) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch (error) {
+      console.error('INSTRUMENT CLEANUP ERROR:', error);
+      process.exitCode = 1;
+    }
+  }
+  if ([dataDir, wsA, wsB, harnessRoot].some((dir) => existsSync(dir))) {
+    console.error('INSTRUMENT CLEANUP ERROR: a temporary directory remains');
+    process.exitCode = 1;
+  }
 }

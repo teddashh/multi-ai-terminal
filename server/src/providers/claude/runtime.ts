@@ -25,6 +25,9 @@ interface SessionState {
   active: boolean;
   activeIo?: SpawnIo;
   coalescer: ContentCoalescer;
+  streamedText: string;
+  streamedThinking: string;
+  toolNames: Map<string, string>;
 }
 
 const REAP_TICK_MS = 30_000;
@@ -38,6 +41,11 @@ export interface ClaudeSessionRuntime {
 const record = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 const string = (value: unknown): string | undefined => typeof value === 'string' ? value : undefined;
 const stripAnsi = (value: string): string => value.replace(/[\u001B\u009B][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d\/#&.:=?%@~_]+)*)?\u0007)|(?:(?:\d{1,4}(?:[;:]\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))/g, '');
+const missingStreamSuffix = (complete: string, streamed: string): string => {
+  if (!complete) return '';
+  if (!streamed) return complete;
+  return complete.startsWith(streamed) ? complete.slice(streamed.length) : '';
+};
 
 function resultErrorMessage(result: Record<string, unknown>): string {
   const message = string(result.error) ?? string(result.message)
@@ -47,10 +55,16 @@ function resultErrorMessage(result: Record<string, unknown>): string {
 
 function usageOf(result: Record<string, unknown>): NodeOutcome['usage'] | undefined {
   const usage = record(result.usage);
+  const number = (value: unknown): number | undefined => (
+    typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+  );
+  const inputTokens = number(usage?.input_tokens);
+  const outputTokens = number(usage?.output_tokens);
+  const costUsd = number(result.total_cost_usd);
   const mapped = {
-    ...(typeof usage?.input_tokens === 'number' ? { inputTokens: usage.input_tokens } : {}),
-    ...(typeof usage?.output_tokens === 'number' ? { outputTokens: usage.output_tokens } : {}),
-    ...(typeof result.total_cost_usd === 'number' ? { costUsd: result.total_cost_usd } : {}),
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(costUsd !== undefined ? { costUsd } : {}),
   };
   return Object.keys(mapped).length ? mapped : undefined;
 }
@@ -130,7 +144,16 @@ class SessionRuntime implements ClaudeSessionRuntime {
   private state(key: string): SessionState {
     let state = this.sessions.get(key);
     if (!state) {
-      const created = { interruptRequested: false, stderrTail: '', chain: Promise.resolve(), lastActivity: Date.now(), active: false } as SessionState;
+      const created = {
+        interruptRequested: false,
+        stderrTail: '',
+        chain: Promise.resolve(),
+        lastActivity: Date.now(),
+        active: false,
+        streamedText: '',
+        streamedThinking: '',
+        toolNames: new Map<string, string>(),
+      } as SessionState;
       created.coalescer = new ContentCoalescer((event) => { if (created.active) created.activeIo?.onEvent(event); });
       this.sessions.set(key, created);
       state = created;
@@ -142,6 +165,9 @@ class SessionRuntime implements ClaudeSessionRuntime {
     state.active = true;
     state.activeIo = io;
     state.lastActivity = Date.now();
+    state.streamedText = '';
+    state.streamedThinking = '';
+    state.toolNames.clear();
     try {
       if (killFlag.requested) return this.killed(state);
       const sdk = await loadAgentSdk();
@@ -244,21 +270,45 @@ class SessionRuntime implements ClaudeSessionRuntime {
     const emit = (event: AdapterContentEvent) => state.activeIo?.onEvent(event);
     if (message.type === 'stream_event') {
       const event = record(message.event); const delta = record(event?.delta);
-      if (event?.type === 'content_block_delta' && typeof delta?.text === 'string') state.coalescer.push('agent', 'message', delta.text);
-      if (event?.type === 'content_block_delta' && typeof delta?.thinking === 'string') state.coalescer.push('thinking', 'thinking', delta.thinking);
+      if (event?.type === 'content_block_delta' && typeof delta?.text === 'string') {
+        state.streamedText += delta.text;
+        state.coalescer.push('agent', 'message', delta.text);
+      }
+      if (event?.type === 'content_block_delta' && typeof delta?.thinking === 'string') {
+        state.streamedThinking += delta.thinking;
+        state.coalescer.push('thinking', 'thinking', delta.thinking);
+      }
       return;
     }
     const content = record(message.message)?.content;
     if (!Array.isArray(content)) return;
+    // A tool or completed message is a source-order boundary. Flush stream
+    // deltas before projecting the non-stream frame so immutable evidence
+    // never appears after a tool that actually followed it.
+    state.coalescer.flush();
     if (message.type === 'assistant') for (const raw of content) {
-      const block = record(raw); if (block?.type !== 'tool_use') continue;
+      const block = record(raw);
+      if (block?.type === 'text' && typeof block.text === 'string') {
+        const suffix = missingStreamSuffix(block.text, state.streamedText);
+        if (suffix) emit({ role: 'agent', kind: 'message', text: suffix, data: { completedFallback: true } });
+        continue;
+      }
+      if (block?.type === 'thinking' && typeof block.thinking === 'string') {
+        const suffix = missingStreamSuffix(block.thinking, state.streamedThinking);
+        if (suffix) emit({ role: 'thinking', kind: 'thinking', text: suffix, data: { completedFallback: true } });
+        continue;
+      }
+      if (block?.type !== 'tool_use') continue;
       const name = string(block.name) ?? 'tool'; const id = string(block.id); const input = stringifyToolValue(block.input);
+      if (id) state.toolNames.set(id, name);
       emit({ role: 'tool', kind: 'tool_use', text: `${name}${input ? ` ${input.replace(/\s+/g, ' ')}` : ''}`, tool: { ...(id ? { toolCallId: id } : {}), name, input } });
     }
     if (message.type === 'user') for (const raw of content) {
       const block = record(raw); if (block?.type !== 'tool_result') continue;
       const id = string(block.tool_use_id); const output = typeof block.content === 'string' ? block.content : stringifyToolValue(block.content);
-      emit({ role: 'tool', kind: 'tool_result', text: truncateText(output), tool: { ...(id ? { toolCallId: id } : {}), name: 'tool', output, isError: block.is_error === true } });
+      const name = id ? state.toolNames.get(id) ?? 'tool' : 'tool';
+      if (id) state.toolNames.delete(id);
+      emit({ role: 'tool', kind: 'tool_result', text: truncateText(output), tool: { ...(id ? { toolCallId: id } : {}), name, output, isError: block.is_error === true } });
     }
   }
 
@@ -279,6 +329,10 @@ class SessionRuntime implements ClaudeSessionRuntime {
 let singleton: SessionRuntime | undefined;
 let testOverrides: RuntimeOverrides = {};
 export function claudeSessionRuntime(): ClaudeSessionRuntime { return singleton ??= new SessionRuntime(testOverrides); }
+/** Dispose only an already-created production singleton; never create one during shutdown. */
+export async function disposeClaudeSessionRuntime(): Promise<void> {
+  const previous = singleton; singleton = undefined; await previous?.dispose();
+}
 export function resetClaudeSessionRuntimeForTest(overrides: RuntimeOverrides = {}): void {
   const previous = singleton; singleton = undefined; testOverrides = overrides; if (previous) void previous.dispose();
 }

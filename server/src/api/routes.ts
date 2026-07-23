@@ -12,6 +12,7 @@ import {
   WorkflowCreateRequestSchema,
   WorkflowPatchRequestSchema,
   type ApplyPatchResponse,
+  type OpenRouterModelCatalog,
   type RetryStageRequest,
   type RunCreateRequest,
   type RunSnapshot,
@@ -39,6 +40,7 @@ import { isSignInActive } from '../providers/signin.js';
 import { captureCurrent, readAccountIndex, removeAccount, switchAccount } from '../providers/codex/accounts.js';
 import { clearOpenAiKey, configuredOpenAiKey, setOpenAiKey } from '../providers/codex/apiKey.js';
 import { codexSessionRuntime } from '../providers/codex/runtime.js';
+import { loadOpenRouterModelCatalog } from '../providers/openrouter/catalog.js';
 import { clearAugmentedPathCache, spawnManaged, type ManagedProcess } from '../spawn.js';
 import { readEventsAfter } from '../store/eventLog.js';
 import { getDataDir } from '../store/dataDir.js';
@@ -85,6 +87,7 @@ const codexRefusal = (error: string): { ok: false; error: string } => ({ ok: fal
 
 export interface ApiRouteDependencies {
   providers(): ReturnType<typeof listProviders>;
+  openrouterModels(): Promise<OpenRouterModelCatalog>;
   providerInstall: {
     plan(providerId: ProviderId): ProviderInstallPlan;
     updatePlan(providerId: ProviderId): ProviderInstallPlan;
@@ -123,6 +126,7 @@ export interface ApiRouteDependencies {
 
 export const defaultApiRouteDependencies: ApiRouteDependencies = {
   providers: listProviders,
+  openrouterModels: loadOpenRouterModelCatalog,
   providerInstall: { plan: providerInstallPlan, updatePlan: providerUpdatePlan, spawn: spawnManaged, clearVersionCache, clearPathCache: clearAugmentedPathCache },
   providerSignIn: { start: startSignIn, status: signInStatus, submitCode: submitSignInCode, cancel: cancelSignIn },
   runtimes: { status: runtimeStatus, install: installFamily, clear: clearFamily, active: activeRuntimeMutation },
@@ -151,6 +155,7 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
 
   app.get('/api/health', wrap(async () => ({ ok: true, version: VERSION })));
   app.get('/api/providers', wrap(async () => dependencies.providers()));
+  app.get('/api/providers/openrouter/models', wrap(async () => dependencies.openrouterModels()));
   app.get('/api/providers/claude/accounts', wrap(async () => readClaudeAccountIndex(getDataDir())));
   app.get('/api/providers/codex/accounts', wrap(async () => readAccountIndex()));
   app.post('/api/providers/codex/accounts/capture', wrap(async () => {

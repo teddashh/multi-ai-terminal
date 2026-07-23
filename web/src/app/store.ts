@@ -310,7 +310,10 @@ export function createMatStore(client: ApiClient = apiClient): StoreApi<MatStore
           void client.getProviders().then((providers) => set({ providers })).catch(() => undefined);
         }
       }
-      else if (msg.type === 'runtime:changed') void client.getRuntimes().then((runtimes) => set({ runtimes })).catch(() => undefined);
+      else if (msg.type === 'runtime:changed') {
+        void client.getRuntimes().then((runtimes) => set({ runtimes })).catch(() => undefined);
+        void client.getProviders().then((providers) => set({ providers })).catch(() => undefined);
+      }
       else void client.getWorkspaces().then((workspaces) => set({ workspaces })).catch(() => undefined);
     },
     focusNode: (focusedNodeRunId) => set({ ui: { focusedNodeRunId } }),

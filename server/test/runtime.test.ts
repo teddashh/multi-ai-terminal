@@ -188,6 +188,52 @@ describe('runtime triggers', () => {
     await installFamily(root, 'codex', { ...deps(catalog), install: install as never });
     expect(events).toEqual([{ family: 'codex', state: 'missing', managedVersion: '2.3.4' }]);
   });
+
+  it('quietly self-provisions missing managed runtimes once and in dependency order for desktop startup', async () => {
+    const root = tempRoot(); const catalog = catalogFor(integrity(Buffer.from('x'))); const order: string[] = [];
+    let releaseCodex!: () => void;
+    const codexGate = new Promise<void>((resolve) => { releaseCodex = resolve; });
+    const install = vi.fn(async (_dataDir: string, family: string) => {
+      order.push(`start:${family}`);
+      if (family === 'codex') await codexGate;
+      order.push(`end:${family}`);
+      return `/fixture/${family}`;
+    });
+    const previous = process.env.MAT_SELF_PROVISION;
+    process.env.MAT_SELF_PROVISION = '1';
+    try {
+      maybeSelfProvision(root, { ...deps(catalog), install: install as never });
+      maybeSelfProvision(root, { ...deps(catalog), install: install as never });
+      await vi.waitFor(() => expect(order).toEqual(['start:codex']));
+      releaseCodex();
+      await vi.waitFor(() => expect(order).toEqual(['start:codex', 'end:codex', 'start:claude', 'end:claude']));
+      expect(install).toHaveBeenCalledTimes(2);
+      expect(install).toHaveBeenNthCalledWith(1, root, 'codex', expect.any(Object));
+      expect(install).toHaveBeenNthCalledWith(2, root, 'claude', expect.any(Object));
+    } finally {
+      if (previous === undefined) delete process.env.MAT_SELF_PROVISION;
+      else process.env.MAT_SELF_PROVISION = previous;
+    }
+  }, 30_000);
+
+  it('does not overwrite a broken managed runtime during desktop self-provision', async () => {
+    const root = tempRoot(); const catalog = catalogFor(integrity(Buffer.from('x')));
+    const install = vi.fn(async (_dataDir: string, family: string) => `/fixture/${family}`);
+    const previous = process.env.MAT_SELF_PROVISION;
+    process.env.MAT_SELF_PROVISION = '1';
+    try {
+      maybeSelfProvision(root, {
+        ...deps(catalog),
+        exists: async (path) => path.includes('claude-agent-sdk'),
+        install: install as never,
+      });
+      await vi.waitFor(() => expect(install).toHaveBeenCalledOnce());
+      expect(install).toHaveBeenCalledWith(root, 'codex', expect.any(Object));
+    } finally {
+      if (previous === undefined) delete process.env.MAT_SELF_PROVISION;
+      else process.env.MAT_SELF_PROVISION = previous;
+    }
+  }, 30_000);
 });
 
 describe('runtime install lifecycle', () => {

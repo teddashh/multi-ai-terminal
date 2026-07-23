@@ -1,6 +1,6 @@
 import type { AdapterContentEvent, Usage } from '@mat/shared';
 import { ContentCoalescer, humanizeError } from '../../adapters/base.js';
-import { redactEnvironmentValues } from '../../redact.js';
+import { redactEnvironmentValues, redactJsonValue } from '../../redact.js';
 import { UNHANDLED, type CodexConnection } from './connection.js';
 import { CODEX_APPROVAL_POLICIES, CODEX_SANDBOX_MODES } from './models.js';
 import { parseTokenUsage, translateNotification, turnOutcome, type CodexCommandOutputs, type ParsedTokenUsage } from './translate.js';
@@ -9,8 +9,51 @@ type ObjectValue = Record<string, unknown>;
 const object = (value: unknown): ObjectValue | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as ObjectValue : undefined;
 const text = (value: unknown): string | undefined => typeof value === 'string' ? value : undefined;
 const nestedId = (params: unknown, key: string): string | undefined => { const p = object(params); return text(p?.[`${key}Id`]) ?? text(object(p?.[key])?.id); };
+const missingStreamSuffix = (complete: string, streamed: string): string => {
+  if (!complete) return '';
+  if (!streamed) return complete;
+  return complete.startsWith(streamed) ? complete.slice(streamed.length) : '';
+};
 
-export interface CodexTurnOptions { prompt: string; model: string; effort?: string; cwd: string; approvalPolicy?: string; sandbox?: string }
+function redactAdapterEvent(
+  event: AdapterContentEvent,
+  environment: Readonly<Record<string, string | undefined>>,
+): AdapterContentEvent {
+  return {
+    ...event,
+    // role, kind, tool.isError, and canonical Bash/Edit names are trusted
+    // protocol structure. Child-derived payloads cross the sink boundary.
+    text: redactEnvironmentValues(event.text, environment),
+    ...(event.tool ? {
+      tool: {
+        ...event.tool,
+        name: ['Bash', 'Edit', 'WebSearch', 'TodoWrite'].includes(event.tool.name)
+          ? event.tool.name
+          : redactEnvironmentValues(event.tool.name, environment),
+        ...(event.tool.toolCallId !== undefined
+          ? { toolCallId: redactEnvironmentValues(event.tool.toolCallId, environment) }
+          : {}),
+        ...(event.tool.input !== undefined
+          ? { input: redactEnvironmentValues(event.tool.input, environment) }
+          : {}),
+        ...(event.tool.output !== undefined
+          ? { output: redactEnvironmentValues(event.tool.output, environment) }
+          : {}),
+      },
+    } : {}),
+    ...(event.data ? { data: redactJsonValue(event.data, environment) } : {}),
+  };
+}
+
+export interface CodexTurnOptions {
+  prompt: string;
+  model: string;
+  modelProvider?: string;
+  effort?: string;
+  cwd: string;
+  approvalPolicy?: string;
+  sandbox?: string;
+}
 export interface CodexTurnOutcome { status: 'completed' | 'interrupted' | 'failed'; usage?: Usage; resultText?: string; error?: string; threadId?: string }
 export interface CodexApprovalRequest { toolUseId: string; toolName: 'Bash' | 'Edit'; detail: Record<string, unknown>; reason?: string }
 export interface ThreadManagerHooks {
@@ -21,6 +64,7 @@ export interface ThreadManagerHooks {
 
 interface RunningTurn {
   pendingId?: string; liveId?: string; abortRequested: boolean; finished: boolean; resultText: string;
+  streamedText: string; streamedThinking: string;
   interruptActive?: boolean;
   resolve(value: CodexTurnOutcome): void; promise: Promise<CodexTurnOutcome>;
 }
@@ -40,9 +84,21 @@ export class CodexThreadManager {
   private generation = 0;
 
   private readonly interruptSettleMs: number;
+  private readonly errorProvider: string;
+  private readonly redactionEnvironment: Readonly<Record<string, string | undefined>>;
 
-  constructor(private readonly connection: CodexConnection, private readonly hooks: ThreadManagerHooks, opts: { interruptSettleMs?: number } = {}) {
+  constructor(
+    private readonly connection: CodexConnection,
+    private readonly hooks: ThreadManagerHooks,
+    opts: {
+      interruptSettleMs?: number;
+      errorProvider?: string;
+      redactionEnvironment?: Readonly<Record<string, string | undefined>>;
+    } = {},
+  ) {
     this.interruptSettleMs = opts.interruptSettleMs ?? 5_000;
+    this.errorProvider = opts.errorProvider ?? 'codex';
+    this.redactionEnvironment = opts.redactionEnvironment ?? process.env;
   }
 
   ownsSession(sessionKey: string): boolean { return this.sessions.has(sessionKey); }
@@ -130,10 +186,34 @@ export class CodexThreadManager {
       return;
     }
     const events = translateNotification(method, params, state.outputs);
-    for (const event of events) {
-      if (event.role === 'agent' && event.kind === 'message') { if (running) running.resultText += event.text; state.coalescer.push('agent', 'message', event.text); }
-      else if (event.role === 'thinking') state.coalescer.push('thinking', 'thinking', event.text);
-      else this.hooks.onEvent(sessionKey, event);
+    for (const rawEvent of events) {
+      let event = redactAdapterEvent(rawEvent, this.redactionEnvironment);
+      if (event.role === 'agent' && event.kind === 'message') {
+        if (running && event.data?.completedFallback === true) {
+          const suffix = missingStreamSuffix(event.text, running.streamedText);
+          if (!suffix) continue;
+          event = { ...event, text: suffix };
+        } else if (running) {
+          running.streamedText += event.text;
+        }
+        if (running) running.resultText += event.text;
+        state.coalescer.push('agent', 'message', event.text);
+      } else if (event.role === 'thinking') {
+        if (running && event.data?.completedFallback === true) {
+          const suffix = missingStreamSuffix(event.text, running.streamedThinking);
+          if (!suffix) continue;
+          event = { ...event, text: suffix };
+        } else if (running) {
+          running.streamedThinking += event.text;
+        }
+        state.coalescer.push('thinking', 'thinking', event.text);
+      } else {
+        // A tool/control frame is a source-order boundary. Flush stream text
+        // before forwarding it so immutable evidence cannot move past a later
+        // tool event.
+        state.coalescer.flush();
+        this.hooks.onEvent(sessionKey, event);
+      }
     }
   }
 
@@ -144,8 +224,14 @@ export class CodexThreadManager {
     const [sessionKey] = routed; const p = object(params) ?? {}; const item = object(p.item) ?? p;
     const requestId = text(p.requestId) ?? String(p.id ?? item.id ?? 'unknown');
     const toolName = method.includes('commandExecution') ? 'Bash' : 'Edit';
-    const detail = toolName === 'Bash' ? { command: item.command, cwd: item.cwd } : { summary: item.summary ?? item.changes };
-    const reason = text(p.reason);
+    const detail = redactJsonValue(
+      toolName === 'Bash' ? { command: item.command, cwd: item.cwd } : { summary: item.summary ?? item.changes },
+      this.redactionEnvironment,
+    );
+    const rawReason = text(p.reason);
+    const reason = rawReason
+      ? redactEnvironmentValues(rawReason, this.redactionEnvironment)
+      : undefined;
     const request: CodexApprovalRequest = { toolUseId: `codex-approval-${requestId}`, toolName, detail, ...(reason ? { reason } : {}) };
     // Keyed by a local counter: two id-less wire requests must never collide in
     // the map — an overwritten entry would leave its reply promise unsettled
@@ -181,7 +267,15 @@ export class CodexThreadManager {
     const sandbox = CODEX_SANDBOX_MODES.includes(options.sandbox as never) ? options.sandbox! : 'workspace-write';
     let resolve!: (value: CodexTurnOutcome) => void;
     const promise = new Promise<CodexTurnOutcome>((done) => { resolve = done; });
-    const running: RunningTurn = { abortRequested: false, finished: false, resultText: '', resolve, promise };
+    const running: RunningTurn = {
+      abortRequested: false,
+      finished: false,
+      resultText: '',
+      streamedText: '',
+      streamedThinking: '',
+      resolve,
+      promise,
+    };
     state.running = running;
     try {
       await this.ensureThread(state, options, approvalPolicy, sandbox);
@@ -207,11 +301,26 @@ export class CodexThreadManager {
   }
   private async recoverThread(state: SessionState, options: CodexTurnOptions, approvalPolicy: string, sandbox: string): Promise<void> {
     if (!state.hasCompletedTurn) return this.startThread(state, options, approvalPolicy, sandbox);
-    await this.connection.request('thread/resume', { threadId: state.threadId, model: options.model, cwd: options.cwd, approvalPolicy, sandbox, serviceName: 'multi-ai-terminal' });
+    await this.connection.request('thread/resume', {
+      threadId: state.threadId,
+      model: options.model,
+      ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
+      cwd: options.cwd,
+      approvalPolicy,
+      sandbox,
+      serviceName: 'multi-ai-terminal',
+    });
     state.generation = this.generation;
   }
   private async startThread(state: SessionState, options: CodexTurnOptions, approvalPolicy: string, sandbox: string): Promise<void> {
-    const response = await this.connection.request('thread/start', { model: options.model, cwd: options.cwd, approvalPolicy, sandbox, serviceName: 'multi-ai-terminal' });
+    const response = await this.connection.request('thread/start', {
+      model: options.model,
+      ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
+      cwd: options.cwd,
+      approvalPolicy,
+      sandbox,
+      serviceName: 'multi-ai-terminal',
+    });
     const id = nestedId(response, 'thread') ?? text(object(response)?.threadId);
     if (!id) throw new Error('Codex thread/start returned no thread id');
     if (state.threadId) this.threadOwners.delete(state.threadId);
@@ -260,12 +369,21 @@ export class CodexThreadManager {
     const running = state.running; if (!running || running.finished) return;
     running.finished = true; state.coalescer.end();
     if (outcome.status === 'interrupted') this.rememberStale(running.liveId ?? running.pendingId);
-    running.resolve({ ...outcome, ...(running.resultText ? { resultText: running.resultText } : {}), ...(state.threadId ? { threadId: state.threadId } : {}) });
+    const publicThreadId = state.threadId
+      ? redactEnvironmentValues(state.threadId, this.redactionEnvironment)
+      : undefined;
+    running.resolve({
+      ...outcome,
+      ...(running.resultText ? { resultText: running.resultText } : {}),
+      ...(publicThreadId ? { threadId: publicThreadId } : {}),
+    });
     delete state.running; this.cancelSessionApprovals(sessionKey);
   }
   private rememberStale(id?: string): void { if (!id) return; this.staleTurns.push(id); if (this.staleTurns.length > 16) this.staleTurns.shift(); }
   private cancelSessionApprovals(sessionKey: string): void { for (const approval of [...this.approvals.values()]) if (approval.sessionKey === sessionKey) approval.settle('cancel'); }
-  private safeError(value: unknown): string { return redactEnvironmentValues(humanizeError(value, 'codex')); }
+  private safeError(value: unknown): string {
+    return redactEnvironmentValues(humanizeError(value, this.errorProvider), this.redactionEnvironment);
+  }
   private route(params: unknown): [string, SessionState] | undefined {
     const threadId = nestedId(params, 'thread');
     const owner = threadId ? this.threadOwners.get(threadId) : undefined;

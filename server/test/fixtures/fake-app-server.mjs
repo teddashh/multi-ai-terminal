@@ -10,7 +10,15 @@ if (scenario.spawnMarkerFile) {
 
 const record = (direction, message) => {
   if (!scenario.recordFile) return;
-  appendFileSync(scenario.recordFile, `${JSON.stringify({ direction, message, spawnIndex, apiKeyPresent: process.env.OPENAI_API_KEY !== undefined })}\n`);
+  appendFileSync(scenario.recordFile, `${JSON.stringify({
+    direction,
+    message,
+    spawnIndex,
+    apiKeyPresent: process.env.OPENAI_API_KEY !== undefined,
+    openRouterApiKeyPresent: process.env.OPENROUTER_API_KEY !== undefined,
+    codexAccessTokenPresent: process.env.CODEX_ACCESS_TOKEN !== undefined,
+    codexApiKeyPresent: process.env.CODEX_API_KEY !== undefined,
+  })}\n`);
 };
 const send = (message) => {
   record('out', message);
@@ -34,6 +42,9 @@ input.on('line', (line) => {
   if (message.method === 'initialized' && !Object.hasOwn(message, 'id')) {
     initialized = true;
     if (scenario.warningLine) process.stdout.write(`${scenario.warningLine}\n`);
+    if (scenario.stderrEnvironmentName) {
+      process.stderr.write(String(process.env[scenario.stderrEnvironmentName] ?? ''));
+    }
     return;
   }
   if (!message.method || !Object.hasOwn(message, 'id')) return;

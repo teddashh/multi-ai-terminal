@@ -1,4 +1,4 @@
-import type { AdapterContentEvent, AgentBinding, ProviderId, Usage } from '@mat/shared';
+import type { AdapterContentEvent, AgentBinding, ProviderId, ProviderSessionMeta, ProviderTurnEndReason, Usage } from '@mat/shared';
 import type { ChildProcess } from 'node:child_process';
 import { spawnManaged } from '../spawn.js';
 import { diag } from '../diag.js';
@@ -16,10 +16,19 @@ export interface NodeOutcome {
   sessionRef?: string; usage?: Usage;
   resultText?: string;
   error?: string;
+  /** Canonical provider-manager terminal evidence; nodeRunner remains its only durable writer. */
+  providerTurn?: {
+    event: 'claude:turn-end';
+    sessionId: string;
+    reason: ProviderTurnEndReason;
+    status: ProviderSessionMeta;
+  };
 }
 export interface SpawnedNode { pid: number; kill(sig?: NodeJS.Signals): void; completion: Promise<NodeOutcome> }
 export interface Adapter {
   id: ProviderId; tier: 'rich' | 'plain';
+  runtimeFamily?: 'claude' | 'codex';
+  environmentCredential?(): { name: string; configured: boolean };
   available(): Promise<{ ok: boolean; version?: string; detail?: string }>;
   spawn(spec: ResolvedNodeSpec, io: { onEvent(e: AdapterContentEvent): void; onRaw(line: string, stream: 'out'|'err'): void }): SpawnedNode;
   models: string[]; defaultModel: string;
@@ -39,12 +48,14 @@ const AUTH_PATTERNS = [
   /app_session_terminated/i,
   /access token could not be refreshed/i,
   /failed to refresh token/i,
+  /OPENROUTER_API_KEY[\s\S]{0,120}(?:not set|missing|required)/i,
 ];
 
 const SAFE_AUTH_INSTRUCTIONS: Readonly<Record<string, readonly string[]>> = {
   codex: ['codex logout && codex login', 'codex login'],
   grok: ['grok login --device-code', 'grok login'],
 };
+const OPENROUTER_AUTH_GUIDANCE = "Set OPENROUTER_API_KEY in MAT's environment, then restart MAT.";
 
 function safeAuthInstruction(provider: string, text: string): string | undefined {
   const allowed = SAFE_AUTH_INSTRUCTIONS[provider];
@@ -59,6 +70,9 @@ export function detectAuthFailure(provider: string, text: string): string | unde
   if (provider === 'mock') return undefined;
   const tail = text.slice(-4096);
   if (!AUTH_PATTERNS.some((pattern) => pattern.test(tail))) return undefined;
+  if (provider === 'openrouter') {
+    return `openrouter authentication failed.\nFix: ${OPENROUTER_AUTH_GUIDANCE}`;
+  }
   const command = signInCommand(provider);
   if (!command) return undefined;
   const expired = /refresh(?:_| )token|401 Unauthorized/i.test(tail);
@@ -101,6 +115,12 @@ export function humanizeError(value: unknown, provider?: string): string {
   const message = extracted.message ?? original;
   const spawn = /spawn (\S+) ENOENT/.exec(message);
   if (spawn?.[1]) return `\`${spawn[1]}\` CLI not found on PATH — install it or remove this agent from the workflow.`;
+  if (provider === 'openrouter' && (
+    /401 Unauthorized|invalid api key/i.test(message)
+    || /OPENROUTER_API_KEY[\s\S]{0,120}(?:not set|missing|required)/i.test(message)
+  )) {
+    return `openrouter authentication failed. ${OPENROUTER_AUTH_GUIDANCE}`;
+  }
   if (provider && provider !== 'mock' && (/refresh token .*(revoked|already used)/i.test(message) || /401 Unauthorized/.test(message))) {
     const relogin = provider === 'codex'
       ? 'Sign out and back in with the codex CLI (e.g. `codex logout && codex login`)'

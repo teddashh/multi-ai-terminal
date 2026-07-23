@@ -68,6 +68,10 @@ describe('Codex model and notification translation', () => {
       total: { inputTokens: 11, outputTokens: 7, cacheReadTokens: 3 }, last: { inputTokens: 2, outputTokens: 1 }, contextWindow: 99,
     });
     expect(parseTokenUsage({ usage: { inputTokens: 4, outputTokens: 5, modelContextWindow: 0 } })).toEqual({ total: { inputTokens: 4, outputTokens: 5 }, last: { inputTokens: 4, outputTokens: 5 } });
+    expect(parseTokenUsage({ usage: { inputTokens: -4, outputTokens: 5, cachedInputTokens: -2 } })).toEqual({
+      total: { outputTokens: 5 },
+      last: { outputTokens: 5 },
+    });
   });
 
   it('accumulates stripped command output between matching tool events', () => {
@@ -77,6 +81,31 @@ describe('Codex model and notification translation', () => {
     const end = translateNotification('item/completed', { item: { id: 'tool-1', type: 'commandExecution', exitCode: 0 } }, outputs);
     expect(start[0]?.tool).toMatchObject({ toolCallId: 'tool-1', name: 'Bash' });
     expect(end[0]?.tool).toMatchObject({ toolCallId: 'tool-1', name: 'Bash', output: 'red', isError: false });
+  });
+
+  it('keeps completed-only message fallbacks and canonical non-shell tool names', () => {
+    expect(translateNotification('item/completed', {
+      item: { id: 'message-1', type: 'agentMessage', text: 'completed only' },
+    })).toEqual([{
+      role: 'agent',
+      kind: 'message',
+      text: 'completed only',
+      data: { completedFallback: true },
+    }]);
+    expect(translateNotification('item/completed', {
+      item: { id: 'reason-1', type: 'reasoning', summaryText: 'reasoning only' },
+    })).toEqual([{
+      role: 'thinking',
+      kind: 'thinking',
+      text: 'reasoning only',
+      data: { completedFallback: true },
+    }]);
+    expect(translateNotification('item/started', {
+      item: { id: 'web-1', type: 'web_search', query: 'MAT' },
+    })[0]?.tool?.name).toBe('WebSearch');
+    expect(translateNotification('item/started', {
+      item: { id: 'todo-1', type: 'todoList', items: [] },
+    })[0]?.tool?.name).toBe('TodoWrite');
   });
 });
 
@@ -91,6 +120,7 @@ describe('CodexThreadManager', () => {
           { delayMs: 5, method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-1' } } },
           { delayMs: 10, method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', delta: 'hello ' } },
           { delayMs: 12, method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', delta: 'world' } },
+          { delayMs: 13, method: 'item/completed', params: { threadId: 'thread-1', turnId: 'turn-1', item: { id: 'message-1', type: 'agentMessage', text: 'hello world' } } },
           { delayMs: 15, method: 'item/started', params: { threadId: 'thread-1', turnId: 'turn-1', item: { id: 'cmd-1', type: 'commandExecution', command: 'pwd', cwd: '/repo' } } },
           { delayMs: 17, method: 'item/commandExecution/outputDelta', params: { threadId: 'thread-1', turnId: 'turn-1', item: { id: 'cmd-1' }, delta: '/repo\n' } },
           { delayMs: 20, method: 'item/completed', params: { threadId: 'thread-1', turnId: 'turn-1', item: { id: 'cmd-1', type: 'commandExecution', exitCode: 0 } } },
@@ -113,9 +143,105 @@ describe('CodexThreadManager', () => {
     manager = new CodexThreadManager(connection, { onEvent: (_session, event) => events.push(event) });
     const options = { prompt: 'hello', model: DEFAULT_CODEX_MODEL, cwd: '/repo' };
     await expect(manager.startTurn('session', options)).resolves.toMatchObject({ status: 'completed', usage: { inputTokens: 8, outputTokens: 3 }, resultText: 'hello world', threadId: 'thread-1' });
-    expect(events.map((event) => event.kind)).toEqual(['tool_use', 'tool_result', 'message']);
+    expect(events.map((event) => event.kind)).toEqual(['message', 'tool_use', 'tool_result']);
     await expect(manager.startTurn('session', { ...options, prompt: 'again' })).resolves.toMatchObject({ status: 'completed', threadId: 'thread-1' });
     expect(records(recordFile).filter((entry) => entry.direction === 'in' && entry.message.method === 'thread/start')).toHaveLength(1);
+  }, 30_000);
+
+  it('redacts child-only credentials from translated events and result text', async () => {
+    const canary = 'mat-thread-child-secret-canary';
+    const threadId = `thread-${canary}`;
+    const events: AdapterContentEvent[] = [];
+    const { manager } = setup({
+      responses: {
+        'thread/start': { result: { thread: { id: threadId } } },
+        'turn/start': {
+          result: { turn: { id: 'turn-redacted' } },
+          notifications: [
+            {
+              method: 'item/agentMessage/delta',
+              params: {
+                threadId,
+                turnId: 'turn-redacted',
+                delta: `echo ${canary}`,
+              },
+            },
+            {
+              method: 'item/started',
+              params: {
+                threadId,
+                turnId: 'turn-redacted',
+                item: { id: canary, type: 'commandExecution', command: `echo ${canary}`, cwd: '/repo' },
+              },
+            },
+            {
+              method: 'item/commandExecution/outputDelta',
+              params: {
+                threadId,
+                turnId: 'turn-redacted',
+                item: { id: canary },
+                delta: canary,
+              },
+            },
+            {
+              method: 'item/completed',
+              params: {
+                threadId,
+                turnId: 'turn-redacted',
+                item: { id: canary, type: 'commandExecution', exitCode: 0 },
+              },
+            },
+            {
+              method: 'item/started',
+              params: {
+                threadId,
+                turnId: 'turn-redacted',
+                item: { id: 'unknown-secret', type: canary },
+              },
+            },
+            {
+              delayMs: 2,
+              method: 'turn/completed',
+              params: {
+                threadId,
+                turn: { id: 'turn-redacted', status: 'completed' },
+              },
+            },
+          ],
+        },
+      },
+    }, {
+      onEvent: (_sessionKey, event) => events.push(event),
+    }, {
+      redactionEnvironment: {
+        MAT_TEST_API_KEY: canary,
+        MAT_TEST_ROLE_COLLISION: 'agent',
+        MAT_TEST_KIND_COLLISION: 'message',
+        MAT_TEST_TOOL_COLLISION: 'Bash',
+      },
+    });
+
+    const outcome = await manager.startTurn('session', turnOptions);
+    expect(outcome.resultText).toBe('echo [REDACTED_ENV]');
+    expect(outcome.threadId).toBe('thread-[REDACTED_ENV]');
+    expect(events.map((event) => event.text).join('\n')).toContain('[REDACTED_ENV]');
+    expect(events.find((event) => event.role === 'agent')).toMatchObject({
+      role: 'agent',
+      kind: 'message',
+    });
+    expect(events.find((event) => event.kind === 'tool_use')?.tool).toMatchObject({
+      toolCallId: '[REDACTED_ENV]',
+      name: 'Bash',
+      input: expect.stringContaining('[REDACTED_ENV]'),
+    });
+    expect(events.find((event) => event.kind === 'tool_result')?.tool).toMatchObject({
+      toolCallId: '[REDACTED_ENV]',
+      name: 'Bash',
+      output: '[REDACTED_ENV]',
+    });
+    expect(events.find((event) => event.tool?.toolCallId === 'unknown-secret')?.tool?.name)
+      .toBe('[REDACTED_ENV]');
+    expect(JSON.stringify({ outcome, events })).not.toContain(canary);
   }, 30_000);
 
   it('resumes and retries a completed session when turn/start reports thread not found', async () => {

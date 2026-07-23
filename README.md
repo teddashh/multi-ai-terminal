@@ -2,9 +2,11 @@
 
 **English** | [繁體中文](./README.zh-TW.md)
 
-A local web workbench for composing and running **multi-agent workflows across headless CLI coding agents** — Claude Code, Codex CLI, Grok CLI, and Antigravity (Gemini). Drag agents onto workflow stages, let a real LLM orchestrator gate each stage, and watch every agent's output stream into one categorized, replayable feed.
+A local web workbench for composing and running **multi-agent workflows across headless coding-agent runtimes** — Claude Code, Codex, Grok, Antigravity (Gemini), and OpenRouter through Codex-as-runtime. Drag agents onto workflow stages, let a real LLM orchestrator gate each stage, and watch every agent's output stream into one categorized, replayable feed.
 
-Successor to [multi-ai-chat-desktop](https://github.com/teddashh/multi-ai-chat-desktop): instead of scraping web chats, every agent is a real headless CLI process whose JSONL stream is normalized into a single event schema.
+Successor to [multi-ai-chat-desktop](https://github.com/teddashh/multi-ai-chat-desktop): instead of scraping web chats, every agent is driven through a real headless CLI, app-server, or SDK runtime whose stream is normalized into one durable evidence schema.
+
+The latest published release is **v0.2.10**, adding OpenRouter through Codex-as-runtime, common Grok/Agy managers, and the canonical provider contract.
 
 ## How it works
 
@@ -32,7 +34,7 @@ Choose **Debug** beside **Report**, or use the read-only **Health** drawer, to d
 
 ## Quickstart
 
-Requirements: Node.js ≥ 20, Git ≥ 2.32 recommended (older Git falls back to plain `git apply --check`), plus whichever agent CLIs you want: `claude`, `codex`, `grok`, `agy`.
+Requirements: Node.js ≥ 20 and Git ≥ 2.32 recommended (older Git falls back to plain `git apply --check`), plus the runtimes for the providers you use: Claude and Codex can use MAT-managed pinned runtimes; Grok uses `grok`; Antigravity uses `agy`. OpenRouter has no CLI of its own: it requires the Codex runtime and `OPENROUTER_API_KEY` in MAT's environment. In the editor, choose an OpenRouter model first and then a version; MAT persists and sends the selected version's exact OpenRouter request slug.
 
 ```sh
 npm install
@@ -76,9 +78,9 @@ The lane is source-web only: no Rust toolchain, no installers, no release-asset 
 
 ## Provider setup
 
-Unavailable providers expose **Setup** in the agent palette. An install starts only after an explicit click and uses a fixed server-side recipe: npm global installs for Claude Code, Codex, and Grok; `winget` for Antigravity on Windows; and a displayed, copyable manual command for Antigravity elsewhere. No CLI is bundled or downloaded implicitly. Provider licenses remain independent, the upstream package manager supplies current releases, and each CLI may still require its own sign-in.
+The desktop quietly bootstraps missing supported Claude/Codex managed runtimes on first run, including the Codex runtime reused by OpenRouter. These artifacts are fixed, catalog-pinned, integrity-verified, and written only under `<dataDir>/runtimes/`; MAT does not install `@latest` globally or modify the host `PATH`. Unavailable providers still expose **Setup** as recovery and for provider-specific fixed recipes where no managed artifact exists. Those recipes accept no command input, and each provider's license and sign-in remain independent.
 
-Setup shows elapsed install time, automatically reruns discovery when the installer finishes, and keeps the completion/restart guidance visible. **Retry detection** clears MAT's local PATH/version caches without reinstalling anything. Windows version probes allow cold CLI shims 15 seconds to start; transient failures are cached for only two seconds, while successful versions remain cached for ten minutes.
+Automatic bootstrap and Setup both rerun runtime/provider discovery when installation finishes; Setup also shows elapsed time and keeps completion/restart guidance visible. **Retry detection** clears MAT's local PATH/version caches without reinstalling anything. Windows version probes allow cold CLI shims 15 seconds to start; transient failures are cached for only two seconds, while successful versions remain cached for ten minutes.
 
 MAT augments child-process `PATH` with existing well-known CLI locations: `%LOCALAPPDATA%\Antigravity` and `%APPDATA%\npm` on Windows, or `~/.local/bin`, `/usr/local/bin`, and `/opt/homebrew/bin` elsewhere. This lets the desktop server discover common user-level installs without inheriting environment-variable values into diagnostics.
 
@@ -90,17 +92,20 @@ The durable options are API-key authentication or serial provider usage. Codex s
 
 When a real provider fails with a recognized sign-in error, its node card shows multi-line amber guidance with the verified command, its provider chip gains an `auth` badge, and Setup exposes a copyable **Sign in** block. The composer warns before another run uses that provider without blocking it; a later successful node clears the alert.
 
-## Providers (verified invocations)
+OpenRouter authentication is environment-only: set `OPENROUTER_API_KEY` before starting MAT and restart MAT after changing it. MAT reports only whether the variable is present; it never exposes or persists its value.
 
-| Provider | CLI | Stream | Notes |
+## Providers and runtime paths
+
+| Provider | Runtime / transport | Stream | Notes |
 |---|---|---|---|
-| claude | `claude -p --output-format stream-json --verbose` | full (text/thinking/tools/cost) | resume via `--resume` |
-| codex | `codex exec --json -m gpt-5.6-sol` | full (incl. command exec events) | effort via `-c model_reasoning_effort` |
-| grok | `grok --prompt-file F --output-format streaming-json` | thought/text only (tools run silently) | grok ≥ 0.2.93: don't pass `-p` with `--prompt-file` |
-| agy | `agy -p "PROMPT" --model "Gemini 3.1 Pro (High)"` | plain text | model = display name; no JSON mode |
+| claude | Agent SDK driving the resolved `claude` runtime | full (text/thinking/tools/usage) | persistent session runtime; explicit legacy CLI mode remains |
+| codex | persistent `codex app-server` JSON-RPC/JSONL controller | full (thinking/tools/usage) | one shared controller owns resumable threads |
+| grok | `grok --prompt-file F --output-format streaming-json`, behind a FIFO manager | thought/text only (tools run silently) | grok ≥ 0.2.93: don't pass `-p` with `--prompt-file` |
+| agy | `agy -p "PROMPT" --model "Gemini 3.1 Pro (High)"`, behind a FIFO manager | plain text | model = display name; no JSON mode or resume |
+| openrouter | no OpenRouter CLI; persistent Codex app-server with an isolated OpenRouter config | full where the selected model supports it | requires `OPENROUTER_API_KEY`; select model → version; the exact version slug is sent |
 | mock | in-process | scripted | deterministic; `MOCK_REPLY:` echo mode for tests |
 
-Permission tiers per slot: `safe` (read-only), `auto` (accept edits), `full` (bypass sandbox) — mapped to each CLI's native flags (SPEC §4.5).
+Permission tiers per slot: `safe` (read-only), `auto` (accept edits), `full` (bypass sandbox) — mapped to each runtime's native policy (SPEC §4.6).
 
 ## Trust model
 
@@ -112,7 +117,7 @@ Binds `127.0.0.1` by default. `--host 0.0.0.0` exposes the API/UI to your networ
 
 ## Docs
 
-- [SPEC.md](./SPEC.md) — the engineering contract (v1.4)
+- [SPEC.md](./SPEC.md) — the engineering contract (v1.5, including BAT-runtime alignment)
 - [docs/project-audit-2026-07-20.md](./docs/project-audit-2026-07-20.md) — current hardening record and ordered continuation backlog
 - [docs/spec-review-panel.md](./docs/spec-review-panel.md) — 4-model spec review record
 - [docs/code-review-panel.md](./docs/code-review-panel.md) — 4-model code review record (25 findings fixed, 3 refuted)

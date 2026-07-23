@@ -8,18 +8,23 @@
 //    stage (regression for the trailing-steer fix).
 // E: debug bundle zip → manifest/run/events/diag/report/raw/artifacts present,
 //    client-log lands in server-diag, /api/debug/server-log serves it.
-import { spawn, execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  fetchWithTimeout,
+  isolatedServerEnvironment,
+  launchEvidenceServer,
+} from './harness.mjs';
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const ROOT = process.env.MAT_ROOT ?? REPO_ROOT;
 const REPO = process.env.MAT_REPO ?? REPO_ROOT;
-const PORT = Number(process.env.MAT_PORT ?? 7815);
-const BASE = `http://127.0.0.1:${PORT}`;
+const PORT = Number(process.env.MAT_PORT ?? 0);
+let baseUrl;
 const AdmZip = createRequire(join(REPO, 'server', 'package.json'))('adm-zip');
 const failures = [];
 const check = (name, ok, detail = '') => {
@@ -28,7 +33,8 @@ const check = (name, ok, detail = '') => {
 };
 
 const api = async (path, init) => {
-  const response = await fetch(`${BASE}${path}`, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } });
+  if (!baseUrl) throw new Error(`cannot call ${path} before this server reports READY`);
+  const response = await fetchWithTimeout(`${baseUrl}${path}`, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } });
   if (!response.ok) throw new Error(`${init?.method ?? 'GET'} ${path} → ${response.status}: ${await response.text()}`);
   const type = response.headers.get('content-type') ?? '';
   if (type.includes('json')) return response.json();
@@ -65,16 +71,19 @@ const slot = (id, model, promptTemplate) => ({ id, label: id, agent: { provider:
 const dataDir = mkdtempSync(join(tmpdir(), 'mat-steer-evidence-data-'));
 const wsC = gitWorkspace();
 const wsD = gitWorkspace();
-const child = spawn(process.execPath, [join(ROOT, 'server/dist/index.js')], {
-  env: { ...process.env, MAT_PORT: String(PORT), MAT_DATA_DIR: dataDir, MAT_HOST: '127.0.0.1' },
-  stdio: ['ignore', 'pipe', 'pipe'],
-});
+const harnessRoot = mkdtempSync(join(tmpdir(), 'mat-v017-harness-'));
 let serverLog = '';
-child.stdout.on('data', (chunk) => { serverLog += chunk; });
-child.stderr.on('data', (chunk) => { serverLog += chunk; });
+let server;
 
 try {
-  await waitFor(async () => { try { await api('/api/health'); return true; } catch { return undefined; } }, 'server health', 15_000);
+  const env = isolatedServerEnvironment({ harnessRoot, dataDir, port: PORT });
+  server = launchEvidenceServer({
+    root: ROOT,
+    env,
+    onOutput: (text) => { serverLog += text; },
+  });
+  baseUrl = await server.ready;
+  await api('/api/health');
 
   // ---------- Scenario C: interrupt steer ----------
   const workspaceC = await api('/api/workspaces', { method: 'POST', body: JSON.stringify({
@@ -179,7 +188,22 @@ try {
   console.error(serverLog.slice(-2000));
   process.exitCode = 1;
 } finally {
-  child.kill('SIGTERM');
-  setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } }, 2000).unref();
-  for (const dir of [dataDir, wsC, wsD]) { try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best effort */ } }
+  try {
+    await server?.stop();
+  } catch (error) {
+    console.error('INSTRUMENT CLEANUP ERROR:', error);
+    process.exitCode = 1;
+  }
+  for (const dir of [dataDir, wsC, wsD, harnessRoot]) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch (error) {
+      console.error('INSTRUMENT CLEANUP ERROR:', error);
+      process.exitCode = 1;
+    }
+  }
+  if ([dataDir, wsC, wsD, harnessRoot].some((dir) => existsSync(dir))) {
+    console.error('INSTRUMENT CLEANUP ERROR: a temporary directory remains');
+    process.exitCode = 1;
+  }
 }

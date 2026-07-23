@@ -11,6 +11,7 @@ export interface CodexConnectionConfig {
   nodeCommand?: string;
   codexHome: string;
   apiKey?: string;
+  extraEnv?: Readonly<Record<string, string | undefined>>;
   purpose: 'session' | 'login';
   cwd?: string;
   clientInfo: { name: string; title: string; version: string };
@@ -48,17 +49,17 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_REAPER_INTERVAL_MS = 30_000;
 const DEFAULT_IDLE_AFTER_MS = 300_000;
 
-function errorMessage(error: unknown): string {
+function errorMessage(error: unknown, environment: NodeJS.ProcessEnv = process.env): string {
   const raw = error instanceof Error ? error.message : String(error);
-  return redactEnvironmentValues(raw);
+  return redactEnvironmentValues(raw, environment);
 }
 
-function connectionLostError(reason: string): Error {
-  return new Error(`Codex app-server connection lost: ${redactEnvironmentValues(reason)}`);
+function connectionLostError(reason: string, environment: NodeJS.ProcessEnv = process.env): Error {
+  return new Error(`Codex app-server connection lost: ${redactEnvironmentValues(reason, environment)}`);
 }
 
-function rpcError(code: number, message: string): CodexRpcError {
-  const error = new Error(redactEnvironmentValues(message)) as CodexRpcError;
+function rpcError(code: number, message: string, environment: NodeJS.ProcessEnv = process.env): CodexRpcError {
+  const error = new Error(redactEnvironmentValues(message, environment)) as CodexRpcError;
   error.code = code;
   return error;
 }
@@ -75,8 +76,16 @@ export class CodexConnection {
   private lastActivity = Date.now();
   private deferredRecycle: string | undefined;
   private readonly reaper?: ReturnType<typeof setInterval>;
+  private readonly sinkEnvironment: NodeJS.ProcessEnv;
 
   constructor(private readonly config: CodexConnectionConfig) {
+    this.sinkEnvironment = {
+      ...process.env,
+      ...config.extraEnv,
+      ...(config.purpose === 'session' && config.apiKey !== undefined
+        ? { OPENAI_API_KEY: config.apiKey }
+        : {}),
+    };
     if (config.idleReaper !== false) {
       const interval = config.idleReaper?.checkIntervalMs ?? DEFAULT_REAPER_INTERVAL_MS;
       this.reaper = setInterval(() => this.reaperTick(), interval);
@@ -106,7 +115,7 @@ export class CodexConnection {
   async kill(): Promise<void> {
     const slot = this.slot;
     if (!slot) return;
-    this.lose(slot, connectionLostError('terminated'));
+    this.lose(slot, connectionLostError('terminated', this.sinkEnvironment));
   }
 
   /** Final teardown: kills the child AND stops the reaper. The instance stays
@@ -155,7 +164,7 @@ export class CodexConnection {
   private recycle(reason: string): void {
     const slot = this.slot;
     if (!slot) return;
-    this.lose(slot, connectionLostError(reason));
+    this.lose(slot, connectionLostError(reason, this.sinkEnvironment));
   }
 
   private async ensureReady(): Promise<ConnectionSlot> {
@@ -181,9 +190,21 @@ export class CodexConnection {
 
   private async spawnSlot(): Promise<ConnectionSlot> {
     const env = codexChildEnv(this.config.command, this.config.nodeCommand);
+    for (const [name, value] of Object.entries(this.config.extraEnv ?? {})) {
+      if (value === undefined) delete env[name];
+      else env[name] = value;
+    }
     env.CODEX_HOME = this.config.codexHome;
     if (this.config.purpose === 'session' && this.config.apiKey !== undefined) env.OPENAI_API_KEY = this.config.apiKey;
     else delete env.OPENAI_API_KEY;
+    const unsetEnv = new Set(
+      Object.entries(this.config.extraEnv ?? {})
+        .filter(([, value]) => value === undefined)
+        .map(([name]) => name),
+    );
+    if (!(this.config.purpose === 'session' && this.config.apiKey !== undefined)) {
+      unsetEnv.add('OPENAI_API_KEY');
+    }
 
     // spawnManaged is the project's one Windows-correct spawn seam: cross-spawn
     // .cmd shims, process-group kill with SIGKILL escalation, and loader-var
@@ -195,11 +216,12 @@ export class CodexConnection {
       cwd: this.config.cwd ?? homedir(),
       stdinOpen: true,
       env,
+      ...(unsetEnv.size > 0 ? { unsetEnv: [...unsetEnv] } : {}),
     });
     const { child, killGroup } = managed;
     if (!child.stdout || !child.stdin) {
       try { killGroup('SIGTERM'); } catch { /* best-effort */ }
-      throw connectionLostError('child spawned without stdio pipes');
+      throw connectionLostError('child spawned without stdio pipes', this.sinkEnvironment);
     }
     const slot: ConnectionSlot = { child, killGroup, nextId: 1, pending: new Map(), buffer: '', ready: false, lost: false, handshake: Promise.resolve() };
     this.slot = slot;
@@ -210,17 +232,37 @@ export class CodexConnection {
     child.stdout.once('end', () => {
       // Spawn errors and exits can close stdout first. Give their more useful,
       // redacted reason one event-loop turn to win before reporting plain EOF.
-      setImmediate(() => this.lose(slot, connectionLostError('stdout closed')));
+      setImmediate(() => this.lose(slot, connectionLostError('stdout closed', this.sinkEnvironment)));
     });
     // BAT runs the app-server with inherited stderr; spawnManaged pipes it, so
-    // forward — an unconsumed pipe would eventually block a chatty child.
-    child.stderr?.on('data', (chunk: string | Uint8Array) => process.stderr.write(chunk));
+    // forward complete, redacted lines — an unconsumed pipe would eventually
+    // block a chatty child, while raw forwarding could expose an env-sourced
+    // provider credential in server logs.
+    let stderrPending = '';
+    const flushStderr = (final = false): void => {
+      let newline = stderrPending.indexOf('\n');
+      while (newline >= 0) {
+        const line = stderrPending.slice(0, newline).replace(/\r$/, '');
+        stderrPending = stderrPending.slice(newline + 1);
+        process.stderr.write(`${redactEnvironmentValues(line, this.sinkEnvironment)}\n`);
+        newline = stderrPending.indexOf('\n');
+      }
+      if (final && stderrPending) {
+        process.stderr.write(redactEnvironmentValues(stderrPending, this.sinkEnvironment));
+        stderrPending = '';
+      }
+    };
+    child.stderr?.on('data', (chunk: string | Uint8Array) => {
+      stderrPending += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+      flushStderr();
+    });
+    child.stderr?.once('end', () => flushStderr(true));
     child.once('exit', (code, signal) => {
       const detail = signal ? `exited with signal ${signal}` : `exited with code ${code ?? 'unknown'}`;
-      this.lose(slot, connectionLostError(detail));
+      this.lose(slot, connectionLostError(detail, this.sinkEnvironment));
     });
-    child.once('error', (error) => this.lose(slot, connectionLostError(errorMessage(error))));
-    child.stdin.on('error', (error) => this.lose(slot, connectionLostError(errorMessage(error))));
+    child.once('error', (error) => this.lose(slot, connectionLostError(errorMessage(error, this.sinkEnvironment), this.sinkEnvironment)));
+    child.stdin.on('error', (error) => this.lose(slot, connectionLostError(errorMessage(error, this.sinkEnvironment), this.sinkEnvironment)));
 
     slot.handshake = this.sendRequest(slot, 'initialize', {
       clientInfo: this.config.clientInfo,
@@ -229,14 +271,16 @@ export class CodexConnection {
       this.write(slot, { method: 'initialized', params: {} });
       slot.ready = true;
     }).catch((error) => {
-      this.lose(slot, error instanceof Error ? error : connectionLostError(errorMessage(error)));
+      this.lose(slot, error instanceof Error
+        ? error
+        : connectionLostError(errorMessage(error, this.sinkEnvironment), this.sinkEnvironment));
       throw error;
     });
     return slot;
   }
 
   private sendRequest(slot: ConnectionSlot, method: string, params: unknown, timeoutMs: number): Promise<unknown> {
-    if (slot.lost) return Promise.reject(connectionLostError('not connected'));
+    if (slot.lost) return Promise.reject(connectionLostError('not connected', this.sinkEnvironment));
     const id = slot.nextId++;
     this.lastActivity = Date.now();
     return new Promise((resolve, reject) => {
@@ -258,7 +302,7 @@ export class CodexConnection {
 
   private write(slot: ConnectionSlot, message: Record<string, unknown>): void {
     const stdin = slot.child.stdin;
-    if (slot.lost || !stdin?.writable) throw connectionLostError('stdin closed');
+    if (slot.lost || !stdin?.writable) throw connectionLostError('stdin closed', this.sinkEnvironment);
     stdin.write(`${JSON.stringify(message)}\n`);
   }
 
@@ -309,7 +353,7 @@ export class CodexConnection {
     if (error) {
       const code = typeof error.code === 'number' ? error.code : -32603;
       const messageText = typeof error.message === 'string' ? error.message : 'JSON-RPC error';
-      pending.reject(rpcError(code, messageText));
+      pending.reject(rpcError(code, messageText, this.sinkEnvironment));
     } else {
       pending.resolve(message.result);
     }
@@ -325,7 +369,7 @@ export class CodexConnection {
       if (result === UNHANDLED) this.safeReply(slot, { id, error: { code: -32601, message: 'method not found' } });
       else this.safeReply(slot, { id, result });
     }, (error) => {
-      this.safeReply(slot, { id, error: { code: -32603, message: errorMessage(error) } });
+      this.safeReply(slot, { id, error: { code: -32603, message: errorMessage(error, this.sinkEnvironment) } });
     });
   }
 

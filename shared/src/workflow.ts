@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export type ProviderId = 'claude' | 'codex' | 'grok' | 'agy' | 'mock';
+export type ProviderId = 'claude' | 'codex' | 'grok' | 'agy' | 'openrouter' | 'mock';
 export interface AgentBinding {
   provider: ProviderId;
   model?: string;
@@ -40,7 +40,7 @@ export interface WorkflowDef {
   maxRetriesPerStage: number;
 }
 
-export const ProviderIdSchema = z.enum(['claude', 'codex', 'grok', 'agy', 'mock']);
+export const ProviderIdSchema = z.enum(['claude', 'codex', 'grok', 'agy', 'openrouter', 'mock']);
 export const WorkflowIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/, 'must be 1-64 letters, numbers, underscores, or hyphens');
 export const AgentBindingSchema = z.object({
   provider: ProviderIdSchema,

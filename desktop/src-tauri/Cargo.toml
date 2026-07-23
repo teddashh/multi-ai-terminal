@@ -1,6 +1,6 @@
 [package]
 name = "multi-ai-terminal"
-version = "0.2.9"
+version = "0.2.10"
 description = "Desktop shell for Multi-AI Terminal"
 edition = "2021"
 

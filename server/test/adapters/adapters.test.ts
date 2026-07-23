@@ -10,6 +10,7 @@ import { buildClaudeArgs, claudeAdapter } from '../../src/adapters/claude.js';
 import { buildCodexArgs, codexAdapter } from '../../src/adapters/codex.js';
 import { buildGrokArgs, grokAdapter } from '../../src/adapters/grok.js';
 import { mockAdapter } from '../../src/adapters/mock.js';
+import { redactEnvironmentValues } from '../../src/redact.js';
 import { createFakeExecutable, prependPath } from '../helpers/fakeExecutable.js';
 
 const fixture = (name: string): string => fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
@@ -168,9 +169,11 @@ describe('codex adapter', () => {
 
   it('normalizes command lifecycle and keeps the last agent message as resultText', async () => {
     const { events, outcome } = await runFixture(codexAdapter, spec('codex'), 'codex-tool.jsonl');
+    const rawCommand = "/bin/bash -lc 'echo hello-mat .'";
+    const persistedCommand = redactEnvironmentValues(rawCommand);
     expect(events).toEqual([
       { role: 'agent', kind: 'message', text: 'I’ll run that exact command and report what it prints.' },
-      { role: 'tool', kind: 'tool_use', text: "/bin/bash -lc 'echo hello-mat .'", tool: { toolCallId: 'item_1', name: 'shell', input: "/bin/bash -lc 'echo hello-mat .'" } },
+      { role: 'tool', kind: 'tool_use', text: persistedCommand, tool: { toolCallId: 'item_1', name: 'shell', input: persistedCommand } },
       { role: 'tool', kind: 'tool_result', text: 'hello-mat .\n', tool: { toolCallId: 'item_1', name: 'shell', output: 'hello-mat .\n', isError: false } },
       { role: 'agent', kind: 'message', text: '`hello-mat .`' },
     ]);
@@ -308,6 +311,7 @@ describe('coalescing and agy plain output', () => {
     expect(resolveAgyModel('Claude Sonnet 4.6 (Thinking)', 'low')).toBe('Claude Sonnet 4.6 (Thinking)');
     expect(buildAgyArgs(spec('agy', { permission: 'safe' }, 'inspect'))[1]).toContain('Read-only mode:');
     expect(buildAgyArgs(spec('agy', { permission: 'full' }))).toContain('--dangerously-skip-permissions');
+    expect(buildAgyArgs(spec('agy'))).toContain('45m');
   }, 30_000);
 
   it('rejects prompts over the 200 KB argv cap without spawning', async () => {
@@ -316,7 +320,7 @@ describe('coalescing and agy plain output', () => {
       onEvent: () => undefined,
       onRaw: (line) => raw.push(line),
     });
-    await expect(spawned.completion).resolves.toMatchObject({ exitCode: null, error: expect.stringContaining('200 KB') });
+    await expect(spawned.completion).resolves.toMatchObject({ exitCode: 1, error: expect.stringContaining('200 KB') });
     expect(raw).toEqual([expect.stringContaining('200 KB')]);
   }, 30_000);
 });

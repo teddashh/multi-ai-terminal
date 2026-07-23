@@ -1,4 +1,4 @@
-import type { AgentEvent, ApplyPatchResponse, ClaudeAccountIndexResponse, CodexAccountIndex, ProviderInfo, ProviderInstallResponse, ProviderSignInCodeResponse, ProviderSignInStartResponse, ProviderSignInStatusResponse, RetryStageRequest, RuntimeFamily, RuntimeStatus, RunCreateRequest, RunSnapshot, SteerRequest, WorkflowDef, Workspace } from '@mat/shared';
+import type { AgentEvent, ApplyPatchResponse, ClaudeAccountIndexResponse, CodexAccountIndex, OpenRouterModelCatalog, ProviderInfo, ProviderInstallResponse, ProviderSignInCodeResponse, ProviderSignInStartResponse, ProviderSignInStatusResponse, RetryStageRequest, RuntimeFamily, RuntimeStatus, RunCreateRequest, RunSnapshot, SteerRequest, WorkflowDef, Workspace } from '@mat/shared';
 
 export interface CodexAccountOperationResponse { ok: boolean; error?: string }
 export interface CodexApiKeyStatus { configured: boolean; source?: 'file' | 'env' }
@@ -17,6 +17,7 @@ export class ApiClient {
   get token(): string | undefined { return typeof this.#token === 'function' ? this.#token() : this.#token; }
   health(): Promise<{ ok: boolean; version: string }> { return this.request('/api/health'); }
   getProviders(): Promise<ProviderInfo[]> { return this.request('/api/providers'); }
+  getOpenRouterModels(): Promise<OpenRouterModelCatalog> { return this.request('/api/providers/openrouter/models'); }
   getRuntimes(): Promise<RuntimeStatus[]> { return this.request('/api/runtimes'); }
   installRuntime(family: RuntimeFamily): Promise<{ accepted: boolean }> { return this.request(`/api/runtimes/${family}/install`, { method: 'POST' }); }
   clearRuntime(family: RuntimeFamily): Promise<{ accepted: boolean }> { return this.request(`/api/runtimes/${family}/clear`, { method: 'POST' }); }

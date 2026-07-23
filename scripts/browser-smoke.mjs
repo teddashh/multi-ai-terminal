@@ -351,7 +351,7 @@ try {
     const darkCanvas = await page.locator('main').evaluate((element) => getComputedStyle(element).backgroundColor);
 
     await page.getByLabel('Language').selectOption('zh-TW');
-    await page.getByText('健康狀態', { exact: true }).waitFor({ timeout: 5_000 });
+    await page.getByRole('button', { name: '健康狀態', exact: true }).waitFor({ timeout: 5_000 });
     if (await page.locator('html').getAttribute('lang') !== 'zh-TW') throw new Error('Traditional Chinese selection did not update document language.');
 
     await page.getByRole('button', { name: '專案', exact: true }).click();
@@ -384,7 +384,7 @@ try {
 
     await page.getByLabel('介面語言').selectOption('en');
     await page.getByLabel('Theme').selectOption('dark');
-    await page.getByText('Health', { exact: true }).waitFor({ timeout: 5_000 });
+    await page.getByRole('button', { name: 'Health', exact: true }).waitFor({ timeout: 5_000 });
     if (await page.getByText('Final commemorative edition').isVisible()) throw new Error('AI-Sister edition badge leaked into the dark theme.');
   });
 

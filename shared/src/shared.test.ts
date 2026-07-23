@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { AgentEventSchema, ClaudeAccountIndexResponseSchema, CodexAccountIndexSchema, CodexApiKeySetRequestSchema, CodexApiKeyStatusResponseSchema, CodexAccountIdRequestSchema, NodeRunSchema, ProviderInfoSchema, ProviderSignInCancelRequestSchema, ProviderSignInCodeRequestSchema, RunSnapshotSchema, StageSchema, SteerMessageSchema, SteerRequestSchema, WorkflowDefSchema, WorkspacePatchRequestSchema, WorkspaceSchema, applyWorkflowDefaults } from './index.js';
+import { AgentEventSchema, ClaudeAccountIndexResponseSchema, CodexAccountIndexSchema, CodexApiKeySetRequestSchema, CodexApiKeyStatusResponseSchema, CodexAccountIdRequestSchema, NodeRunSchema, OpenRouterModelCatalogSchema, OpenRouterModelGroupSchema, OpenRouterModelVersionSchema, ProviderEventSchema, ProviderEventTypeSchema, ProviderIdSchema, ProviderInfoSchema, ProviderSessionMetaSchema, ProviderSignInCancelRequestSchema, ProviderSignInCodeRequestSchema, RunSnapshotSchema, StageSchema, SteerMessageSchema, SteerRequestSchema, WorkflowDefSchema, WorkspacePatchRequestSchema, WorkspaceSchema, applyWorkflowDefaults } from './index.js';
 
 describe('shared schemas', () => {
   it('round-trips an event', () => {
@@ -100,6 +100,194 @@ describe('shared schemas', () => {
     expect(CodexApiKeyStatusResponseSchema.parse({ configured: true, source: 'file' })).toEqual({ configured: true, source: 'file' });
   });
 
+  it('accepts OpenRouter before mock and keeps runtime metadata additive and strict', () => {
+    expect(ProviderIdSchema.options).toEqual(['claude', 'codex', 'grok', 'agy', 'openrouter', 'mock']);
+    expect(ProviderIdSchema.parse('openrouter')).toBe('openrouter');
+
+    const legacy = { id: 'openrouter', tier: 'rich', ok: true, installable: false, models: ['openai/gpt-test'], defaultModel: 'openai/gpt-test' };
+    expect(ProviderInfoSchema.parse(legacy)).toEqual(legacy);
+
+    const provider = {
+      ...legacy,
+      runtimeFamily: 'codex',
+      environmentCredential: { name: 'OPENROUTER_API_KEY', configured: false },
+    };
+    expect(ProviderInfoSchema.parse(provider)).toEqual(provider);
+    expect(ProviderInfoSchema.safeParse({ ...provider, runtimeFamily: 'openrouter' }).success).toBe(false);
+    expect(ProviderInfoSchema.safeParse({
+      ...provider,
+      environmentCredential: { ...provider.environmentCredential, value: 'must-not-cross-the-contract' },
+    }).success).toBe(false);
+  });
+
+  it('strictly validates OpenRouter model-family catalogs', () => {
+    const latest = {
+      id: '~openai/gpt-latest',
+      label: 'Latest',
+      kind: 'latest',
+      supportsTools: true,
+    } as const;
+    const pinned = {
+      id: 'openai/gpt-5.2-20251211',
+      label: 'GPT-5.2 (2025-12-11)',
+      kind: 'pinned',
+      supportsTools: true,
+      created: 1_765_411_200,
+    } as const;
+    const group = {
+      id: 'openai/gpt',
+      label: 'OpenAI GPT',
+      versions: [latest, pinned],
+      defaultVersion: latest.id,
+    };
+    const catalog = { groups: [group], source: 'live' } as const;
+
+    expect(OpenRouterModelVersionSchema.parse(latest)).toEqual(latest);
+    expect(OpenRouterModelGroupSchema.parse(group)).toEqual(group);
+    expect(OpenRouterModelCatalogSchema.parse(catalog)).toEqual(catalog);
+    expect(OpenRouterModelVersionSchema.safeParse({ ...latest, runtimeSlug: 'changed' }).success).toBe(false);
+    expect(OpenRouterModelGroupSchema.safeParse({ ...group, defaultVersion: 'missing' }).success).toBe(false);
+    expect(OpenRouterModelGroupSchema.safeParse({ ...group, versions: [] }).success).toBe(false);
+    expect(OpenRouterModelCatalogSchema.safeParse({ ...catalog, source: 'cache' }).success).toBe(false);
+    expect(OpenRouterModelCatalogSchema.safeParse({ ...catalog, extra: true }).success).toBe(false);
+  });
+
+  it('accepts the exact BAT provider-event surface with a nonempty session id', () => {
+    const meta = providerSessionMeta();
+    const events: Array<Record<string, unknown>> = [
+      {
+        type: 'claude:message', sessionId: 'session-1',
+        message: { id: 'message-1', sessionId: 'session-1', role: 'assistant', content: 'Done', thinking: 'Checked', parentToolUseId: null, timestamp: 1 },
+      },
+      {
+        type: 'claude:tool-use', sessionId: 'session-1',
+        toolCall: { id: 'tool-1', sessionId: 'session-1', toolName: 'Bash', input: { command: 'npm test' }, status: 'running', parentToolUseId: null, timestamp: 2 },
+      },
+      {
+        type: 'claude:tool-result', sessionId: 'session-1',
+        result: { id: 'tool-1', status: 'completed', result: { output: 'ok' } },
+      },
+      { type: 'claude:stream', sessionId: 'session-1', data: { text: 'partial', parentToolUseId: null } },
+      { type: 'claude:status', sessionId: 'session-1', meta },
+      {
+        type: 'claude:result', sessionId: 'session-1',
+        result: { subtype: 'success', usage: { input_tokens: 2 }, providerField: ['preserved'] },
+      },
+      {
+        type: 'claude:turn-end', sessionId: 'session-1',
+        payload: { reason: 'completed', result: 'Done', sdkSessionId: 'sdk-1', turnId: 'turn-1', usage: { inputTokens: 2, outputTokens: 1, costUsd: 0.01 } },
+      },
+      { type: 'claude:error', sessionId: 'session-1', error: 'provider failed' },
+      {
+        type: 'claude:rate-limit', sessionId: 'session-1',
+        info: { rateLimitType: 'five_hour', resetsAt: 10, utilization: 0.5, isUsingOverage: false },
+      },
+      {
+        type: 'claude:task', sessionId: 'session-1',
+        task: {
+          id: 'task-1', toolUseId: 'tool-1', type: 'workflow', status: 'running',
+          isWorkflow: true, workflowName: 'Review', subagentType: null, description: 'Review changes', startedAt: 3,
+        },
+      },
+      {
+        type: 'claude:permission-request', sessionId: 'session-1',
+        data: { toolUseId: 'tool-1', toolName: 'Bash', input: { command: 'npm test' }, suggestions: [{ type: 'allow' }], decisionReason: 'Run checks' },
+      },
+      { type: 'claude:permission-resolved', sessionId: 'session-1', toolUseId: 'tool-1' },
+      {
+        type: 'claude:ask-user', sessionId: 'session-1',
+        data: { toolUseId: 'ask-1', questions: [{ question: 'Continue?', header: 'Choice' }] },
+      },
+      { type: 'claude:ask-user-resolved', sessionId: 'session-1', toolUseId: 'ask-1' },
+      { type: 'claude:modeChange', sessionId: 'session-1', mode: 'acceptEdits' },
+      {
+        type: 'claude:history', sessionId: 'session-1',
+        items: [
+          { id: 'history-1', sessionId: 'session-1', role: 'user', content: 'Prior prompt', timestamp: 0 },
+          { id: 'history-tool-1', sessionId: 'session-1', toolName: 'Read', input: { file: 'a.ts' }, status: 'completed', result: 'ok', timestamp: 1 },
+        ],
+      },
+      { type: 'claude:resume-loading', sessionId: 'session-1', loading: true },
+      { type: 'claude:session-reset', sessionId: 'session-1' },
+      {
+        type: 'claude:worktree-info', sessionId: 'session-1',
+        payload: { branchName: 'bat/worktree-1', worktreePath: '/repo/wt', sourceBranch: 'main', gitRoot: '/repo' },
+      },
+    ];
+
+    expect(events.map((event) => event.type)).toEqual(ProviderEventTypeSchema.options);
+    for (const event of events) {
+      expect(ProviderEventSchema.parse(event)).toEqual(event);
+      const { sessionId: _sessionId, ...withoutSession } = event;
+      expect(ProviderEventSchema.safeParse(withoutSession).success).toBe(false);
+      expect(ProviderEventSchema.safeParse({ ...event, sessionId: '' }).success).toBe(false);
+    }
+    const batMessage = events[0] as {
+      type: 'claude:message';
+      sessionId: string;
+      message: Record<string, unknown>;
+    };
+    const { sessionId: _messageSessionId, ...messageWithoutSession } = batMessage.message;
+    expect(ProviderEventSchema.safeParse({
+      ...batMessage,
+      message: messageWithoutSession,
+    }).success).toBe(false);
+
+    const batToolUse = events[1] as {
+      type: 'claude:tool-use';
+      sessionId: string;
+      toolCall: Record<string, unknown>;
+    };
+    const { sessionId: _toolSessionId, ...toolWithoutSession } = batToolUse.toolCall;
+    expect(ProviderEventSchema.safeParse({
+      ...batToolUse,
+      toolCall: toolWithoutSession,
+    }).success).toBe(false);
+
+    const batHistory = events[15] as {
+      type: 'claude:history';
+      sessionId: string;
+      items: Array<Record<string, unknown>>;
+    };
+    const historyWithoutNestedSessions = batHistory.items.map(
+      ({ sessionId: _historySessionId, ...item }) => item,
+    );
+    expect(ProviderEventSchema.safeParse({
+      ...batHistory,
+      items: historyWithoutNestedSessions,
+    }).success).toBe(false);
+    expect(ProviderEventSchema.parse({ type: 'claude:worktree-info', sessionId: 'session-1', payload: null }).payload).toBeNull();
+  });
+
+  it('requires full strict provider status snapshots and bounded terminal metadata', () => {
+    const meta = providerSessionMeta();
+    expect(ProviderSessionMetaSchema.parse(meta)).toEqual(meta);
+    const { runtimeMessage: _runtimeMessage, ...partial } = meta;
+    expect(ProviderSessionMetaSchema.safeParse(partial).success).toBe(false);
+    expect(ProviderSessionMetaSchema.safeParse({ ...meta, extra: true }).success).toBe(false);
+    expect(ProviderSessionMetaSchema.safeParse({ ...meta, inputTokens: -1 }).success).toBe(false);
+    expect(ProviderSessionMetaSchema.safeParse({ ...meta, totalCost: Number.POSITIVE_INFINITY }).success).toBe(false);
+    expect(ProviderSessionMetaSchema.safeParse({ ...meta, numTurns: 1.5 }).success).toBe(false);
+
+    expect(ProviderEventSchema.safeParse({
+      type: 'claude:status', sessionId: 'session-1', meta: { model: null },
+    }).success).toBe(false);
+    expect(ProviderEventSchema.safeParse({
+      type: 'claude:message', sessionId: 'session-1',
+      message: { id: 'message-1', sessionId: 'session-1', role: 'assistant', content: 'Done', timestamp: 1, extra: true },
+    }).success).toBe(false);
+    expect(ProviderEventSchema.safeParse({
+      type: 'claude:turn-end', sessionId: 'session-1', payload: { reason: 'paused' },
+    }).success).toBe(false);
+    expect(ProviderEventSchema.safeParse({
+      type: 'claude:turn-end', sessionId: 'session-1',
+      payload: { reason: 'error', error: 'failed', usage: { inputTokens: -1 } },
+    }).success).toBe(false);
+    expect(ProviderEventSchema.safeParse({
+      type: 'claude:stream', sessionId: 'session-1', data: {},
+    }).success).toBe(false);
+  });
+
   it('enforces the per-stage fan-out cap', () => {
     const value = preset('planning');
     value.stages[0]!.slots[0]!.count = 8;
@@ -126,6 +314,35 @@ describe('shared schemas', () => {
     expect(WorkflowDefSchema.safeParse(value).success).toBe(false);
   });
 });
+
+function providerSessionMeta() {
+  return {
+    permissionMode: 'default',
+    model: null,
+    effort: null,
+    ultracode: false,
+    autoCompactWindow: null,
+    sdkSessionId: null,
+    cwd: null,
+    totalCost: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    durationMs: 0,
+    numTurns: 0,
+    contextWindow: 0,
+    maxOutputTokens: 0,
+    contextTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    callCacheRead: 0,
+    callCacheWrite: 0,
+    lastQueryCalls: 0,
+    isStreaming: false,
+    runtimeStatus: null,
+    runtimeMessage: null,
+    runtimeStatusStartedAt: null,
+  };
+}
 
 describe('builtin presets', () => {
   for (const name of ['planning', 'build', 'review', 'pipeline']) {

@@ -45,6 +45,49 @@ describe('health logic', () => {
     expect(observedFailure.issue).toBe(true);
   });
 
+  it('reports the OpenRouter environment key without inventing a separate CLI or sign-in state', () => {
+    const missing = providerFinding(provider({
+      id: 'openrouter',
+      runtimeFamily: 'codex',
+      environmentCredential: { name: 'OPENROUTER_API_KEY', configured: false },
+    }));
+    expect(missing).toMatchObject({
+      title: 'openrouter: OPENROUTER_API_KEY is not configured',
+      severity: 'warning',
+      issue: true,
+    });
+    expect(missing.detail).toContain('codex runtime detected');
+    expect(missing.detail).toContain('OPENROUTER_API_KEY: configured=false');
+    expect(missing.detail).toContain('API reports presence only and never exposes the credential value');
+    expect(`${missing.title} ${missing.detail}`).not.toMatch(/openrouter CLI|sign[- ]?in/i);
+
+    const configured = providerFinding(provider({
+      id: 'openrouter',
+      runtimeFamily: 'codex',
+      environmentCredential: { name: 'OPENROUTER_API_KEY', configured: true },
+    }));
+    expect(configured).toMatchObject({
+      title: 'openrouter: codex runtime detected',
+      severity: 'ok',
+      issue: false,
+    });
+    expect(configured.detail).toContain('OPENROUTER_API_KEY: configured=true');
+
+    const localizedMissing = providerFinding(provider({
+      id: 'openrouter',
+      runtimeFamily: 'codex',
+      environmentCredential: { name: 'OPENROUTER_API_KEY', configured: false },
+      authAlert: {
+        message: "openrouter authentication failed.\nFix: Set OPENROUTER_API_KEY in MAT's environment, then restart MAT.",
+        at: 10,
+        runId: 'run-openrouter',
+      },
+    }), 'zh-TW');
+    expect(localizedMissing.title).toBe('openrouter：尚未設定 OPENROUTER_API_KEY');
+    expect(localizedMissing.detail).toContain('openrouter 驗證失敗。');
+    expect(localizedMissing.detail).not.toContain('authentication failed');
+  });
+
   it('keeps an optional unavailable provider out of the issue count and does not hide recorded auth evidence', () => {
     const unavailable = providerFinding(provider({ id: 'grok', ok: false, detail: 'binary missing' }));
     expect(unavailable).toMatchObject({

@@ -49,28 +49,6 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!('__TAURI_INTERNALS__' in window)) return;
-    const timer = window.setTimeout(() => { void (async () => {
-      const statuses = await apiClient.getRuntimes();
-      for (const family of ['codex', 'claude'] as const) {
-        const status = statuses.find((item) => item.family === family);
-        if (status?.state === 'missing' && status.canInstallManaged) {
-          try {
-            await apiClient.installRuntime(family);
-            const deadline = Date.now() + 10 * 60_000;
-            while (Date.now() < deadline) {
-              await new Promise((resolve) => window.setTimeout(resolve, 2_000));
-              const current = (await apiClient.getRuntimes()).find((item) => item.family === family);
-              if (current?.state !== 'missing') break;
-            }
-          } catch { /* quiet first-run convenience */ }
-        }
-      }
-    })().catch(() => undefined); }, 5_000);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
     let live = true;
     const state = matStore.getState();
     if (!selectedWorkspaceId) {

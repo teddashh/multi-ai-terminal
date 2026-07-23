@@ -17,6 +17,8 @@ export interface ProviderInfo {
   signInCommand?: string;
   signIn?: { mode: ProviderSignInMode; replacesExistingLogin?: boolean };
   updatable?: boolean;
+  runtimeFamily?: 'claude' | 'codex';
+  environmentCredential?: { name: string; configured: boolean };
 }
 export const ProviderInfoSchema = z.object({
   id: ProviderIdSchema, tier: z.enum(['rich', 'plain']), ok: z.boolean(),
@@ -26,8 +28,41 @@ export const ProviderInfoSchema = z.object({
   signInCommand: z.string().optional(),
   signIn: z.object({ mode: z.enum(['paste-code', 'device']), replacesExistingLogin: z.boolean().optional() }).strict().optional(),
   updatable: z.boolean().optional(),
+  runtimeFamily: z.enum(['claude', 'codex']).optional(),
+  environmentCredential: z.object({ name: z.string(), configured: z.boolean() }).strict().optional(),
 }).strict();
 export const ProviderListSchema = z.array(ProviderInfoSchema);
+
+export const OpenRouterModelVersionSchema = z.object({
+  id: z.string().min(1).max(512),
+  label: z.string().min(1).max(512),
+  kind: z.enum(['latest', 'current', 'pinned']),
+  supportsTools: z.boolean(),
+  created: z.number().int().nonnegative().optional(),
+}).strict();
+export type OpenRouterModelVersion = z.infer<typeof OpenRouterModelVersionSchema>;
+
+export const OpenRouterModelGroupSchema = z.object({
+  id: z.string().min(1).max(512),
+  label: z.string().min(1).max(512),
+  versions: z.array(OpenRouterModelVersionSchema).min(1).max(10_001),
+  defaultVersion: z.string().min(1).max(512),
+}).strict().superRefine((group, context) => {
+  if (!group.versions.some((version) => version.id === group.defaultVersion)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['defaultVersion'],
+      message: 'defaultVersion must identify one of the group versions',
+    });
+  }
+});
+export type OpenRouterModelGroup = z.infer<typeof OpenRouterModelGroupSchema>;
+
+export const OpenRouterModelCatalogSchema = z.object({
+  groups: z.array(OpenRouterModelGroupSchema).max(10_000),
+  source: z.enum(['live', 'stale', 'fallback']),
+}).strict();
+export type OpenRouterModelCatalog = z.infer<typeof OpenRouterModelCatalogSchema>;
 
 export interface ProviderInstallResponse {
   ok: boolean;

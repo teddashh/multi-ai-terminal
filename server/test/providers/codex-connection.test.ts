@@ -173,6 +173,44 @@ describe('CodexConnection', () => {
     expect(readFileSync(recordFile, 'utf8')).not.toContain('test-secret-value');
   }, 30_000);
 
+  it('redacts credentials injected only into the child environment from stderr', async () => {
+    const canary = 'mat-child-only-secret-canary';
+    configureScenario({
+      stderrEnvironmentName: 'MAT_TEST_CHILD_SECRET',
+      responses: { ping: { result: true } },
+    });
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      const client = connection({ extraEnv: { MAT_TEST_CHILD_SECRET: canary } });
+      await client.request('ping');
+      await client.kill();
+      await vi.waitFor(() => {
+        expect(stderr.mock.calls.map(([chunk]) => String(chunk)).join('')).toContain('[REDACTED_ENV]');
+      }, { timeout: 5_000, interval: 20 });
+      expect(stderr.mock.calls.map(([chunk]) => String(chunk)).join('')).not.toContain(canary);
+    } finally {
+      stderr.mockRestore();
+    }
+  }, 30_000);
+
+  it('redacts a child-only credential echoed by a JSON-RPC error', async () => {
+    const canary = 'mat-rpc-child-secret-canary';
+    configureScenario({
+      responses: {
+        ping: { error: { code: 401, message: `provider rejected ${canary}` } },
+      },
+    });
+    const client = connection({ apiKey: canary });
+    let message = '';
+    try {
+      await client.request('ping');
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain('[REDACTED_ENV]');
+    expect(message).not.toContain(canary);
+  }, 30_000);
+
   it('replies -32601 with no handler configured and -32603 when the handler throws', async () => {
     configureScenario({ warningLine: 'codex: warming up', responses: {
       triggerUnhandled: { result: 'first', serverRequest: { method: 'approval/request', id: 91, params: {} } },

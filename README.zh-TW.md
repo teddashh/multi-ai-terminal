@@ -2,9 +2,11 @@
 
 [English](./README.md) | **繁體中文**
 
-在本機組合、執行**跨多個 headless CLI coding agent 的多代理工作流**的工作台 — 支援 Claude Code、Codex CLI、Grok CLI、Antigravity(Gemini)。把 agent 拖進工作流階段,讓真正的 LLM 調度者(Orchestrator)在每個階段把關,所有 agent 的輸出彙整成單一、分類、可回放的訊息流。
+在本機組合、執行**跨多個 headless coding-agent runtime 的多代理工作流**的工作台 — 支援 Claude Code、Codex、Grok、Antigravity(Gemini),以及透過 Codex-as-runtime 執行的 OpenRouter。把 agent 拖進工作流階段,讓真正的 LLM 調度者(Orchestrator)在每個階段把關,所有 agent 的輸出彙整成單一、分類、可回放的訊息流。
 
-[multi-ai-chat-desktop](https://github.com/teddashh/multi-ai-chat-desktop) 的後繼者:不再爬網頁聊天室,每個 agent 都是真實的 headless CLI 子進程,其 JSONL 串流被正規化成統一的事件格式。
+[multi-ai-chat-desktop](https://github.com/teddashh/multi-ai-chat-desktop) 的後繼者:不再爬網頁聊天室,每個 agent 都由真實的 headless CLI、app-server 或 SDK runtime 驅動,其串流被正規化成同一套持久證據格式。
+
+最新公開發行版是 **v0.2.10**，加入透過 Codex-as-runtime 執行的 OpenRouter、統一的 Grok/Agy manager，以及 canonical provider contract。
 
 ## 運作方式
 
@@ -32,7 +34,7 @@ UI 與產生的 Markdown 報告會區分「已產生、已審查、已前進、�
 
 ## 快速開始
 
-需求:Node.js ≥ 20、建議 Git ≥ 2.32(較舊的 Git 會退回純 `git apply --check`),以及你想用的 agent CLI:`claude`、`codex`、`grok`、`agy`。
+需求:Node.js ≥ 20、建議 Git ≥ 2.32(較舊的 Git 會退回純 `git apply --check`),以及所選 provider 的 runtime:Claude 與 Codex 可使用 MAT 管理的固定版本 runtime;Grok 使用 `grok`;Antigravity 使用 `agy`。OpenRouter 沒有自己的 CLI,必須使用 Codex runtime,並在 MAT 的環境中設定 `OPENROUTER_API_KEY`。編輯器會先選 OpenRouter 模型、再選版本;MAT 持久化並送出所選版本的精確 OpenRouter request slug。
 
 ```sh
 npm install
@@ -76,9 +78,9 @@ npm run agent:audit -- --json            # 宣告的權限/副作用 vs 實際�
 
 ## Provider 設定
 
-無法使用的 provider 會在 agent palette 顯示 **Setup**。安裝只有在使用者明確點擊後才會開始,而且只使用 server 端固定 recipe:Claude Code、Codex、Grok 走 npm global install;Windows 的 Antigravity 走 `winget`;其他平台只顯示可複製、由使用者自行執行的 Antigravity 指令。MAT 不會隱性綁入或下載任何 CLI;各 provider 的授權條款與登入仍由其上游工具管理。
+桌面版第一次啟動時,會安靜地補齊缺少且受支援的 Claude/Codex managed runtime,也包含 OpenRouter 共用的 Codex runtime。這些檔案都使用 MAT 固定 catalog 版本、先驗證完整性,而且只寫入 `<dataDir>/runtimes/`;不會在全域安裝 `@latest`,也不會修改主機 `PATH`。無法使用的 provider 仍會在 agent palette 顯示 **Setup**,作為修復入口,或執行沒有 managed artifact 時的 provider 專屬固定 recipe。這些 recipe 不接受任何命令列輸入;各 provider 的授權與登入仍彼此獨立。
 
-Setup 會顯示已經過的安裝時間,安裝程式結束後自動重新偵測,並保留清楚的完成／是否需要重開提示。**重新偵測**只會清除 MAT 本機的 PATH／版本快取,不會再次安裝。Windows 的版本檢查會給冷啟動 CLI shim 15 秒;暫時性失敗只快取 2 秒,成功版本則快取 10 分鐘。
+自動 bootstrap 與 Setup 都會在安裝完成後重新偵測 runtime/provider;Setup 另外顯示已經過的安裝時間,並保留清楚的完成／是否需要重開提示。**重新偵測**只會清除 MAT 本機的 PATH／版本快取,不會再次安裝。Windows 的版本檢查會給冷啟動 CLI shim 15 秒;暫時性失敗只快取 2 秒,成功版本則快取 10 分鐘。
 
 MAT 會在子行程 `PATH` 後補上既有的常見 CLI 位置:Windows 的 `%LOCALAPPDATA%\Antigravity`、`%APPDATA%\npm`;其他平台的 `~/.local/bin`、`/usr/local/bin`、`/opt/homebrew/bin`。這讓桌面 server 找得到常見的使用者層級安裝,但不會把環境變數值寫進診斷紀錄。
 
@@ -90,17 +92,20 @@ Codex 的部分登入失敗來自多個 CLI session 同時輪替單次使用的 
 
 真實 provider 若命中已知登入錯誤,失敗節點卡會顯示多行琥珀色指引與查證過的登入命令,provider chip 會出現 `auth` 徽章,Setup 也會提供可複製的 **Sign in** 區塊。Composer 會在再次使用該 provider 前提出非阻擋式警告;之後任一成功節點會清除此警示。
 
-## Provider(已驗證的呼叫方式)
+OpenRouter 只使用環境認證:啟動 MAT 前設定 `OPENROUTER_API_KEY`,變更後重新啟動 MAT。MAT 只回報此變數是否存在,絕不暴露或持久保存它的值。
 
-| 供應商 | CLI | 串流 | 備註 |
+## Provider 與 runtime 路徑
+
+| 供應商 | Runtime／傳輸 | 串流 | 備註 |
 |---|---|---|---|
-| claude | `claude -p --output-format stream-json --verbose` | 完整(文字/思考/工具/費用) | 以 `--resume` 續談 |
-| codex | `codex exec --json -m gpt-5.6-sol` | 完整(含指令執行事件) | 力度用 `-c model_reasoning_effort` |
-| grok | `grok --prompt-file F --output-format streaming-json` | 僅思考/文字(工具靜默執行) | grok ≥ 0.2.93:`--prompt-file` 不可再加 `-p` |
-| agy | `agy -p "PROMPT" --model "Gemini 3.1 Pro (High)"` | 純文字 | 模型用顯示名稱;無 JSON 模式 |
+| claude | Agent SDK 驅動解析後的 `claude` runtime | 完整(文字/思考/工具/用量) | 持久 session runtime;仍保留明確選用的 legacy CLI 模式 |
+| codex | 持久 `codex app-server` JSON-RPC/JSONL controller | 完整(思考/工具/用量) | 單一共享 controller 管理可續談 thread |
+| grok | `grok --prompt-file F --output-format streaming-json`,外包一層 FIFO manager | 僅思考/文字(工具靜默執行) | grok ≥ 0.2.93:`--prompt-file` 不可再加 `-p` |
+| agy | `agy -p "PROMPT" --model "Gemini 3.1 Pro (High)"`,外包一層 FIFO manager | 純文字 | 模型用顯示名稱;無 JSON 模式、無法續談 |
+| openrouter | 沒有 OpenRouter CLI;使用隔離 OpenRouter config 的持久 Codex app-server | 所選模型支援時為完整串流 | 需要 `OPENROUTER_API_KEY`;先選模型 → 再選版本;送出精確版本 slug |
 | mock | 行程內 | 腳本化 | 確定性;測試用 `MOCK_REPLY:` 回聲模式 |
 
-每個槽位的權限層級:`safe`(唯讀)、`auto`(自動接受編輯)、`full`(繞過沙箱)— 對應各 CLI 的原生旗標(SPEC §4.5)。
+每個槽位的權限層級:`safe`(唯讀)、`auto`(自動接受編輯)、`full`(繞過沙箱)— 對應各 runtime 的原生政策(SPEC §4.6)。
 
 ## 信任模型
 
@@ -112,7 +117,7 @@ Codex 的部分登入失敗來自多個 CLI session 同時輪替單次使用的 
 
 ## 文件
 
-- [SPEC.md](./SPEC.md) — 工程契約(v1.4)
+- [SPEC.md](./SPEC.md) — 工程契約(v1.5,含 BAT runtime alignment)
 - [docs/project-audit-2026-07-20.md](./docs/project-audit-2026-07-20.md) — 本次 hardening 記錄與依風險排序的後續 backlog
 - [docs/spec-review-panel.md](./docs/spec-review-panel.md) — 4 模型規格審查記錄
 - [docs/code-review-panel.md](./docs/code-review-panel.md) — 4 模型程式碼審查記錄(25 項發現已修復、3 項駁回)

@@ -5,11 +5,19 @@ import { claudeAdapter } from './claude.js';
 import { codexAdapter } from './codex.js';
 import { grokAdapter } from './grok.js';
 import { mockAdapter } from './mock.js';
+import { openRouterAdapter } from './openrouter.js';
 import { providerInstallPlan, providerUpdatePlan } from '../providers/install.js';
 import { getAuthAlert, signInCommand } from '../providers/auth.js';
 import { providerSignInDescriptor } from '../providers/signin.js';
 
-export const adapters: Readonly<Record<ProviderId, Adapter>> = { claude: claudeAdapter, codex: codexAdapter, grok: grokAdapter, agy: agyAdapter, mock: mockAdapter };
+export const adapters: Readonly<Record<ProviderId, Adapter>> = {
+  claude: claudeAdapter,
+  codex: codexAdapter,
+  grok: grokAdapter,
+  agy: agyAdapter,
+  openrouter: openRouterAdapter,
+  mock: mockAdapter,
+};
 export const adapterRegistry = adapters;
 export const getAdapter = (id: ProviderId): Adapter => adapters[id];
 export async function listProviders(): Promise<ProviderInfo[]> {
@@ -19,9 +27,12 @@ export async function listProviders(): Promise<ProviderInfo[]> {
     const command = signInCommand(adapter.id);
     const signIn = providerSignInDescriptor(adapter.id);
     const available = await adapter.available();
+    const environmentCredential = adapter.environmentCredential?.();
     return {
       id: adapter.id, tier: adapter.tier, ...available, installable: install.recipe !== undefined,
       ...(install.manualCommand ? { manualCommand: install.manualCommand } : {}), models: adapter.models, defaultModel: adapter.defaultModel,
+      ...(adapter.runtimeFamily ? { runtimeFamily: adapter.runtimeFamily } : {}),
+      ...(environmentCredential ? { environmentCredential } : {}),
       ...(authAlert ? { authAlert: { message: authAlert.message, at: authAlert.at, runId: authAlert.runId } } : {}),
       ...(command ? { signInCommand: command } : {}),
       ...(signIn ? { signIn } : {}),

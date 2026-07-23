@@ -213,6 +213,20 @@ describe('MAT store', () => {
     expect(getProviders).toHaveBeenCalledOnce();
   });
 
+  it('refreshes runtime and provider discovery independently after an explicit runtime mutation', async () => {
+    const providers = [{ id: 'codex', tier: 'rich', ok: true, installable: true, models: [], defaultModel: '' }];
+    const getRuntimes = vi.fn().mockRejectedValue(new Error('runtime refresh failed'));
+    const getProviders = vi.fn().mockResolvedValue(providers);
+    const store = createMatStore({ getRuntimes, getProviders } as any);
+    store.getState().applyWsMsg({
+      type: 'runtime:changed',
+      event: { family: 'codex', state: 'managed', managedVersion: '2.3.4' },
+    });
+    await vi.waitFor(() => expect(store.getState().providers).toEqual(providers));
+    expect(getRuntimes).toHaveBeenCalledOnce();
+    expect(getProviders).toHaveBeenCalledOnce();
+  });
+
   it('toggles roles and limits event storage to the ring size', () => {
     const store = createMatStore({} as any);
     store.getState().toggleRole('thinking'); expect(store.getState().filters.roles).not.toContain('thinking');

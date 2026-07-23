@@ -5,7 +5,13 @@ import { delimiter, join } from 'node:path';
 import type { Readable } from 'node:stream';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createLineBuffer } from '../../src/adapters/base.js';
-import { augmentedPathEnv, sanitizedEnvironment, spawnManaged } from '../../src/spawn.js';
+import {
+  augmentedPathEnv,
+  mergeEnvironmentVariables,
+  sanitizedEnvironment,
+  spawnManaged,
+  unsetEnvironmentVariables,
+} from '../../src/spawn.js';
 
 const testRoot = mkdtempSync(join(tmpdir(), 'mat-spawn-tests-'));
 afterAll(() => rmSync(testRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
@@ -88,6 +94,33 @@ describe('spawnManaged', () => {
     expect(env.Path).toBe(String.raw`C:\Windows;C:\Tools`);
     expect(env.PATH).toBeUndefined();
     expect(Object.keys(env).filter((key) => key.toLowerCase() === 'path')).toEqual(['Path']);
+  }, 30_000);
+
+  it('unsets Windows environment names case-insensitively', () => {
+    const env = {
+      OpenAi_Api_Key: 'openai-canary',
+      Codex_Access_Token: 'codex-canary',
+      PATH: String.raw`C:\Windows`,
+    };
+    unsetEnvironmentVariables(env, ['OPENAI_API_KEY', 'CODEX_ACCESS_TOKEN'], 'win32');
+    expect(env).toEqual({ PATH: String.raw`C:\Windows` });
+  }, 30_000);
+
+  it('replaces Windows environment names case-insensitively', () => {
+    const env = mergeEnvironmentVariables({
+      OpenRouter_Api_Key: 'inherited-openrouter',
+      OpenAi_Api_Key: 'inherited-openai',
+      Path: String.raw`C:\Windows`,
+    }, {
+      OPENROUTER_API_KEY: 'isolated-openrouter',
+      OPENAI_API_KEY: 'isolated-openai',
+      PATH: String.raw`C:\Tools`,
+    }, 'win32');
+    expect(env).toEqual({
+      OPENROUTER_API_KEY: 'isolated-openrouter',
+      OPENAI_API_KEY: 'isolated-openai',
+      PATH: String.raw`C:\Tools`,
+    });
   }, 30_000);
 
   it('passes the sanitized environment to the spawned process', async () => {

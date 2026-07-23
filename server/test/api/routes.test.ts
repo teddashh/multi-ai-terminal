@@ -26,6 +26,7 @@ afterEach(async () => {
   await app.close();
   clearAllAuthAlerts();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })));
 });
 
@@ -35,6 +36,37 @@ describe('health endpoint', () => {
     const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string };
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ ok: true, version: manifest.version });
+  });
+});
+
+describe('OpenRouter model catalog route', () => {
+  it('loads models only through the explicit OpenRouter endpoint', async () => {
+    const providers = vi.fn(async () => []);
+    const catalog = {
+      groups: [{
+        id: 'openai/gpt',
+        label: 'OpenAI GPT',
+        versions: [{ id: '~openai/gpt-latest', label: 'Latest', kind: 'latest' as const, supportsTools: true }],
+        defaultVersion: '~openai/gpt-latest',
+      }],
+      source: 'live' as const,
+    };
+    const openrouterModels = vi.fn(async () => catalog);
+    dependencies.providers = providers;
+    dependencies.openrouterModels = openrouterModels;
+
+    const listed = await app.inject({ method: 'GET', url: '/api/providers' });
+    expect(listed.statusCode).toBe(200);
+    expect(providers).toHaveBeenCalledOnce();
+    expect(openrouterModels).not.toHaveBeenCalled();
+
+    const models = await app.inject({ method: 'GET', url: '/api/providers/openrouter/models' });
+    expect(models.statusCode).toBe(200);
+    expect(models.json()).toEqual(catalog);
+    expect(openrouterModels).toHaveBeenCalledOnce();
+
+    expect((await app.inject({ method: 'GET', url: '/api/providers/grok/models' })).statusCode).toBe(404);
+    expect(openrouterModels).toHaveBeenCalledOnce();
   });
 });
 
@@ -166,6 +198,7 @@ describe('run routes', () => {
   });
 
   it('serves real-provider sign-in commands and current auth alerts', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'route-presence-canary');
     for (const adapter of Object.values(adapters)) vi.spyOn(adapter, 'available').mockResolvedValue({ ok: true, version: `${adapter.id}/test` });
     dependencies.providers = listProviders;
     setAuthAlert('grok', 'grok is not signed in.\nFix: grok login', 'run-auth', 'node-auth');
@@ -174,6 +207,12 @@ describe('run routes', () => {
     const listed = response.json() as Array<Record<string, unknown>>;
     expect(listed.find((provider) => provider.id === 'codex')).toMatchObject({ signInCommand: 'codex logout && codex login' });
     expect(listed.find((provider) => provider.id === 'grok')).toMatchObject({ authAlert: { message: expect.stringContaining('not signed in'), runId: 'run-auth' }, signInCommand: expect.stringContaining('grok login --device-code') });
+    expect(listed.find((provider) => provider.id === 'openrouter')).toMatchObject({
+      installable: false,
+      runtimeFamily: 'codex',
+      environmentCredential: { name: 'OPENROUTER_API_KEY', configured: true },
+    });
+    expect(listed.find((provider) => provider.id === 'openrouter')).not.toHaveProperty('signInCommand');
     expect(listed.find((provider) => provider.id === 'mock')).not.toHaveProperty('signInCommand');
     expect(listed.find((provider) => provider.id === 'mock')).not.toHaveProperty('authAlert');
 

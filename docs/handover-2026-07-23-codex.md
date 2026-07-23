@@ -1,23 +1,22 @@
-# Handover — continuation work for codex (written 2026-07-23, post v0.2.9)
+# Handover — v0.2.10 BAT continuation completion record (2026-07-23)
 
-You are gpt-5.6-sol running `codex exec` inside the MAT repo. This note is your work order context. Read `HANDOFF.md` and `AGENTS.md` first — they are the canonical repo contract; this note adds current state and the next tasks.
+This note records the completed #24/#25 continuation. Read `HANDOFF.md` and `AGENTS.md` first — they are the canonical repo contract.
 
 ## Where the project stands
 
-- **Released: v0.2.9** (tag `v0.2.9`, HEAD `0f57c11` on `main`, tree clean). BAT port plan (`docs/bat-port-plan.md`) phases done so far: §2 runtime catalog + managed installer (#20, v0.2.5–7), §3 codex app-server session runtime + claude Agent SDK runtime (#21/#22, v0.2.8), §4 auth/accounts alignment (#23, v0.2.9).
+- **Released: v0.2.10.** The continuation started from v0.2.9 tag commit `0f57c11` / baseline `a77d168` and completed BAT plan #24/#25: Grok/Agy managers, OpenRouter through Codex-as-runtime, the canonical event bridge, and the fifth evidence instrument.
 - #23 delivered: codex unified account store (`server/src/providers/codex/accounts.ts` — capture/switch/remove/sync, path-safe ids via shared `CODEX_ACCOUNT_ID_PATTERN`, switch re-snapshots outgoing + re-captures same-target), OpenAI API-key chain (`apiKey.ts`, file 0600 → env; exec env injects file-source only via `codexExecEnv`), needs-login marking wired in `engine/nodeRunner.ts` (suppressed when an API key is configured), sign-in/turn/mutation mutual exclusion (synchronous ceremony reservation in `providers/signin.ts`, reciprocal guard in `nodeRunner`), claude read-only accounts reader, ProviderSetup UI section, HANDOFF §Security 3 updated. All grok-review findings closed (final verdict PASS).
-- Deliberately deferred in #23 (do NOT build unless a work order asks): BAT's resolve-with-install during sign-in (MAT keeps installs explicit), native keyring for the API key (file+env is the headless baseline), in-protocol device-code login over app-server RPC (child-process login flow retained).
+- Deliberately deferred in #23 (do NOT build unless a work order asks): triggering a download from inside sign-in (desktop startup already quietly bootstraps missing supported managed runtimes, with Setup as recovery), native keyring for the API key (file+env is the headless baseline), in-protocol device-code login over app-server RPC (child-process login flow retained).
 
-## Next tasks (in order)
+## Completed work order
 
-### #24 — grok/agy manager pattern + OpenRouter as provider #5 (plan §5)
-- Wrap grok and agy in the same manager/runtime pattern claude/codex now use (managed runtime resolution where applicable, canonical auth-failure marking, sign-in recipes already exist in `providers/signin.ts`).
-- Add OpenRouter as the fifth provider using **codex-as-runtime** (BAT's `sakana` precedent: a codex binary pointed at OpenRouter via env/config, NOT a new CLI). Follow BAT's adapter shape; refresh the reference first:
-  `git clone --depth 50 https://github.com/tony1223/better-agent-terminal /tmp/mat-refs/better-agent-terminal` — baseline commit `0e24800`; if upstream moved, diff per plan §8 before porting.
-- `RuntimeFamily` is `'claude' | 'codex' | 'node'` — grok/agy/openrouter are NOT runtime families; only add a family if the plan section says so.
+### #24 — grok/agy manager pattern + OpenRouter as provider #5 (completed in v0.2.10)
+- Grok and Agy were wrapped in the common manager/runtime pattern while preserving their existing headless transports.
+- OpenRouter was added as the fifth provider through **codex-as-runtime**, grounded against BAT's unchanged `0e24800` custom-provider precedent.
+- `RuntimeFamily` remains `'claude' | 'codex' | 'node'`; Grok, Agy, and OpenRouter are providers, not new runtime families.
 
-### #25 — evidence mapping + canonical event contract (plan §6), then release
-- Map provider events onto the canonical `AgentEvent` contract per plan §6; extend `scripts/evidence` instruments to cover the runtime overhaul; release per the playbook in `HANDOFF.md` (six version files → lock sync → verify:version → CI → tag → notes → .deb evidence with `MAT_EXPECT_VERSION` → publish). Tempo: each phase releases the day it is green.
+### #25 — evidence mapping + canonical event contract (completed in v0.2.10)
+- Provider events were mapped through the canonical contract bridge, and the fifth black-box evidence instrument covers the runtime overhaul.
 
 ## Hard rules (violations = rejected work)
 
@@ -35,4 +34,4 @@ You are gpt-5.6-sol running `codex exec` inside the MAT repo. This note is your 
 
 ## Acceptance gates for any slice
 
-Server+shared suite green (`npm test`, currently 553 passing / 1 skipped), web suite green (`cd web && npx vitest run`, 164), both typechecks (`npm run typecheck`, `cd web && npx tsc -p tsconfig.json --noEmit`), `smoke:browser` 13/13, real codex+claude smokes when adapter/runtime code changed, `npm run verify:version` before any release commit.
+For the v0.2.10 #24/#25 release, the recorded local gates are: server+shared suite green (`npm test`, 620 passing / 1 skipped), web suite green (`cd web && npx vitest run`, 180 passing), both typechecks (`npm run typecheck`, `cd web && npx tsc -p tsconfig.json --noEmit`), `smoke:browser` 13/13, `npm run evidence` 5/5, and `npm run verify:version`. Real authenticated codex/claude/OpenRouter smokes still require credentials and isolated test homes; never substitute the user's real provider homes.

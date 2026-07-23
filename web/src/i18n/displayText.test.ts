@@ -132,6 +132,10 @@ describe('localized display text', () => {
     const alert = 'codex sign-in expired.\nFix: codex login';
     expect(displayAuthAlertMessage(alert, 'zh-TW')).toBe('codex 登入已過期。\n修正：codex login');
     expect(displayAuthAlertMessage('claude is not signed in.\nFix: claude /login', 'zh-TW')).toBe('claude 尚未登入。\n修正：claude /login');
+    expect(displayAuthAlertMessage(
+      "openrouter authentication failed.\nFix: Set OPENROUTER_API_KEY in MAT's environment, then restart MAT.",
+      'zh-TW',
+    )).toBe('openrouter 驗證失敗。\n修正：請在啟動 MAT 前設定 OPENROUTER_API_KEY 環境變數，然後重新啟動 MAT。');
     expect(displayAuthAlertMessage('arbitrary CLI output', 'zh-TW')).toBe('arbitrary CLI output');
     expect(displayAuthAlertMessage(alert, 'en')).toBe(alert);
   });
@@ -144,6 +148,10 @@ describe('localized display text', () => {
     expect(displayNodeError(bareRace, 'zh-TW')).not.toContain('例如');
     expect(displayNodeError('`codex` CLI not found on PATH — install it or remove this agent from the workflow.', 'zh-TW')).toBe('`codex` CLI 不在 PATH 中。請先安裝它，或從工作流程移除此代理程式。');
     expect(displayNodeError('codex sign-in expired.\nFix: codex login', 'zh-TW')).toBe('codex 登入已過期。\n修正：codex login');
+    expect(displayNodeError(
+      "openrouter authentication failed. Set OPENROUTER_API_KEY in MAT's environment, then restart MAT.",
+      'zh-TW',
+    )).toBe('openrouter 驗證失敗。請在啟動 MAT 前設定 OPENROUTER_API_KEY 環境變數，然後重新啟動 MAT。');
     expect(displayNodeError('some raw CLI stderr', 'zh-TW')).toBe('some raw CLI stderr');
     expect(displayNodeError(race, 'en')).toBe(race);
   });

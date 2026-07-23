@@ -173,6 +173,9 @@ const BARE_EXIT_DETAIL = /^exit (-?\d+|null)$/;
 const AUTH_EXPIRED_LINE = /^(\S+) sign-in expired\.$/;
 const AUTH_NOT_SIGNED_IN_LINE = /^(\S+) is not signed in\.$/;
 const AUTH_RACE_ERROR = /^(\S+) sign-in expired — parallel \1 sessions can race single-use refresh tokens\. Sign out and back in with the \1 CLI(?: \(e\.g\. `([^`]+)`\))?, or switch to API-key auth to avoid the race\.$/;
+const OPENROUTER_AUTH_LINE = 'openrouter authentication failed.';
+const OPENROUTER_AUTH_FIX = "Fix: Set OPENROUTER_API_KEY in MAT's environment, then restart MAT.";
+const OPENROUTER_AUTH_ERROR = "openrouter authentication failed. Set OPENROUTER_API_KEY in MAT's environment, then restart MAT.";
 
 /** Translate only the server's canonical discovery errors; arbitrary error and
  * evidence text stays verbatim. */
@@ -192,6 +195,8 @@ export function displayProviderDetail(provider: ProviderId, detail: string, loca
 export function displayAuthAlertMessage(message: string, locale: UiLocale): string {
   if (locale !== 'zh-TW') return message;
   return message.split('\n').map((line) => {
+    if (line === OPENROUTER_AUTH_LINE) return 'openrouter 驗證失敗。';
+    if (line === OPENROUTER_AUTH_FIX) return '修正：請在啟動 MAT 前設定 OPENROUTER_API_KEY 環境變數，然後重新啟動 MAT。';
     const expired = AUTH_EXPIRED_LINE.exec(line);
     if (expired) return `${expired[1]} 登入已過期。`;
     const notSignedIn = AUTH_NOT_SIGNED_IN_LINE.exec(line);
@@ -205,6 +210,9 @@ export function displayAuthAlertMessage(message: string, locale: UiLocale): stri
  * refresh-token race, missing CLIs); CLI-reported text stays verbatim. */
 export function displayNodeError(text: string, locale: UiLocale): string {
   if (locale !== 'zh-TW') return text;
+  if (text === OPENROUTER_AUTH_ERROR) {
+    return 'openrouter 驗證失敗。請在啟動 MAT 前設定 OPENROUTER_API_KEY 環境變數，然後重新啟動 MAT。';
+  }
   const race = AUTH_RACE_ERROR.exec(text);
   if (race) {
     const example = race[2] ? `（例如 \`${race[2]}\`）` : '';

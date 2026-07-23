@@ -81,6 +81,15 @@ export function fakeApiDependencies(run = runSnapshot()): ApiRouteDependencies {
   const workflows = [workflow()];
   return {
     providers: async () => [],
+    openrouterModels: async () => ({
+      groups: [{
+        id: 'openai/gpt',
+        label: 'OpenAI GPT',
+        versions: [{ id: '~openai/gpt-latest', label: 'Latest', kind: 'latest', supportsTools: true }],
+        defaultVersion: '~openai/gpt-latest',
+      }],
+      source: 'fallback',
+    }),
     providerInstall: { plan: providerInstallPlan, updatePlan: providerUpdatePlan, spawn: spawnManaged, clearVersionCache, clearPathCache: clearAugmentedPathCache },
     providerSignIn: { start: startSignIn, status: signInStatus, submitCode: submitSignInCode, cancel: cancelSignIn },
     report: (snapshot) => `# Run report — ${snapshot.workflow.name}\n`,

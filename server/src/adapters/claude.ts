@@ -31,6 +31,9 @@ export function buildClaudeArgs(spec: ResolvedNodeSpec): string[] {
 
 const stringField = (record: Record<string, unknown>, key: string): string | undefined =>
   typeof record[key] === 'string' ? record[key] : undefined;
+const usageNumber = (value: unknown): number | undefined => (
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+);
 
 function spawnClaudeCommand(command: string, spec: ResolvedNodeSpec, io: Parameters<Adapter['spawn']>[1]): SpawnedNode {
   const managed = spawnManaged({ command, args: buildClaudeArgs(spec), cwd: spec.cwd, stdin: spec.promptText });
@@ -106,10 +109,13 @@ function spawnClaudeCommand(command: string, spec: ResolvedNodeSpec, io: Paramet
       const usageRecord = rawUsage && typeof rawUsage === 'object' && !Array.isArray(rawUsage)
         ? rawUsage as Record<string, unknown>
         : undefined;
+      const inputTokens = usageNumber(usageRecord?.input_tokens);
+      const outputTokens = usageNumber(usageRecord?.output_tokens);
+      const costUsd = usageNumber(record.total_cost_usd);
       usage = {
-        ...(typeof usageRecord?.input_tokens === 'number' ? { inputTokens: usageRecord.input_tokens } : {}),
-        ...(typeof usageRecord?.output_tokens === 'number' ? { outputTokens: usageRecord.output_tokens } : {}),
-        ...(typeof record.total_cost_usd === 'number' ? { costUsd: record.total_cost_usd } : {}),
+        ...(inputTokens !== undefined ? { inputTokens } : {}),
+        ...(outputTokens !== undefined ? { outputTokens } : {}),
+        ...(costUsd !== undefined ? { costUsd } : {}),
       };
       if (record.is_error === true) reportedError = terminalResult ?? 'Claude reported an error';
     }
@@ -158,6 +164,7 @@ export function claudeRuntimeMode(env = process.env): 'sdk' | 'cli' {
 export const claudeAdapter: Adapter = {
   id: 'claude',
   tier: 'rich',
+  runtimeFamily: 'claude',
   models: ['sonnet', 'opus', 'haiku'],
   defaultModel: 'sonnet',
   available: async () => { const command = await resolveRuntimeBinary(getDataDir(), 'claude'); return command ? probeVersion(command) : { ok: false }; },

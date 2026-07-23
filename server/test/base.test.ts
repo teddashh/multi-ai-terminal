@@ -43,6 +43,12 @@ describe('detectAuthFailure', () => {
     expect(detectAuthFailure('claude', 'request failed: 401 Unauthorized')).toBe('claude sign-in expired.\nFix: claude   (then /login inside the session)');
   });
 
+  it('reports OpenRouter key remediation without advertising a sign-in command', () => {
+    expect(detectAuthFailure('openrouter', 'OPENROUTER_API_KEY is missing')).toBe(
+      "openrouter authentication failed.\nFix: Set OPENROUTER_API_KEY in MAT's environment, then restart MAT.",
+    );
+  });
+
   it('ignores non-auth output and the mock provider', () => {
     expect(detectAuthFailure('codex', 'request timed out')).toBeUndefined();
     expect(detectAuthFailure('mock', 'Not signed in')).toBeUndefined();
@@ -86,6 +92,12 @@ describe('humanizeError', () => {
 
   it('humanizes unauthorized failures generically for other real providers', () => {
     expect(humanizeError('401 Unauthorized', 'claude')).toBe('claude sign-in expired — parallel claude sessions can race single-use refresh tokens. Sign out and back in with the claude CLI, or switch to API-key auth to avoid the race.');
+  });
+
+  it('humanizes OpenRouter authentication without Codex account guidance', () => {
+    expect(humanizeError('401 Unauthorized', 'openrouter')).toBe(
+      "openrouter authentication failed. Set OPENROUTER_API_KEY in MAT's environment, then restart MAT.",
+    );
   });
 });
 

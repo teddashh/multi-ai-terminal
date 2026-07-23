@@ -64,15 +64,43 @@ export function providerFinding(provider: ProviderInfo, locale: HealthLocale = '
     };
   }
   if (!provider.ok) {
+    const runtimeCopy = provider.runtimeFamily
+      ? {
+        title: copy(locale, `${provider.id}: ${provider.runtimeFamily} runtime not detected`, `${provider.id}：未偵測到 ${provider.runtimeFamily} 執行環境`),
+        fallback: copy(locale, `MAT could not resolve the ${provider.runtimeFamily} runtime used by this provider.`, `MAT 無法解析此服務提供者使用的 ${provider.runtimeFamily} 執行環境。`),
+        retry: copy(locale, 'Use retry detection after installing or repairing that runtime.', '安裝或修復該執行環境後，請使用「重新偵測」。'),
+      }
+      : {
+        title: copy(locale, `${provider.id}: latest CLI check did not detect it`, `${provider.id}：最新 CLI 檢查未偵測到`),
+        fallback: copy(locale, 'MAT could not find this provider executable on its augmented PATH.', 'MAT 在擴充後的 PATH 中找不到此服務提供者的執行檔。'),
+        retry: copy(locale, 'Transient failures are only cached briefly; use retry detection to bypass all provider caches.', '暫時性失敗只會短暫快取；可用「重新偵測」略過所有服務提供者的偵測快取。'),
+      };
     const recordedAuthFailure = provider.authAlert
       ? copy(locale,
         `\nA sign-in failure was recorded at ${formatTimestamp(provider.authAlert.at)} during run ${provider.authAlert.runId}. This is historical evidence, not a live authentication probe.`,
         `\n執行 ${provider.authAlert.runId} 於 ${formatTimestamp(provider.authAlert.at)} 記錄過登入失敗。這是歷史證據，不是即時登入探測。`)
       : '';
+    const missingCredential = provider.environmentCredential?.configured === false
+      ? copy(locale,
+        `\nEnvironment credential ${provider.environmentCredential.name}: configured=false. The API reports presence only and never exposes its value.`,
+        `\n環境憑證 ${provider.environmentCredential.name}：configured=false。API 只回報是否存在，不會暴露其值。`)
+      : '';
     return {
-      id: `provider-${provider.id}`, scope: 'provider', severity: 'warning', issue: provider.authAlert !== undefined, providerId: provider.id,
-      title: copy(locale, `${provider.id}: latest CLI check did not detect it`, `${provider.id}：最新 CLI 檢查未偵測到`),
-      detail: `${provider.detail ? displayProviderDetail(provider.id, provider.detail, locale) : copy(locale, 'MAT could not find this provider executable on its augmented PATH.', 'MAT 在擴充後的 PATH 中找不到此服務提供者的執行檔。')}${recordedAuthFailure}\n${copy(locale, 'Transient failures are only cached briefly; use retry detection to bypass all provider caches.', '暫時性失敗只會短暫快取；可用「重新偵測」略過所有服務提供者的偵測快取。')}`,
+      id: `provider-${provider.id}`, scope: 'provider', severity: 'warning', issue: provider.authAlert !== undefined || provider.environmentCredential?.configured === false, providerId: provider.id,
+      title: runtimeCopy.title,
+      detail: `${provider.detail ? displayProviderDetail(provider.id, provider.detail, locale) : runtimeCopy.fallback}${recordedAuthFailure}${missingCredential}\n${runtimeCopy.retry}`,
+    };
+  }
+  if (provider.environmentCredential?.configured === false) {
+    const recordedAuthFailure = provider.authAlert
+      ? `\n${displayAuthAlertMessage(provider.authAlert.message, locale ?? 'en')}\n${copy(locale, `Recorded at ${formatTimestamp(provider.authAlert.at)} during run ${provider.authAlert.runId}. This is historical evidence.`, `執行 ${provider.authAlert.runId} 於 ${formatTimestamp(provider.authAlert.at)} 記錄。這是歷史證據。`)}`
+      : '';
+    return {
+      id: `provider-${provider.id}`, scope: 'provider', severity: 'warning', issue: true, providerId: provider.id,
+      title: copy(locale, `${provider.id}: ${provider.environmentCredential.name} is not configured`, `${provider.id}：尚未設定 ${provider.environmentCredential.name}`),
+      detail: `${copy(locale,
+        `${provider.runtimeFamily ? `${provider.runtimeFamily} runtime` : 'Provider runtime'} detected. Environment credential ${provider.environmentCredential.name}: configured=false. The API reports presence only and never exposes the credential value. Set it before starting MAT, then restart MAT.`,
+        `已偵測到 ${provider.runtimeFamily ? `${provider.runtimeFamily} 執行環境` : '服務提供者執行環境'}。環境憑證 ${provider.environmentCredential.name}：configured=false。API 只回報是否存在，不會暴露憑證值。請先設定後，再啟動或重新啟動 MAT。`)}${recordedAuthFailure}`,
     };
   }
   if (provider.authAlert) {
@@ -80,6 +108,23 @@ export function providerFinding(provider: ProviderInfo, locale: HealthLocale = '
       id: `provider-${provider.id}`, scope: 'provider', severity: 'warning', issue: true, providerId: provider.id,
       title: copy(locale, `${provider.id}: recorded sign-in failure`, `${provider.id}：曾記錄登入失敗`),
       detail: `${displayAuthAlertMessage(provider.authAlert.message, locale ?? 'en')}\n${copy(locale, `Recorded at ${formatTimestamp(provider.authAlert.at)} during run ${provider.authAlert.runId}. This is historical evidence, not a live authentication probe.`, `執行 ${provider.authAlert.runId} 於 ${formatTimestamp(provider.authAlert.at)} 記錄。這是歷史證據，不是即時登入探測。`)}`,
+    };
+  }
+  if (provider.runtimeFamily) {
+    const configuredCredential = provider.environmentCredential
+      ? copy(locale,
+        ` Environment credential ${provider.environmentCredential.name}: configured=true reports presence only; its value is not exposed.`,
+        ` 環境憑證 ${provider.environmentCredential.name}：configured=true 只代表存在；其值不會顯示。`)
+      : '';
+    const runtimeCheck = copy(locale,
+      `Successful runtime checks may be cached for up to 10 minutes and do not confirm that provider authentication will succeed.${configuredCredential}`,
+      `成功的執行環境檢查最多快取 10 分鐘，且不代表服務提供者驗證一定會成功。${configuredCredential}`);
+    return {
+      id: `provider-${provider.id}`, scope: 'provider', severity: 'ok', issue: false, providerId: provider.id,
+      title: copy(locale, `${provider.id}: ${provider.runtimeFamily} runtime detected`, `${provider.id}：已偵測到 ${provider.runtimeFamily} 執行環境`),
+      detail: provider.version
+        ? `${provider.version}${copy(locale, '. ', '。')}${runtimeCheck}`
+        : runtimeCheck,
     };
   }
   return {

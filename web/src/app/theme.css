@@ -22,6 +22,7 @@ html[data-theme='dark'] {
   --provider-codex: #10a37f;
   --provider-agy: #4285f4;
   --provider-grok: #e11d48;
+  --provider-openrouter: #6366f1;
   --provider-mock: #71717a;
 }
 

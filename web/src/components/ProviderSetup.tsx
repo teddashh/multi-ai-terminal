@@ -22,7 +22,8 @@ interface SignInProgress {
 export function ProviderSetupButton({ provider, api = apiClient }: { provider: ProviderInfo; api?: ApiClient }) {
   const { locale, t } = useUiPreferences();
   const setProviders = useMatStore((state) => state.setProviders);
-  const runtime = useMatStore((state) => state.runtimes.find((item) => item.family === provider.id));
+  const runtimeFamily = provider.runtimeFamily;
+  const runtime = useMatStore((state) => runtimeFamily ? state.runtimes.find((item) => item.family === runtimeFamily) : undefined);
   const [open, setOpen] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -45,7 +46,19 @@ export function ProviderSetupButton({ provider, api = apiClient }: { provider: P
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const busy = installing || updating;
-  const setupAvailable = provider.id !== 'mock' && (!provider.ok || Boolean(provider.authAlert) || provider.updatable === true || provider.id === 'codex' || provider.id === 'claude');
+  const missingEnvironmentCredential = provider.environmentCredential?.configured === false;
+  const managedRuntimeInstallAvailable = !provider.ok
+    && runtimeFamily !== undefined
+    && runtime?.canInstallManaged === true;
+  const setupAvailable = provider.id !== 'mock' && (
+    !provider.ok
+    || Boolean(provider.authAlert)
+    || Boolean(provider.signInCommand)
+    || missingEnvironmentCredential
+    || provider.updatable === true
+    || provider.id === 'codex'
+    || provider.id === 'claude'
+  );
   const signInAvailable = provider.ok && provider.signIn !== undefined;
 
   useEffect(() => {
@@ -146,9 +159,9 @@ export function ProviderSetupButton({ provider, api = apiClient }: { provider: P
   const install = async () => {
     setInstalling(true); setActionStartedAt(Date.now()); setElapsedSeconds(0); setError(undefined); setLogTail(undefined); setNotice(undefined);
     try {
-      if ((provider.id === 'claude' || provider.id === 'codex') && runtime?.canInstallManaged) {
-        await api.installRuntime(provider.id);
-        setNotice({ tone: 'success', text: t('runtime.installAccepted', { provider: provider.id }) });
+      if (managedRuntimeInstallAvailable && runtimeFamily) {
+        await api.installRuntime(runtimeFamily);
+        setNotice({ tone: 'success', text: t('runtime.installAccepted', { family: runtimeFamily }) });
         return;
       }
       const result = await api.installProvider(provider.id);
@@ -196,7 +209,9 @@ export function ProviderSetupButton({ provider, api = apiClient }: { provider: P
       const detected = await refreshAfterAction();
       setNotice(detected?.ok
         ? { tone: 'success', text: t('provider.detectedReady', { provider: provider.id }) }
-        : { tone: 'warning', text: t('provider.stillUnavailable', { provider: provider.id }) });
+        : { tone: 'warning', text: runtimeFamily
+          ? t('runtime.stillUnavailable', { provider: provider.id, family: runtimeFamily })
+          : t('provider.stillUnavailable', { provider: provider.id }) });
     } catch (caught) { setError(caught instanceof Error ? caught.message : t('provider.detectionFailed')); }
     finally { setRechecking(false); }
   };
@@ -307,9 +322,24 @@ export function ProviderSetupButton({ provider, api = apiClient }: { provider: P
     <button ref={triggerRef} type="button" onClick={() => setOpen((value) => !value)} onKeyDown={closeOnEscape} aria-label={t('provider.setupNamed', { provider: provider.id })} aria-haspopup="dialog" aria-controls={dialogId} aria-expanded={open} className="rounded border border-border px-2 py-1 text-[10px] text-accentForeground hover:border-accent">{t('provider.setup')}</button>
     {open && <div id={dialogId} role="dialog" aria-label={t('provider.setupNamed', { provider: provider.id })} onKeyDown={closeOnEscape} className="absolute right-0 top-full z-40 mt-2 w-72 rounded border border-accent bg-panel p-3 text-left shadow-2xl">
       <div className="flex items-center justify-between"><strong className="text-xs">{t('provider.setupNamed', { provider: provider.id })}</strong><button ref={closeRef} type="button" onClick={close} aria-label={t('provider.closeSetup', { provider: provider.id })} className="text-muted">×</button></div>
-      {runtime && <p className="mt-2 text-[10px] text-muted">{t('runtime.summary', { state: t(runtime.state === 'managed' ? 'runtime.state.managed' : runtime.state === 'external' ? 'runtime.state.external' : runtime.state === 'broken' ? 'runtime.state.broken' : 'runtime.state.missing'), version: runtime.managedVersion ?? '—' })}</p>}
-      <p className="mt-2 text-xs text-muted">{provider.version ?? (provider.detail ? displayProviderDetail(provider.id, provider.detail, locale) : t('provider.notDetected'))}</p>
+      {runtime && runtimeFamily && <p className="mt-2 text-[10px] text-muted">{t('runtime.summary', { family: runtimeFamily, state: t(runtime.state === 'managed' ? 'runtime.state.managed' : runtime.state === 'external' ? 'runtime.state.external' : runtime.state === 'broken' ? 'runtime.state.broken' : 'runtime.state.missing'), version: runtime.managedVersion ?? '—' })}</p>}
+      <p className="mt-2 text-xs text-muted">{provider.version ?? (provider.detail
+        ? displayProviderDetail(provider.id, provider.detail, locale)
+        : runtimeFamily
+          ? t(provider.ok ? 'runtime.detected' : 'runtime.notDetected', { family: runtimeFamily })
+          : t(provider.ok ? 'provider.detected' : 'provider.notDetected'))}</p>
       {provider.authAlert && <p className="mt-2 whitespace-pre-line break-words text-xs text-amber-200">{displayAuthAlertMessage(provider.authAlert.message, locale)}</p>}
+      {provider.environmentCredential && <div className={`mt-3 rounded border p-2 ${provider.environmentCredential.configured ? 'border-border/80 bg-canvas/50' : 'border-amber-800 bg-amber-950/30'}`}>
+        <strong className="text-[11px] text-muted">{t('provider.environmentCredential')}</strong>
+        <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-[11px]">
+          <dt className="text-muted">{t('provider.credentialName')}</dt>
+          <dd><code className="break-all text-ink">{provider.environmentCredential.name}</code></dd>
+          <dt className="text-muted">{t('provider.credentialConfigured')}</dt>
+          <dd data-configured={String(provider.environmentCredential.configured)} className={provider.environmentCredential.configured ? 'text-emerald-200' : 'text-amber-200'}>{t(provider.environmentCredential.configured ? 'provider.credentialYes' : 'provider.credentialNo')}</dd>
+        </dl>
+        <p className="mt-1 text-[10px] leading-relaxed text-muted">{t('provider.credentialPrivacy')}</p>
+        {!provider.environmentCredential.configured && <p className="mt-1 text-[10px] leading-relaxed text-amber-200">{t('provider.credentialMissingHelp')}</p>}
+      </div>}
       {provider.id === 'codex' && <div className="mt-3 rounded border border-border/80 bg-canvas/50 p-2">
         <strong className="text-[11px] text-muted">{t('accounts.codexTitle')}</strong>
         <div className="mt-2 space-y-2">
@@ -381,7 +411,9 @@ export function ProviderSetupButton({ provider, api = apiClient }: { provider: P
       {provider.signInCommand && <div className="mt-3"><strong className="text-[11px] text-muted">{t('provider.signIn')}</strong><code className="mt-1 block select-all break-words rounded bg-canvas p-2 text-[11px] text-ink">{provider.signInCommand}</code><button type="button" aria-label={t('provider.copySignIn', { provider: provider.id })} onClick={() => void copy(provider.signInCommand!, 'sign-in')} className="mt-2 rounded border border-border px-2 py-1 text-xs">{copied === 'sign-in' ? t('provider.copied') : t('provider.copy')}</button></div>}
       {!provider.ok && <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" aria-label={t('provider.recheckNamed', { provider: provider.id })} disabled={busy || rechecking} onClick={() => void recheck()} className="rounded border border-accent px-2 py-1.5 text-xs text-accentForeground disabled:opacity-50">{rechecking ? t('provider.rechecking') : t('provider.retryDetection')}</button>
-        {provider.installable && <button type="button" aria-label={t('provider.installNamed', { provider: provider.id })} disabled={busy || rechecking} onClick={() => void install()} className="rounded bg-accent px-2 py-1.5 text-xs font-medium text-onAccent disabled:opacity-50">{installing ? t('provider.installing', { elapsed: formatElapsed(elapsedSeconds) }) : t('provider.install')}</button>}
+        {managedRuntimeInstallAvailable && runtimeFamily
+          ? <button type="button" aria-label={t('runtime.installNamed', { provider: provider.id, family: runtimeFamily })} disabled={busy || rechecking} onClick={() => void install()} className="rounded bg-accent px-2 py-1.5 text-xs font-medium text-onAccent disabled:opacity-50">{installing ? t('provider.installing', { elapsed: formatElapsed(elapsedSeconds) }) : t('runtime.install', { family: runtimeFamily })}</button>
+          : provider.installable && provider.id !== 'openrouter' && <button type="button" aria-label={t('provider.installNamed', { provider: provider.id })} disabled={busy || rechecking} onClick={() => void install()} className="rounded bg-accent px-2 py-1.5 text-xs font-medium text-onAccent disabled:opacity-50">{installing ? t('provider.installing', { elapsed: formatElapsed(elapsedSeconds) }) : t('provider.install')}</button>}
       </div>}
       {provider.ok && provider.updatable && <div className="mt-3">
         <button type="button" aria-label={t('provider.updateNamed', { provider: provider.id })} disabled={busy || rechecking || signInProgress !== undefined} onClick={() => void update()} className="rounded border border-accent px-2 py-1.5 text-xs text-accentForeground disabled:opacity-50">{updating ? t('provider.updating', { elapsed: formatElapsed(elapsedSeconds) }) : t('provider.update')}</button>

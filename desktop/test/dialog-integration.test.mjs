@@ -19,3 +19,9 @@ describe('Tauri folder-picker integration', () => {
     expect(capability.permissions).toEqual(['dialog:allow-open']);
   });
 });
+
+describe('Tauri managed-runtime bootstrap', () => {
+  it('enables the quiet bootstrap coordinator for the bundled server only', () => {
+    expect(mainRs).toContain('.env("MAT_SELF_PROVISION", "1")');
+  });
+});

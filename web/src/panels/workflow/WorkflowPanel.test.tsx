@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import type { ProviderInfo, RunSnapshot, WorkflowDef, Workspace } from '@mat/shared';
-import { fireEvent, screen, within } from '@testing-library/react';
+import type { OpenRouterModelCatalog, ProviderInfo, RunSnapshot, WorkflowDef, Workspace } from '@mat/shared';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { act, type ReactElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,7 +12,7 @@ import { WorkflowPanel } from './WorkflowPanel.js';
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const apiMocks = vi.hoisted(() => ({
-  createRun: vi.fn(), duplicateWorkflow: vi.fn(), updateWorkflow: vi.fn(), installProvider: vi.fn(), getProviders: vi.fn(), refreshProviders: vi.fn(),
+  createRun: vi.fn(), duplicateWorkflow: vi.fn(), updateWorkflow: vi.fn(), installProvider: vi.fn(), getProviders: vi.fn(), getOpenRouterModels: vi.fn(), refreshProviders: vi.fn(),
 }));
 
 vi.mock('../../api/client.js', () => ({ apiClient: apiMocks }));
@@ -52,6 +52,13 @@ async function openPrimarySlot(): Promise<HTMLElement> {
   return within(drawer).getByRole('dialog', { name: 'Edit R1' });
 }
 
+async function openOpenRouterSlot(): Promise<HTMLElement> {
+  const drawer = await openCustomize();
+  act(() => fireEvent.click(within(drawer).getByRole('button', { name: /R1 openrouter/ })));
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  return within(drawer).getByRole('dialog', { name: 'Edit R1' });
+}
+
 const providers: ProviderInfo[] = [
   { id: 'codex', tier: 'rich', ok: true, installable: true, models: ['gpt-test', 'gpt-next'], defaultModel: 'gpt-test', signInCommand: 'codex logout && codex login' },
   { id: 'grok', tier: 'rich', ok: false, detail: 'binary missing', installable: true, models: ['grok-test'], defaultModel: 'grok-test', signInCommand: 'grok login --device-code' },
@@ -76,12 +83,82 @@ const workspace: Workspace = {
   id: 'w1', name: 'Castle', path: '/home/ted/projects/castle', isGit: true, defaultWorkflowId: 'planning',
 };
 
+const openRouterCatalog: OpenRouterModelCatalog = {
+  source: 'live',
+  groups: [
+    {
+      id: '~openai/gpt-latest',
+      label: 'OpenAI GPT Latest',
+      defaultVersion: '~openai/gpt-latest',
+      versions: [
+        { id: '~openai/gpt-latest', label: 'OpenAI GPT', kind: 'latest', supportsTools: true },
+      ],
+    },
+    {
+      id: 'openai/gpt-5.6-sol-20260709',
+      label: 'OpenAI: GPT-5.6 Sol',
+      defaultVersion: 'openai/gpt-5.6-sol',
+      versions: [
+        { id: 'openai/gpt-5.6-sol', label: 'openai/gpt-5.6-sol', kind: 'current', supportsTools: true, created: 1_783_590_850 },
+        { id: 'openai/gpt-5.6-sol-preview', label: 'openai/gpt-5.6-sol-preview', kind: 'current', supportsTools: true, created: 1_783_590_850 },
+        { id: 'openai/gpt-5.6-sol-20260709', label: 'GPT-5.6 Sol', kind: 'pinned', supportsTools: true, created: 1_783_590_850 },
+      ],
+    },
+    {
+      id: '~anthropic/claude-sonnet-latest',
+      label: 'Anthropic Claude Sonnet Latest',
+      defaultVersion: '~anthropic/claude-sonnet-latest',
+      versions: [
+        { id: '~anthropic/claude-sonnet-latest', label: 'Claude Sonnet', kind: 'latest', supportsTools: true },
+      ],
+    },
+    {
+      id: 'anthropic/claude-sonnet-4.6-20260612',
+      label: 'Anthropic: Claude Sonnet 4.6',
+      defaultVersion: 'anthropic/claude-sonnet-4.6',
+      versions: [
+        { id: 'anthropic/claude-sonnet-4.6', label: 'anthropic/claude-sonnet-4.6', kind: 'current', supportsTools: false, created: 1_781_225_600 },
+        { id: 'anthropic/claude-sonnet-4.6-20260612', label: 'Claude Sonnet 4.6', kind: 'pinned', supportsTools: false, created: 1_781_225_600 },
+      ],
+    },
+  ],
+};
+
+const openRouterProvider: ProviderInfo = {
+  id: 'openrouter',
+  tier: 'rich',
+  ok: true,
+  installable: false,
+  models: ['~openai/gpt-latest', '~anthropic/claude-sonnet-latest'],
+  defaultModel: '~openai/gpt-latest',
+  runtimeFamily: 'codex',
+  environmentCredential: { name: 'OPENROUTER_API_KEY', configured: true },
+};
+
+function useOpenRouterSlot(model: string | undefined): void {
+  matStore.setState({
+    providers: [openRouterProvider],
+    workflows: [{
+      ...workflow,
+      orchestrator: { ...workflow.orchestrator, enabled: false },
+      stages: [{
+        ...workflow.stages[0]!,
+        slots: [{
+          ...workflow.stages[0]!.slots[0]!,
+          agent: { provider: 'openrouter', ...(model ? { model } : {}), permission: 'safe' },
+        }],
+      }],
+    }],
+  });
+}
+
 beforeEach(() => {
   Object.values(apiMocks).forEach((mock) => mock.mockReset());
+  apiMocks.getOpenRouterModels.mockResolvedValue(openRouterCatalog);
   matStore.setState({
     workflows: [workflow], providers, workspaces: [workspace], selectedWorkspaceId: 'w1',
     ephemeralWorkflowEdits: {}, runs: {}, activeRunId: undefined, viewedRunId: undefined,
-    runsLoading: false,
+    runsLoading: false, runtimes: [],
   });
 });
 
@@ -186,6 +263,126 @@ describe('WorkflowPanel', () => {
     expect(screen.queryByLabelText('Custom model')).toBeNull();
   });
 
+  it('requires an OpenRouter model choice before version and stores the exact selected version slug', async () => {
+    useOpenRouterSlot(undefined);
+    renderPanel(<WorkflowPanel />);
+    const slotEditor = await openOpenRouterSlot();
+
+    const model = within(slotEditor).getByLabelText('Model') as HTMLSelectElement;
+    const version = within(slotEditor).getByLabelText('Version') as HTMLSelectElement;
+    await waitFor(() => {
+      expect(apiMocks.getOpenRouterModels).toHaveBeenCalledOnce();
+      expect(Array.from(model.options).some((option) => option.value === 'openai/gpt-5.6-sol-20260709')).toBe(true);
+    });
+    expect(model.value).toBe('');
+    expect(version.disabled).toBe(true);
+    expect(version.selectedOptions[0]?.textContent).toBe('Select a model first');
+
+    act(() => fireEvent.change(model, { target: { value: 'openai/gpt-5.6-sol-20260709' } }));
+    expect(matStore.getState().ephemeralWorkflowEdits.planning?.stages[0]!.slots[0]!.agent.model).toBe('openai/gpt-5.6-sol');
+    expect(version.disabled).toBe(false);
+    expect(version.value).toBe('openai/gpt-5.6-sol');
+
+    act(() => fireEvent.change(version, { target: { value: 'openai/gpt-5.6-sol-20260709' } }));
+    expect(matStore.getState().ephemeralWorkflowEdits.planning?.stages[0]!.slots[0]!.agent.model).toBe('openai/gpt-5.6-sol-20260709');
+    expect(model.value).toBe('openai/gpt-5.6-sol-20260709');
+  });
+
+  it('resolves an existing OpenRouter version and resets it when the model family changes', async () => {
+    useOpenRouterSlot('openai/gpt-5.6-sol-20260709');
+    renderPanel(<WorkflowPanel />);
+    const slotEditor = await openOpenRouterSlot();
+
+    await waitFor(() => expect((within(slotEditor).getByLabelText('Model') as HTMLSelectElement).value).toBe('openai/gpt-5.6-sol-20260709'));
+    const model = within(slotEditor).getByLabelText('Model') as HTMLSelectElement;
+    const version = within(slotEditor).getByLabelText('Version') as HTMLSelectElement;
+    expect(version.value).toBe('openai/gpt-5.6-sol-20260709');
+
+    act(() => fireEvent.change(model, { target: { value: 'anthropic/claude-sonnet-4.6-20260612' } }));
+    expect(matStore.getState().ephemeralWorkflowEdits.planning?.stages[0]!.slots[0]!.agent.model).toBe('anthropic/claude-sonnet-4.6');
+    expect(version.value).toBe('anthropic/claude-sonnet-4.6');
+    expect(Array.from(version.options).some((option) => option.textContent?.includes('tool calling not advertised'))).toBe(true);
+  });
+
+  it('keeps alternate OpenRouter aliases inside their shared canonical model group', async () => {
+    useOpenRouterSlot('openai/gpt-5.6-sol-preview');
+    renderPanel(<WorkflowPanel />);
+    const slotEditor = await openOpenRouterSlot();
+
+    const model = within(slotEditor).getByLabelText('Model') as HTMLSelectElement;
+    const version = within(slotEditor).getByLabelText('Version') as HTMLSelectElement;
+    await waitFor(() => expect(model.value).toBe('openai/gpt-5.6-sol-20260709'));
+    expect(version.value).toBe('openai/gpt-5.6-sol-preview');
+
+    act(() => fireEvent.change(version, { target: { value: 'openai/gpt-5.6-sol-20260709' } }));
+    expect(model.value).toBe('openai/gpt-5.6-sol-20260709');
+    expect(matStore.getState().ephemeralWorkflowEdits.planning?.stages[0]!.slots[0]!.agent.model).toBe('openai/gpt-5.6-sol-20260709');
+  });
+
+  it('keeps an unknown OpenRouter variant in Custom without stripping its suffix or auto-collapsing', async () => {
+    useOpenRouterSlot('vendor/model:thinking');
+    renderPanel(<WorkflowPanel />);
+    const slotEditor = await openOpenRouterSlot();
+
+    const custom = await within(slotEditor).findByLabelText('Custom model') as HTMLInputElement;
+    expect(custom.value).toBe('vendor/model:thinking');
+    expect(document.activeElement).toBe(custom);
+    act(() => fireEvent.change(custom, { target: { value: '~openai/gpt-latest' } }));
+    expect((within(slotEditor).getByLabelText('Custom model') as HTMLInputElement).value).toBe('~openai/gpt-latest');
+    expect(matStore.getState().ephemeralWorkflowEdits.planning?.stages[0]!.slots[0]!.agent.model).toBe('~openai/gpt-latest');
+  });
+
+  it('uses the same OpenRouter model-then-version editor for the orchestrator', async () => {
+    matStore.setState({
+      providers: [openRouterProvider],
+      workflows: [{
+        ...workflow,
+        orchestrator: {
+          enabled: true,
+          gateTimeoutSec: 300,
+          agent: { provider: 'openrouter', model: '~openai/gpt-latest', permission: 'auto' },
+        },
+      }],
+    });
+    renderPanel(<WorkflowPanel />);
+    const drawer = await openCustomize();
+    act(() => fireEvent.click(within(drawer).getByRole('button', { name: /openrouter · ~openai\/gpt-latest/ })));
+    const editor = within(drawer).getByRole('dialog', { name: 'Orchestrator binding' });
+
+    await waitFor(() => expect((within(editor).getByLabelText('Model') as HTMLSelectElement).value).toBe('~openai/gpt-latest'));
+    act(() => fireEvent.change(within(editor).getByLabelText('Model'), { target: { value: 'openai/gpt-5.6-sol-20260709' } }));
+    act(() => fireEvent.change(within(editor).getByLabelText('Version'), { target: { value: 'openai/gpt-5.6-sol-20260709' } }));
+    expect(matStore.getState().ephemeralWorkflowEdits.planning?.orchestrator.agent.model).toBe('openai/gpt-5.6-sol-20260709');
+  });
+
+  it('keeps built-in OpenRouter model and version choices available when catalog refresh fails', async () => {
+    apiMocks.getOpenRouterModels.mockRejectedValueOnce(new Error('remote catalog detail must stay hidden'));
+    useOpenRouterSlot('~openai/gpt-latest');
+    renderPanel(<WorkflowPanel />);
+    const slotEditor = await openOpenRouterSlot();
+
+    expect(await within(slotEditor).findByText('OpenRouter is unavailable; showing built-in choices. Custom model IDs remain available.')).toBeTruthy();
+    expect((within(slotEditor).getByLabelText('Model') as HTMLSelectElement).value).toBe('~openai/gpt-latest');
+    expect((within(slotEditor).getByLabelText('Version') as HTMLSelectElement).value).toBe('~openai/gpt-latest');
+    expect(slotEditor.textContent).not.toContain('remote catalog detail');
+  });
+
+  it('labels the OpenRouter model-then-version flow in Traditional Chinese', async () => {
+    localStorage.setItem('mat-ui-preferences-v1', JSON.stringify({ language: 'zh-TW', theme: 'dark' }));
+    useOpenRouterSlot('~openai/gpt-latest');
+    renderPanel(<UiPreferencesProvider><WorkflowPanel /></UiPreferencesProvider>);
+
+    const customize = await screen.findByRole('button', { name: '進階設定' });
+    act(() => fireEvent.click(customize));
+    const drawer = screen.getByRole('dialog', { name: /進階設定/ });
+    act(() => fireEvent.click(within(drawer).getByRole('button', { name: /R1 openrouter/ })));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const editor = within(drawer).getByRole('dialog', { name: '編輯 R1' });
+    expect(within(editor).getByLabelText('模型')).toBeTruthy();
+    expect(within(editor).getByLabelText('版本')).toBeTruthy();
+    expect((within(editor).getByLabelText('版本') as HTMLSelectElement).selectedOptions[0]?.textContent).toBe('最新版本（自動更新）');
+  });
+
   it('installs an unavailable provider and refreshes provider state', async () => {
     const refreshed = providers.map((provider) => provider.id === 'grok' ? { ...provider, ok: true, version: 'grok 1.0.0' } : provider);
     apiMocks.installProvider.mockResolvedValueOnce({ ok: true, exitCode: 0, logTail: '', provider: refreshed[1] });
@@ -222,6 +419,48 @@ describe('WorkflowPanel', () => {
     act(() => fireEvent.change(screen.getByLabelText('Task'), { target: { value: 'Keep going' } }));
     expect(screen.getByText(/Sign-in warning: codex is not signed in/)).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('marks a missing OpenRouter environment credential amber without claiming CLI/sign-in or blocking Start', async () => {
+    const openrouter: ProviderInfo = {
+      id: 'openrouter', tier: 'rich', ok: true, installable: false,
+      models: ['openai/gpt-test'], defaultModel: 'openai/gpt-test',
+      runtimeFamily: 'codex',
+      environmentCredential: { name: 'OPENROUTER_API_KEY', configured: false },
+      authAlert: { message: 'openrouter authentication failed. Set OPENROUTER_API_KEY.', at: 10, runId: 'run-key' },
+    };
+    const openrouterWorkflow: WorkflowDef = {
+      ...workflow,
+      orchestrator: { ...workflow.orchestrator, enabled: false },
+      stages: [{
+        ...workflow.stages[0]!,
+        slots: [{
+          ...workflow.stages[0]!.slots[0]!,
+          agent: { provider: 'openrouter', model: 'openai/gpt-test', permission: 'safe' },
+        }],
+      }],
+    };
+    matStore.setState({ workflows: [openrouterWorkflow], providers: [openrouter] });
+    renderPanel(<WorkflowPanel />);
+
+    await screen.findByRole('heading', { name: 'Run task' });
+    const mode = screen.getByRole('button', { name: /Planning/ });
+    expect(mode.textContent).toContain('Available 0/1');
+    const readiness = screen.getByText(/Needs setup · 0\/1/);
+    expect(readiness.className).toContain('border-amber-800');
+    expect(screen.getByText('OPENROUTER_API_KEY · not configured')).toBeTruthy();
+    expect(screen.getByText('Environment credential warning: openrouter: OPENROUTER_API_KEY')).toBeTruthy();
+    expect(screen.queryByText('CLI detected')).toBeNull();
+    expect(screen.queryByText('Recent authentication failure')).toBeNull();
+    expect(screen.queryByText(/Sign-in warning/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Setup openrouter' })).toBeTruthy();
+
+    act(() => fireEvent.change(screen.getByLabelText('Task'), { target: { value: 'Use OpenRouter' } }));
+    expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(false);
+
+    const drawer = await openCustomize();
+    expect(within(drawer).getByRole('button', { name: 'openrouter provider environment credential required' })).toBeTruthy();
+    expect(within(drawer).getByText('credential')).toBeTruthy();
   });
 
   it('adds a provider through the keyboard fallback as an ephemeral builtin edit', async () => {

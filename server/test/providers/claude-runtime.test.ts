@@ -70,9 +70,53 @@ describe('Claude session runtime', () => {
     q.feed({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] } });
     q.feed({ type: 'result', subtype: 'success', result: 'hello', usage: { input_tokens: 5, output_tokens: 2 }, total_cost_usd: 0.01, session_id: 'sdk-1' });
     await expect(run.completion).resolves.toEqual({ exitCode: 0, sessionRef: 'sdk-1', usage: { inputTokens: 5, outputTokens: 2, costUsd: 0.01 }, resultText: 'hello' });
-    // Stream deltas coalesce into one message (flushed at turn end); tool events pass through directly.
-    expect(events.map((event) => event.kind)).toEqual(['tool_use', 'tool_result', 'message']);
-    expect(events[2]).toMatchObject({ role: 'agent', text: 'hello' });
+    // A tool is a source-order boundary: preceding stream text must be flushed
+    // before the tool pair instead of appearing after it.
+    expect(events.map((event) => event.kind)).toEqual(['message', 'tool_use', 'tool_result']);
+    expect(events[0]).toMatchObject({ role: 'agent', text: 'hello' });
+    expect(events[1]?.tool).toMatchObject({ toolCallId: 't1', name: 'Read' });
+    expect(events[2]?.tool).toMatchObject({ toolCallId: 't1', name: 'Read' });
+  });
+
+  it('drops non-finite and negative SDK usage fields', async () => {
+    const fake = fakeSdk(); setup(fake);
+    const run = spawnClaude(spec(), io()); const q = await query(fake);
+    q.feed({
+      type: 'result',
+      subtype: 'success',
+      usage: { input_tokens: -1, output_tokens: 2 },
+      total_cost_usd: Number.POSITIVE_INFINITY,
+    });
+    await expect(run.completion).resolves.toMatchObject({
+      exitCode: 0,
+      usage: { outputTokens: 2 },
+    });
+    const outcome = await run.completion;
+    expect(outcome.usage).not.toHaveProperty('inputTokens');
+    expect(outcome.usage).not.toHaveProperty('costUsd');
+  });
+
+  it('uses completed assistant content only as a missing-stream fallback', async () => {
+    const fake = fakeSdk(); setup(fake); const events: AdapterContentEvent[] = [];
+    const run = spawnClaude(spec(), io(events)); const q = await query(fake);
+    q.feed({ type: 'stream_event', event: { type: 'content_block_delta', delta: { text: 'hello' } } });
+    q.feed({ type: 'assistant', message: { content: [{ type: 'text', text: 'hello world' }] } });
+    q.feed({ type: 'result', subtype: 'success', result: 'hello world' });
+    await run.completion;
+    expect(events.map((event) => event.text).join('')).toBe('hello world');
+    expect(events.map((event) => event.text)).toEqual(['hello', ' world']);
+
+    const secondEvents: AdapterContentEvent[] = [];
+    const second = spawnClaude(spec(), io(secondEvents)); const q2 = await query(fake, 1);
+    q2.feed({ type: 'assistant', message: { content: [{ type: 'text', text: 'completed only' }] } });
+    q2.feed({ type: 'result', subtype: 'success', result: 'completed only' });
+    await second.completion;
+    expect(secondEvents).toEqual([expect.objectContaining({
+      role: 'agent',
+      kind: 'message',
+      text: 'completed only',
+      data: { completedFallback: true },
+    })]);
   });
 
   it.each([['full', 'bypassPermissions', true], ['safe', 'plan', undefined], ['standard', 'acceptEdits', undefined]] as const)('builds %s query options', async (permission, mode, dangerous) => {

@@ -23,7 +23,7 @@ vi.mock('zustand', async () => {
 vi.mock('../api/client.js', () => ({
   apiClient: {
     getWorkspaces: vi.fn(), getWorkflows: vi.fn(), getProviders: vi.fn(), getRuntimes: vi.fn().mockResolvedValue([]), getRuns: mocks.getRuns,
-    abortRun: vi.fn(),
+    abortRun: vi.fn(), installRuntime: vi.fn(),
   },
 }));
 vi.mock('../api/ws.js', () => ({
@@ -51,6 +51,7 @@ afterEach(() => {
   vi.clearAllMocks();
   mocks.subscriptions.length = 0;
   mocks.catchUpState = undefined;
+  delete (window as Window & { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__;
   document.body.replaceChildren();
 });
 
@@ -96,6 +97,29 @@ describe('App boot run discovery', () => {
 
     await waitFor(() => expect(matStore.getState()).toMatchObject({ activeRunId: undefined, viewedRunId: 'terminal-run', runsLoading: false }));
     expect(mocks.subscriptions).not.toContain('terminal-run');
+    act(() => root.unmount());
+  });
+
+  it('leaves desktop runtime bootstrap to the single server coordinator', async () => {
+    (window as Window & { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__ = {};
+    vi.mocked(apiClient.getWorkspaces).mockResolvedValue([workspace]);
+    vi.mocked(apiClient.getWorkflows).mockResolvedValue([]);
+    vi.mocked(apiClient.getProviders).mockResolvedValue([]);
+    vi.mocked(apiClient.getRuntimes).mockResolvedValue([
+      { family: 'codex', state: 'missing', managedVersion: '0.144.5', canInstallManaged: true },
+      { family: 'claude', state: 'missing', managedVersion: '0.3.212', canInstallManaged: true },
+    ]);
+    mocks.getRuns.mockResolvedValue([]);
+    matStore.setState({ workspaces: [], workflows: [], providers: [], runtimes: [], selectedWorkspaceId: undefined, activeRunId: undefined, viewedRunId: undefined, runsLoading: false, runs: {}, events: {} });
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    act(() => root.render(<App />));
+
+    await waitFor(() => expect(apiClient.getRuntimes).toHaveBeenCalledOnce());
+    expect(apiClient.installRuntime).not.toHaveBeenCalled();
     act(() => root.unmount());
   });
 });

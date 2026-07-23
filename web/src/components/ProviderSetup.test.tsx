@@ -15,6 +15,7 @@ vi.mock('zustand', () => ({ useStore: (store: { getState(): unknown }, selector:
 
 const apiMocks = {
   installProvider: vi.fn(), getProviders: vi.fn(), refreshProviders: vi.fn(), updateProvider: vi.fn(),
+  installRuntime: vi.fn(),
   startSignIn: vi.fn(), signInStatus: vi.fn(), submitSignInCode: vi.fn(), cancelSignIn: vi.fn(),
   getCodexAccounts: vi.fn(), captureCodexAccount: vi.fn(), switchCodexAccount: vi.fn(), removeCodexAccount: vi.fn(),
   getCodexApiKey: vi.fn(), setCodexApiKey: vi.fn(), clearCodexApiKey: vi.fn(), getClaudeAccounts: vi.fn(),
@@ -42,7 +43,7 @@ beforeEach(() => {
   apiMocks.getCodexAccounts.mockResolvedValue({ schemaVersion: 1, migrated: false, accounts: [] });
   apiMocks.getCodexApiKey.mockResolvedValue({ configured: false });
   apiMocks.getClaudeAccounts.mockResolvedValue({ accounts: [] });
-  matStore.setState({ providers: [unavailable] });
+  matStore.setState({ providers: [unavailable], runtimes: [] });
 });
 
 afterEach(() => {
@@ -75,6 +76,90 @@ describe('ProviderSetupButton', () => {
     render(<ProviderSetupButton provider={mock} api={api} />);
     expect(screen.queryByRole('button', { name: 'Setup mock' })).toBeNull();
     expect(apiMocks.installProvider).not.toHaveBeenCalled();
+  });
+
+  it('uses OpenRouter runtimeFamily to offer the managed codex runtime without inventing an OpenRouter CLI', async () => {
+    const openrouter: ProviderInfo = {
+      id: 'openrouter', tier: 'rich', ok: false, installable: false,
+      models: ['openai/gpt-test'], defaultModel: 'openai/gpt-test',
+      runtimeFamily: 'codex',
+      environmentCredential: { name: 'OPENROUTER_API_KEY', configured: false },
+    };
+    apiMocks.installRuntime.mockResolvedValueOnce({ accepted: true });
+    matStore.setState({
+      providers: [openrouter],
+      runtimes: [{ family: 'codex', state: 'missing', canInstallManaged: true }],
+    });
+    render(<ProviderSetupButton provider={openrouter} api={api} />);
+
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Setup openrouter' })));
+    const dialog = screen.getByRole('dialog', { name: 'Setup openrouter' });
+    expect(within(dialog).getByText('Runtime: codex · — · missing')).toBeTruthy();
+    expect(within(dialog).getByText('OPENROUTER_API_KEY', { selector: 'code' })).toBeTruthy();
+    expect(within(dialog).getByText('No').getAttribute('data-configured')).toBe('false');
+    expect(within(dialog).queryByText(/openrouter CLI/i)).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: 'Install openrouter' })).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Install managed codex runtime for openrouter' }));
+      await Promise.resolve();
+    });
+
+    expect(apiMocks.installRuntime).toHaveBeenCalledWith('codex');
+    expect(apiMocks.installProvider).not.toHaveBeenCalled();
+    expect(within(dialog).getByText(/Managed codex runtime installation started/)).toBeTruthy();
+  });
+
+  it('keeps setup visible for a healthy missing environment credential and localizes the value-safe status', () => {
+    localStorage.setItem('mat-ui-preferences-v1', JSON.stringify({ language: 'zh-TW', theme: 'dark' }));
+    const openrouter: ProviderInfo = {
+      id: 'openrouter', tier: 'rich', ok: true, installable: false,
+      models: ['openai/gpt-test'], defaultModel: 'openai/gpt-test',
+      runtimeFamily: 'codex',
+      environmentCredential: { name: 'OPENROUTER_API_KEY', configured: false },
+    };
+    matStore.setState({ providers: [openrouter], runtimes: [{ family: 'codex', state: 'managed', managedVersion: '0.144.5', canInstallManaged: true }] });
+    render(<UiPreferencesProvider><ProviderSetupButton provider={openrouter} api={api} /></UiPreferencesProvider>);
+
+    act(() => fireEvent.click(screen.getByRole('button', { name: '設定 openrouter' })));
+    const dialog = screen.getByRole('dialog', { name: '設定 openrouter' });
+    expect(within(dialog).getByText('環境憑證')).toBeTruthy();
+    expect(within(dialog).getByText('OPENROUTER_API_KEY', { selector: 'code' })).toBeTruthy();
+    expect(within(dialog).getByText('否').getAttribute('data-configured')).toBe('false');
+    expect(within(dialog).getByText('只有憑證名稱與是否已設定會經由伺服器 API 傳到瀏覽器。憑證值只會傳入隔離的子程序環境，MAT 不會顯示、保存或寫入紀錄。')).toBeTruthy();
+    expect(within(dialog).queryByText('從 MAT 登入')).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: /安裝 openrouter/i })).toBeNull();
+  });
+
+  it('localizes canonical OpenRouter auth evidence without inventing a sign-in flow', () => {
+    localStorage.setItem('mat-ui-preferences-v1', JSON.stringify({ language: 'zh-TW', theme: 'dark' }));
+    const openrouter: ProviderInfo = {
+      id: 'openrouter', tier: 'rich', ok: true, installable: false,
+      models: ['openai/gpt-test'], defaultModel: 'openai/gpt-test',
+      runtimeFamily: 'codex',
+      environmentCredential: { name: 'OPENROUTER_API_KEY', configured: true },
+      authAlert: {
+        message: "openrouter authentication failed.\nFix: Set OPENROUTER_API_KEY in MAT's environment, then restart MAT.",
+        at: 1,
+        runId: 'run-openrouter',
+      },
+    };
+    render(<UiPreferencesProvider><ProviderSetupButton provider={openrouter} api={api} /></UiPreferencesProvider>);
+    act(() => fireEvent.click(screen.getByRole('button', { name: '設定 openrouter' })));
+    const dialog = screen.getByRole('dialog', { name: '設定 openrouter' });
+    expect(within(dialog).getByText(/openrouter 驗證失敗。/)).toBeTruthy();
+    expect(within(dialog).queryByText(/authentication failed/)).toBeNull();
+    expect(within(dialog).queryByText('從 MAT 登入')).toBeNull();
+  });
+
+  it('keeps setup visible for a healthy provider with a manual sign-in command', () => {
+    const commandOnly: ProviderInfo = {
+      id: 'agy', tier: 'rich', ok: true, installable: false,
+      models: ['gemini-test'], defaultModel: 'gemini-test', signInCommand: 'agy',
+    };
+    render(<ProviderSetupButton provider={commandOnly} api={api} />);
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Setup agy' })));
+    expect(within(screen.getByRole('dialog', { name: 'Setup agy' })).getByText('agy', { selector: 'code' })).toBeTruthy();
   });
 
   it('uses provider-specific names, focuses the popup, and Escape closes only setup', () => {
@@ -124,7 +209,8 @@ describe('ProviderSetupButton', () => {
     await act(async () => { fireEvent.click(copy); await Promise.resolve(); });
     expect(copy.textContent).toBe('Copied');
 
-    act(() => updateProvider({ ...unavailable, ok: true, detail: 'grok 1.0' }));
+    const { signInCommand: _signInCommand, ...detected } = unavailable;
+    act(() => updateProvider({ ...detected, ok: true, detail: 'grok 1.0' }));
 
     expect(screen.queryByRole('dialog', { name: 'Setup grok' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Setup grok' })).toBeNull();

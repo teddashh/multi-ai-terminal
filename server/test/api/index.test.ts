@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildServer, parseArgs, readyLine } from '../../src/index.js';
+import { buildServer, parseArgs, readyLine, shutdownServer } from '../../src/index.js';
 import { fakeApiDependencies } from './helpers.js';
 
 const dirs: string[] = [];
@@ -74,6 +74,38 @@ describe('server options and trust boundary', () => {
     }
     expect((await app.inject({ method: 'GET', url: '/api/health', headers: { authorization: 'Bearer secret' } })).statusCode).toBe(200);
     expect((await app.inject({ method: 'GET', url: '/not-api' })).statusCode).not.toBe(401);
+  });
+
+  it('releases provider runtimes and closes the listener after engine and account-sync failures', async () => {
+    const calls: string[] = [];
+    const engineFailure = new Error('run listing failed');
+
+    await expect(shutdownServer(
+      { close: async () => { calls.push('close'); } },
+      {
+        stopEngine: async () => { calls.push('stop'); throw engineFailure; },
+        syncActiveAccount: () => { calls.push('sync'); throw new Error('account sync failed'); },
+        disposeProviderRuntimes: async () => { calls.push('dispose'); },
+      },
+    )).rejects.toBe(engineFailure);
+
+    expect(calls).toEqual(['stop', 'sync', 'dispose', 'close']);
+  });
+
+  it('still closes the listener when provider disposal fails', async () => {
+    const calls: string[] = [];
+    const disposeFailure = new Error('provider disposal failed');
+
+    await expect(shutdownServer(
+      { close: async () => { calls.push('close'); } },
+      {
+        stopEngine: async () => { calls.push('stop'); },
+        syncActiveAccount: () => { calls.push('sync'); },
+        disposeProviderRuntimes: async () => { calls.push('dispose'); throw disposeFailure; },
+      },
+    )).rejects.toBe(disposeFailure);
+
+    expect(calls).toEqual(['stop', 'sync', 'dispose', 'close']);
   });
 });
 

@@ -2,16 +2,18 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AdapterContentEvent, RuntimeChangedEvent } from '@mat/shared';
 import { spawnCodex } from '../../src/adapters/codex.js';
 import type { ResolvedNodeSpec } from '../../src/adapters/base.js';
 import { CodexConnection } from '../../src/providers/codex/connection.js';
 import { resetCodexSessionRuntimeForTest } from '../../src/providers/codex/runtime.js';
 import { SIGNIN_RUNTIME_BUSY, resetSignInForTests, setSignInRecipeForTests, startSignIn } from '../../src/providers/signin.js';
+import { configureDataDir } from '../../src/store/dataDir.js';
 
 const fixturePath = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'fake-app-server.mjs');
 const roots: string[] = [];
+let originalCodexHome: string | undefined;
 
 type Recorded = { direction: 'in' | 'out'; message: Record<string, any>; spawnIndex: number };
 const records = (file: string): Recorded[] => {
@@ -19,12 +21,14 @@ const records = (file: string): Recorded[] => {
   catch { return []; }
 };
 const spec = (resumeSessionRef?: string): ResolvedNodeSpec => ({
-  binding: { provider: 'codex', role: 'coder', permission: 'standard' }, promptText: 'hello', cwd: '/repo', ...(resumeSessionRef ? { resumeSessionRef } : {}),
+  binding: { provider: 'codex', permission: 'auto' }, promptText: 'hello', cwd: '/repo', ...(resumeSessionRef ? { resumeSessionRef } : {}),
 });
 
 function setup(scenario: Record<string, unknown>, opts: { missingBinary?: boolean; failResolve?: boolean; poisonDispose?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'mat-codex-runtime-')); roots.push(root);
   const recordFile = join(root, 'wire.jsonl');
+  configureDataDir(join(root, 'data'));
+  process.env.CODEX_HOME = join(root, 'codex-home');
   process.env.MAT_FAKE_APPSERVER_SCENARIO = JSON.stringify({ ...scenario, recordFile, spawnMarkerFile: join(root, 'spawns.txt') });
   let creates = 0;
   let resolves = 0;
@@ -53,12 +57,18 @@ function setup(scenario: Record<string, unknown>, opts: { missingBinary?: boolea
   };
 }
 
+beforeEach(() => {
+  originalCodexHome = process.env.CODEX_HOME;
+});
+
 afterEach(() => {
   resetCodexSessionRuntimeForTest();
   resetSignInForTests();
   delete process.env.MAT_CODEX_RUNTIME;
   delete process.env.MAT_CODEX_BIN;
   delete process.env.MAT_FAKE_APPSERVER_SCENARIO;
+  if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+  else process.env.CODEX_HOME = originalCodexHome;
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
@@ -81,8 +91,14 @@ describe('Codex session runtime', () => {
     const events: AdapterContentEvent[] = [];
     const run = spawnCodex(spec(), { onEvent: (event) => events.push(event), onRaw: () => undefined });
     await expect(run.completion).resolves.toEqual({ exitCode: 0, sessionRef: 'thread-1', usage: { inputTokens: 8, outputTokens: 3 }, resultText: 'hello world' });
-    expect(events.map((event) => event.kind)).toEqual(['tool_use', 'tool_result', 'message']);
-    expect(records(recordFile).filter((entry) => entry.message.method === 'initialize')).toHaveLength(1);
+    // Preserve source order when text arrives before a tool call in the same turn.
+    expect(events.map((event) => event.kind)).toEqual(['message', 'tool_use', 'tool_result']);
+    const inbound = records(recordFile).filter((entry) => entry.direction === 'in');
+    expect(inbound.filter((entry) => entry.message.method === 'initialize')).toHaveLength(1);
+    expect(inbound.find((entry) => entry.message.method === 'thread/start')?.message.params)
+      .not.toHaveProperty('modelProvider');
+    expect(inbound.find((entry) => entry.message.method === 'turn/start')?.message.params)
+      .not.toHaveProperty('modelProvider');
   }, 30_000);
 
   it('maps kill to a SIGTERM interrupted outcome', async () => {
@@ -104,20 +120,14 @@ describe('Codex session runtime', () => {
     } });
     // Hermetic even if the refusal regressed: empty fake home (capture refuses
     // before writing) and a harmless test recipe instead of the real codex CLI.
-    const originalCodexHome = process.env.CODEX_HOME;
     process.env.CODEX_HOME = join(dirname(recordFile), 'codex-home');
     setSignInRecipeForTests('codex', {
       mode: 'device', command: process.execPath, args: ['-e', 'setTimeout(() => process.exit(0), 3000)'], trustedHosts: ['openai.com'],
     });
-    try {
-      const run = spawnCodex(spec(), { onEvent: () => undefined, onRaw: () => undefined });
-      await expect(startSignIn('codex')).resolves.toMatchObject({ ok: false, error: SIGNIN_RUNTIME_BUSY });
-      run.kill();
-      await run.completion;
-    } finally {
-      if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
-      else process.env.CODEX_HOME = originalCodexHome;
-    }
+    const run = spawnCodex(spec(), { onEvent: () => undefined, onRaw: () => undefined });
+    await expect(startSignIn('codex')).resolves.toMatchObject({ ok: false, error: SIGNIN_RUNTIME_BUSY });
+    run.kill();
+    await run.completion;
   }, 30_000);
 
   it('resolves provider failure instead of rejecting', async () => {
