@@ -1,5 +1,5 @@
 import type { ProviderInfo } from '@mat/shared';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -87,6 +87,20 @@ describe('provider update endpoint', () => {
 });
 
 describe('provider sign-in endpoints', () => {
+  it('returns the sanitized Claude account index', async () => {
+    writeFileSync(join(dataDir, 'claude-accounts.json'), JSON.stringify({
+      activeAccountId: 'account-1',
+      accounts: [{ id: 'account-1', email: 'one@example.test', credential: 'drop' }],
+    }));
+    await ready();
+    const response = await app.inject({ method: 'GET', url: '/api/providers/claude/accounts' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      activeAccountId: 'account-1',
+      accounts: [{ id: 'account-1', email: 'one@example.test' }],
+    });
+  });
+
   it('starts a sign-in for a known provider and passes the id through', async () => {
     dependencies.providers = async () => [installed()];
     dependencies.providerSignIn.start = vi.fn(async () => ({ ok: true, loginId: 'L1', mode: 'device' as const, url: 'https://login.grok.com/activate', userCode: 'WXYZ-1234' }));

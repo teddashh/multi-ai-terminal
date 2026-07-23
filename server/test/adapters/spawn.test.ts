@@ -105,6 +105,23 @@ describe('spawnManaged', () => {
     expect(parsed.path?.split(delimiter).filter(Boolean).length).toBeGreaterThan(0);
   }, 30_000);
 
+  it('removes an inherited variable from the spawned process environment', async () => {
+    process.env.MAT_UNSET_ENV_FIXTURE = 'fixture-secret';
+    try {
+      const managed = spawnManaged({
+        command: process.execPath,
+        args: ['-e', "console.log(process.env.MAT_UNSET_ENV_FIXTURE === undefined ? 'no' : 'yes')"],
+        cwd: testRoot,
+        unsetEnv: ['MAT_UNSET_ENV_FIXTURE'],
+      });
+      const closed = once(managed.child, 'close');
+      expect(await firstLine(managed.child.stdout!)).toBe('no');
+      await closed;
+    } finally {
+      delete process.env.MAT_UNSET_ENV_FIXTURE;
+    }
+  }, 30_000);
+
   it('pipes stdin then closes it, with stdout available incrementally', async () => {
     const script = `let value = ''; process.stdin.on('data', (chunk) => value += chunk); process.stdin.on('end', () => console.log('got:' + value.trim()));`;
     const managed = spawnManaged({ command: process.execPath, args: ['-e', script], cwd: testRoot, stdin: 'hello\n' });

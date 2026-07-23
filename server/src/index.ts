@@ -15,6 +15,7 @@ import { configureWorkflowStore } from './store/workflows.js';
 import { configureWorkspaceStore } from './store/workspaces.js';
 import { redactEnvironmentValues } from './redact.js';
 import { maybeSelfProvision } from './runtime/triggers.js';
+import { syncActiveFromSharedHome } from './providers/codex/accounts.js';
 
 export interface ServerOptions { port: number; host: string; dataDir: string | undefined; token: string | undefined }
 
@@ -116,6 +117,13 @@ async function main(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     await stopEngine(abortRun);
+    await Promise.race([
+      Promise.resolve().then(() => { syncActiveFromSharedHome(); }).catch(() => undefined),
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 1_000);
+        timer.unref();
+      }),
+    ]);
     await app.close();
   };
   process.once('SIGINT', () => { shutdown().catch((error: unknown) => console.error(`[mat] shutdown failed: ${redactedError(error)}`)); });

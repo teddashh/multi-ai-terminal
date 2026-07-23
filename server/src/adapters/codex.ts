@@ -5,6 +5,7 @@ import { getDataDir } from '../store/dataDir.js';
 import { managedBinaryPath } from '../runtime/install.js';
 import { resolveRuntimeBinary, runtimeBinaryForSpawn } from '../runtime/resolve.js';
 import { codexSessionRuntime } from '../providers/codex/runtime.js';
+import { configuredOpenAiKey } from '../providers/codex/apiKey.js';
 import {
   createLineBuffer,
   humanizeError,
@@ -75,8 +76,17 @@ export function codexChildEnv(command: string, nodeCommand?: string): NodeJS.Pro
   return env;
 }
 
+export function codexExecEnv(command: string, nodeCommand?: string): NodeJS.ProcessEnv {
+  const env = codexChildEnv(command, nodeCommand);
+  // An env-sourced key is already in the inherited copy; injecting only the
+  // file-sourced key keeps the store chain's file-beats-env precedence.
+  const configured = configuredOpenAiKey();
+  if (configured?.source === 'file') env.OPENAI_API_KEY = configured.key;
+  return env;
+}
+
 function spawnCodexCommand(command: string, spec: ResolvedNodeSpec, io: Parameters<Adapter['spawn']>[1]): SpawnedNode {
-  const managed = spawnManaged({ command, args: buildCodexArgs(spec), cwd: spec.cwd, stdin: spec.promptText, env: codexChildEnv(command, spec.runtimeNodeCommand) });
+  const managed = spawnManaged({ command, args: buildCodexArgs(spec), cwd: spec.cwd, stdin: spec.promptText, env: codexExecEnv(command, spec.runtimeNodeCommand) });
   const { child } = managed;
   let sessionRef: string | undefined;
   let usage: NodeOutcome['usage'];

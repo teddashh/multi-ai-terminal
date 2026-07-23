@@ -2,6 +2,8 @@ import { existsSync } from 'node:fs';
 import {
   ProviderSignInCancelRequestSchema,
   ProviderSignInCodeRequestSchema,
+  CodexAccountIdRequestSchema,
+  CodexApiKeySetRequestSchema,
   RetryStageRequestSchema,
   SteerRequestSchema,
   RunCreateRequestSchema,
@@ -31,7 +33,12 @@ import { buildDebugBundle, readTail } from '../engine/debugBundle.js';
 import { buildRunReport } from '../engine/report.js';
 import { redactEnvironmentValues } from '../redact.js';
 import { providerInstallPlan, providerInstallTimeoutMs, providerUpdatePlan, type ProviderInstallPlan } from '../providers/install.js';
+import { readClaudeAccountIndex } from '../providers/claude/accounts.js';
 import { cancelSignIn, signInStatus, startSignIn, submitSignInCode } from '../providers/signin.js';
+import { isSignInActive } from '../providers/signin.js';
+import { captureCurrent, readAccountIndex, removeAccount, switchAccount } from '../providers/codex/accounts.js';
+import { clearOpenAiKey, configuredOpenAiKey, setOpenAiKey } from '../providers/codex/apiKey.js';
+import { codexSessionRuntime } from '../providers/codex/runtime.js';
 import { clearAugmentedPathCache, spawnManaged, type ManagedProcess } from '../spawn.js';
 import { readEventsAfter } from '../store/eventLog.js';
 import { getDataDir } from '../store/dataDir.js';
@@ -74,6 +81,7 @@ const ClientLogSchema = z.object({
   stack: z.string().max(8000).optional(), url: z.string().optional(),
 }).strict();
 const ACTIVE_RUN_STATUSES = new Set<RunSnapshot['status']>(['created', 'running', 'gating']);
+const codexRefusal = (error: string): { ok: false; error: string } => ({ ok: false, error: redactEnvironmentValues(error) });
 
 export interface ApiRouteDependencies {
   providers(): ReturnType<typeof listProviders>;
@@ -143,6 +151,43 @@ export async function registerApiRoutes(app: FastifyInstance, dependencies: ApiR
 
   app.get('/api/health', wrap(async () => ({ ok: true, version: VERSION })));
   app.get('/api/providers', wrap(async () => dependencies.providers()));
+  app.get('/api/providers/claude/accounts', wrap(async () => readClaudeAccountIndex(getDataDir())));
+  app.get('/api/providers/codex/accounts', wrap(async () => readAccountIndex()));
+  app.post('/api/providers/codex/accounts/capture', wrap(async () => {
+    if (isSignInActive()) return codexRefusal('Cannot capture codex account while a sign-in is in progress.');
+    if (codexSessionRuntime().busy()) return codexRefusal('Cannot capture codex account while a turn is running.');
+    return captureCurrent();
+  }));
+  app.post('/api/providers/codex/accounts/switch', wrap(async (request) => {
+    const { accountId } = CodexAccountIdRequestSchema.parse(request.body);
+    if (isSignInActive()) return codexRefusal('Cannot switch codex account while a sign-in is in progress.');
+    const runtime = codexSessionRuntime();
+    if (runtime.busy()) return codexRefusal('Cannot switch codex account while a turn is running.');
+    const result = switchAccount(accountId);
+    if (result.ok) await runtime.recycleForAccountChange();
+    return result;
+  }));
+  app.post('/api/providers/codex/accounts/remove', wrap(async (request) => {
+    const { accountId } = CodexAccountIdRequestSchema.parse(request.body);
+    if (isSignInActive()) return codexRefusal('Cannot remove codex account while a sign-in is in progress.');
+    if (codexSessionRuntime().busy()) return codexRefusal('Cannot remove codex account while a turn is running.');
+    return removeAccount(accountId);
+  }));
+  app.get('/api/providers/codex/api-key', wrap(async () => {
+    const configured = configuredOpenAiKey();
+    return { configured: configured !== null, ...(configured ? { source: configured.source } : {}) };
+  }));
+  app.post('/api/providers/codex/api-key', wrap(async (request) => {
+    const { key } = CodexApiKeySetRequestSchema.parse(request.body);
+    setOpenAiKey(key);
+    const configured = configuredOpenAiKey();
+    return { configured: configured !== null, ...(configured ? { source: configured.source } : {}) };
+  }));
+  app.delete('/api/providers/codex/api-key', wrap(async () => {
+    clearOpenAiKey();
+    const configured = configuredOpenAiKey();
+    return { configured: configured !== null, ...(configured ? { source: configured.source } : {}) };
+  }));
   app.get('/api/runtimes', wrap(async () => dependencies.runtimes.status(getDataDir())));
   const runtimeMutation = async (request: FastifyRequest, reply: FastifyReply, kind: 'install' | 'clear'): Promise<FastifyReply> => {
     const raw = (request.params as { family?: unknown }).family;

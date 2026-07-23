@@ -12,6 +12,8 @@ export interface SpawnProcessOptions {
   /** Keep stdin piped and open for later writes instead of ignore/auto-end. */
   stdinOpen?: boolean;
   env?: NodeJS.ProcessEnv;
+  /** Remove inherited variables from the final child environment. */
+  unsetEnv?: string[];
   timeoutMs?: number;
   onTimeout?: () => void;
   shell?: boolean;
@@ -146,11 +148,13 @@ export function spawnManaged(options: SpawnProcessOptions): ManagedProcess {
   const baseEnv = augmentedPathEnv();
   const explicitPathKey = Object.keys(options.env ?? {}).find((key) => key.toLowerCase() === 'path');
   if (explicitPathKey) for (const key of Object.keys(baseEnv)) if (key.toLowerCase() === 'path') delete baseEnv[key];
+  const childEnv = sanitizedEnvironment({ ...baseEnv, ...options.env });
+  for (const key of options.unsetEnv ?? []) delete childEnv[key];
   const child = spawnImpl(options.command, options.args, {
     cwd: options.cwd,
     detached: !windows,
     windowsHide: windows,
-    env: sanitizedEnvironment({ ...baseEnv, ...options.env }),
+    env: childEnv,
     stdio: [options.stdin === undefined && options.stdinOpen !== true ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     shell: options.shell ?? false,
   });

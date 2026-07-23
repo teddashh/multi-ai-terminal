@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { clearProviderSpawnSlots, detectAuthFailure, humanizeError, IncrementalLineBuffer, providerSpawnSlot } from '../src/adapters/base.js';
 
 describe('detectAuthFailure', () => {
+  it.each([
+    'Your session has ended',
+    'app_session_terminated',
+    'Access token could not be refreshed',
+    'Failed to refresh token',
+  ])('matches BAT codex auth phrase: %s', (phrase) => {
+    expect(detectAuthFailure('codex', phrase)).toContain('Fix: codex logout && codex login');
+  });
   it('detects revoked Codex refresh tokens', () => {
     expect(detectAuthFailure('codex', 'Your refresh token was already used. Please log out and sign in again.')).toBe('codex sign-in expired.\nFix: codex logout && codex login');
   });

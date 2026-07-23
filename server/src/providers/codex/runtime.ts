@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { homedir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute } from 'node:path';
 import type { Adapter } from '../../adapters/base.js';
 import { humanizeError, type NodeOutcome, type ResolvedNodeSpec, type SpawnedNode } from '../../adapters/base.js';
 import { redactEnvironmentValues } from '../../redact.js';
@@ -11,11 +10,15 @@ import { VERSION } from '../../version.js';
 import { CodexConnection, type CodexConnectionConfig } from './connection.js';
 import { DEFAULT_CODEX_MODEL } from './models.js';
 import { CodexThreadManager } from './threads.js';
+import { sharedCodexHome } from './accounts.js';
+import { configuredOpenAiKey } from './apiKey.js';
 
 type SpawnIo = Parameters<Adapter['spawn']>[1];
 
 export interface CodexSessionRuntime {
   startRun(spec: ResolvedNodeSpec, io: SpawnIo): SpawnedNode;
+  busy(): boolean;
+  recycleForAccountChange(): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -66,6 +69,12 @@ class SessionRuntime implements CodexSessionRuntime {
       },
       completion,
     };
+  }
+
+  busy(): boolean { return this.runs.size > 0; }
+
+  async recycleForAccountChange(): Promise<void> {
+    await this.retirePair();
   }
 
   async dispose(): Promise<void> {
@@ -123,12 +132,13 @@ class SessionRuntime implements CodexSessionRuntime {
     const command = (await resolve(getDataDir(), 'codex')) ?? runtimeBinaryForSpawn(getDataDir(), 'codex');
     const resolvedNode = await resolve(getDataDir(), 'node');
     const nodeCommand = resolvedNode && resolvedNode !== 'node' && isAbsolute(resolvedNode) ? resolvedNode : process.execPath;
+    const configuredKey = configuredOpenAiKey();
     let manager!: CodexThreadManager;
     const config: CodexConnectionConfig = {
       command,
       nodeCommand,
-      codexHome: process.env.CODEX_HOME ?? join(homedir(), '.codex'),
-      ...(process.env.OPENAI_API_KEY !== undefined ? { apiKey: process.env.OPENAI_API_KEY } : {}),
+      codexHome: sharedCodexHome(),
+      ...(configuredKey ? { apiKey: configuredKey.key } : {}),
       purpose: 'session',
       clientInfo: { name: 'multi-ai-terminal', title: 'Multi-AI Terminal', version: VERSION },
       onNotification: (method, params) => manager.handleNotification(method, params),

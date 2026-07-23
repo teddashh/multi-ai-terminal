@@ -62,3 +62,61 @@ export interface ProviderSignInCodeResponse {
 }
 export const ProviderSignInCodeRequestSchema = z.object({ loginId: z.string().min(1), code: z.string().min(1).max(512) }).strict();
 export const ProviderSignInCancelRequestSchema = z.object({ loginId: z.string().min(1) }).strict();
+
+export const ClaudeAccountSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  subscriptionType: z.string().optional(),
+  isDefault: z.boolean().optional(),
+  createdAt: z.string().optional(),
+}).strict();
+export const ClaudeAccountIndexResponseSchema = z.object({
+  accounts: z.array(ClaudeAccountSchema),
+  activeAccountId: z.string().optional(),
+}).strict();
+export type ClaudeAccountIndexResponse = z.infer<typeof ClaudeAccountIndexResponseSchema>;
+
+export const CodexAccountSchema = z.object({
+  id: z.string(),
+  email: z.string().optional(),
+  accountId: z.string().optional(),
+  label: z.string(),
+  sourceHome: z.string().optional(),
+  createdAt: z.string(),
+  needsLogin: z.boolean(),
+  lastValidatedAt: z.string().optional(),
+  lastInvalidatedAt: z.string().optional(),
+  lastAuthError: z.string().optional(),
+}).strict();
+export type CodexAccount = z.infer<typeof CodexAccountSchema>;
+
+export const CodexAccountIndexSchema = z.object({
+  schemaVersion: z.literal(1),
+  migrated: z.boolean(),
+  activeAccountId: z.string().optional(),
+  accounts: z.array(CodexAccountSchema),
+}).strict();
+export type CodexAccountIndex = z.infer<typeof CodexAccountIndexSchema>;
+
+// Codex account ids double as path segments in the server's account store;
+// both the API schema and the store enforce this same alphabet.
+export const CODEX_ACCOUNT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+export const CodexAccountIdRequestSchema = z.object({ accountId: z.string().regex(CODEX_ACCOUNT_ID_PATTERN) }).strict();
+export const CodexAccountOperationResponseSchema = z.object({
+  ok: z.boolean(),
+  account: CodexAccountSchema.optional(),
+  removed: z.boolean().optional(),
+  error: z.string().optional(),
+}).strict();
+export const CodexAccountCaptureResponseSchema = CodexAccountOperationResponseSchema;
+export const CodexAccountSwitchResponseSchema = CodexAccountOperationResponseSchema;
+export const CodexAccountRemoveResponseSchema = CodexAccountOperationResponseSchema;
+
+export const CodexApiKeyStatusResponseSchema = z.object({
+  configured: z.boolean(),
+  source: z.enum(['file', 'env']).optional(),
+}).strict();
+export const CodexApiKeySetRequestSchema = z.object({ key: z.string().trim().min(1) }).strict();
+export const CodexApiKeySetResponseSchema = CodexApiKeyStatusResponseSchema;
+export const CodexApiKeyClearResponseSchema = CodexApiKeyStatusResponseSchema;
+export type CodexApiKeyStatusResponse = z.infer<typeof CodexApiKeyStatusResponseSchema>;

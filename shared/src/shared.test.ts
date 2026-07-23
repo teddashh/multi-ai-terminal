@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { AgentEventSchema, NodeRunSchema, ProviderInfoSchema, ProviderSignInCancelRequestSchema, ProviderSignInCodeRequestSchema, RunSnapshotSchema, StageSchema, SteerMessageSchema, SteerRequestSchema, WorkflowDefSchema, WorkspacePatchRequestSchema, WorkspaceSchema, applyWorkflowDefaults } from './index.js';
+import { AgentEventSchema, ClaudeAccountIndexResponseSchema, CodexAccountIndexSchema, CodexApiKeySetRequestSchema, CodexApiKeyStatusResponseSchema, CodexAccountIdRequestSchema, NodeRunSchema, ProviderInfoSchema, ProviderSignInCancelRequestSchema, ProviderSignInCodeRequestSchema, RunSnapshotSchema, StageSchema, SteerMessageSchema, SteerRequestSchema, WorkflowDefSchema, WorkspacePatchRequestSchema, WorkspaceSchema, applyWorkflowDefaults } from './index.js';
 
 describe('shared schemas', () => {
   it('round-trips an event', () => {
@@ -81,6 +81,23 @@ describe('shared schemas', () => {
     expect(ProviderSignInCodeRequestSchema.safeParse({ loginId: 'L1', code: 'x', shell: 'rm' }).success).toBe(false);
     expect(ProviderSignInCancelRequestSchema.parse({ loginId: 'L1' })).toEqual({ loginId: 'L1' });
     expect(ProviderSignInCancelRequestSchema.safeParse({}).success).toBe(false);
+    expect(ClaudeAccountIndexResponseSchema.parse({
+      accounts: [{ id: 'account-1', email: 'one@example.test', isDefault: true }],
+      activeAccountId: 'account-1',
+    })).toEqual({
+      accounts: [{ id: 'account-1', email: 'one@example.test', isDefault: true }],
+      activeAccountId: 'account-1',
+    });
+    expect(CodexAccountIndexSchema.parse({
+      schemaVersion: 1, migrated: false, activeAccountId: 'acct',
+      accounts: [{ id: 'acct', label: 'Account', createdAt: '2026-01-01T00:00:00.000Z', needsLogin: false }],
+    }).activeAccountId).toBe('acct');
+    expect(CodexAccountIdRequestSchema.safeParse({ accountId: 'acct', extra: true }).success).toBe(false);
+    expect(CodexAccountIdRequestSchema.safeParse({ accountId: '../escape' }).success).toBe(false);
+    expect(CodexAccountIdRequestSchema.safeParse({ accountId: 'a/b' }).success).toBe(false);
+    expect(CodexApiKeySetRequestSchema.safeParse({ key: '   ' }).success).toBe(false);
+    expect(CodexApiKeySetRequestSchema.parse({ key: ' padded-key ' })).toEqual({ key: 'padded-key' });
+    expect(CodexApiKeyStatusResponseSchema.parse({ configured: true, source: 'file' })).toEqual({ configured: true, source: 'file' });
   });
 
   it('enforces the per-stage fan-out cap', () => {

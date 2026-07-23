@@ -1,4 +1,7 @@
-import type { AgentEvent, ApplyPatchResponse, ProviderInfo, ProviderInstallResponse, ProviderSignInCodeResponse, ProviderSignInStartResponse, ProviderSignInStatusResponse, RetryStageRequest, RuntimeFamily, RuntimeStatus, RunCreateRequest, RunSnapshot, SteerRequest, WorkflowDef, Workspace } from '@mat/shared';
+import type { AgentEvent, ApplyPatchResponse, ClaudeAccountIndexResponse, CodexAccountIndex, ProviderInfo, ProviderInstallResponse, ProviderSignInCodeResponse, ProviderSignInStartResponse, ProviderSignInStatusResponse, RetryStageRequest, RuntimeFamily, RuntimeStatus, RunCreateRequest, RunSnapshot, SteerRequest, WorkflowDef, Workspace } from '@mat/shared';
+
+export interface CodexAccountOperationResponse { ok: boolean; error?: string }
+export interface CodexApiKeyStatus { configured: boolean; source?: 'file' | 'env' }
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string, readonly code = 'HTTP_ERROR') { super(message); }
@@ -24,6 +27,14 @@ export class ApiClient {
   signInStatus(id: string, loginId: string): Promise<ProviderSignInStatusResponse> { return this.request(`/api/providers/${encodeURIComponent(id)}/signin/status${queryString({ loginId })}`); }
   submitSignInCode(id: string, loginId: string, code: string): Promise<ProviderSignInCodeResponse> { return this.request(`/api/providers/${encodeURIComponent(id)}/signin/code`, { method: 'POST', body: { loginId, code } }); }
   cancelSignIn(id: string, loginId: string): Promise<{ ok: boolean; error?: string }> { return this.request(`/api/providers/${encodeURIComponent(id)}/signin/cancel`, { method: 'POST', body: { loginId } }); }
+  getClaudeAccounts(): Promise<ClaudeAccountIndexResponse> { return this.request('/api/providers/claude/accounts'); }
+  getCodexAccounts(): Promise<CodexAccountIndex> { return this.request('/api/providers/codex/accounts'); }
+  captureCodexAccount(): Promise<CodexAccountOperationResponse> { return this.request('/api/providers/codex/accounts/capture', { method: 'POST' }); }
+  switchCodexAccount(accountId: string): Promise<CodexAccountOperationResponse> { return this.request('/api/providers/codex/accounts/switch', { method: 'POST', body: { accountId } }); }
+  removeCodexAccount(accountId: string): Promise<CodexAccountOperationResponse> { return this.request('/api/providers/codex/accounts/remove', { method: 'POST', body: { accountId } }); }
+  getCodexApiKey(): Promise<CodexApiKeyStatus> { return this.request('/api/providers/codex/api-key'); }
+  setCodexApiKey(key: string): Promise<CodexApiKeyStatus> { return this.request('/api/providers/codex/api-key', { method: 'POST', body: { key } }); }
+  clearCodexApiKey(): Promise<CodexApiKeyStatus> { return this.request('/api/providers/codex/api-key', { method: 'DELETE' }); }
   getWorkspaces(): Promise<Workspace[]> { return this.request('/api/workspaces'); }
   getWorkspace(id: string): Promise<Workspace> { return this.request(`/api/workspaces/${encodeURIComponent(id)}`); }
   createWorkspace(value: { name: string; path: string; defaultWorkflowId?: string; verifyCommand?: string; verifyTimeoutSec?: number }): Promise<Workspace> { return this.request('/api/workspaces', { method: 'POST', body: value }); }

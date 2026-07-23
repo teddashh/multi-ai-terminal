@@ -35,6 +35,10 @@ const AUTH_PATTERNS = [
   /please (?:sign|log) in/i,
   /authentication (?:failed|required)/i,
   /invalid api key/i,
+  /your session has ended/i,
+  /app_session_terminated/i,
+  /access token could not be refreshed/i,
+  /failed to refresh token/i,
 ];
 
 const SAFE_AUTH_INSTRUCTIONS: Readonly<Record<string, readonly string[]>> = {

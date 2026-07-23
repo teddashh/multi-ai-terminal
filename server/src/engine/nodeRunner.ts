@@ -10,6 +10,9 @@ import { runDirectory } from './worktree.js';
 import { recordToolUse, resetToolCount } from './digest.js';
 import { diag } from '../diag.js';
 import { clearAuthAlert, setAuthAlert } from '../providers/auth.js';
+import { markActiveNeedsLogin, markActiveValid } from '../providers/codex/accounts.js';
+import { configuredOpenAiKey } from '../providers/codex/apiKey.js';
+import { activeSignInProvider } from '../providers/signin.js';
 import { redactDiagnosticValue, redactEnvironmentValues } from '../redact.js';
 import { getDataDir } from '../store/dataDir.js';
 import { resolveRuntimeBinary } from '../runtime/resolve.js';
@@ -267,6 +270,11 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
       await persistSafely(node, context);
       return;
     }
+    // A login child rewrites the shared CODEX_HOME auth.json mid-ceremony;
+    // spawning a codex turn against it would race the credential swap.
+    if (node.agent.provider === 'codex' && activeSignInProvider() === 'codex') {
+      throw new Error('codex sign-in is in progress; retry after it completes');
+    }
     if (node.agent.provider === 'claude' || node.agent.provider === 'codex') {
       const runtimeCommand = await resolveRuntimeBinary(getDataDir(), node.agent.provider);
       if (!runtimeCommand) throw new Error(`${node.agent.provider} CLI runtime was not found`);
@@ -368,6 +376,9 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
     delete node.error;
     delete node.errorReason;
     clearAuthAlert(node.agent.provider);
+    // A configured API key can carry the turn while the OAuth tokens are dead,
+    // so success only clears needs-login when no key could have authed it.
+    if (node.agent.provider === 'codex' && !configuredOpenAiKey()) void Promise.resolve(markActiveValid()).catch(() => undefined);
   } else {
     node.status = 'failed';
     node.error = outcomeError ?? `Node exited with code ${String(outcome.exitCode)}`;
@@ -380,6 +391,7 @@ export async function runNode(node: NodeRun, stage: Stage, promptText: string): 
       lifecycle(node, context, 'error', authFailure, { status: 'failed', detail: 'auth' });
       diag(context.runId, 'error', { nodeRunId: node.nodeRunId, kind: 'auth' });
       setAuthAlert(node.agent.provider, authFailure, context.runId, node.nodeRunId);
+      if (node.agent.provider === 'codex') void Promise.resolve(markActiveNeedsLogin(authFailure)).catch(() => undefined);
     }
   }
   lifecycle(node, context, 'result', node.resultText ?? '', {

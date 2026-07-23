@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +10,7 @@ import { emitRetryBoundary, killActiveNode, markNodeKilled, registerNodeContext,
 import { clearAllAuthAlerts, getAuthAlert } from '../../src/providers/auth.js';
 import { mockAdapter } from '../../src/adapters/mock.js';
 import { clearProviderSpawnSlots } from '../../src/adapters/base.js';
+import { resetSignInForTests, setSignInRecipeForTests, setSignInTimingForTests, startSignIn } from '../../src/providers/signin.js';
 
 const dirs: string[] = [];
 const oldDataDir = process.env.MAT_DATA_DIR;
@@ -225,6 +226,90 @@ describe('node runner lifecycle', () => {
     succeeding.node.agent = { provider: 'grok', permission: 'safe' };
     await runNode(succeeding.node, stage, 'prompt');
     expect(getAuthAlert('grok')).toBeUndefined();
+  });
+
+  it('marks the active codex account needs-login on auth failure and clears it on success', async () => {
+    // runNode resolves the codex (and node) runtime before spawning; without the
+    // env overrides the resolver probes real binaries, which is neither hermetic
+    // nor survivable under vitest workers in this sandbox.
+    const priorCodexBin = process.env.MAT_CODEX_BIN;
+    const priorNodeBin = process.env.MAT_NODE_BIN;
+    const priorOpenAiKey = process.env.OPENAI_API_KEY;
+    process.env.MAT_CODEX_BIN = process.execPath;
+    process.env.MAT_NODE_BIN = process.execPath;
+    // A configured API key suppresses the success-path markActiveValid.
+    delete process.env.OPENAI_API_KEY;
+    try {
+      const seedIndex = (entry: Record<string, unknown>): string => {
+        const indexPath = join(process.env.MAT_DATA_DIR!, 'codex-accounts.json');
+        writeFileSync(indexPath, JSON.stringify({
+          schemaVersion: 1, migrated: false, activeAccountId: 'a1',
+          accounts: [{ id: 'a1', label: 'A', createdAt: '2026-01-01T00:00:00.000Z', needsLogin: false, ...entry }],
+        }));
+        return indexPath;
+      };
+      const failing = adapterFrom((_spec, io) => {
+        io.onRaw('request failed: 401 Unauthorized', 'out');
+        return { pid: 21, kill() {}, completion: Promise.resolve({ exitCode: 1 }) };
+      }, 'codex');
+      const first = setup(failing); first.node.agent = { provider: 'codex', permission: 'safe' };
+      const firstIndex = seedIndex({});
+      await runNode(first.node, stage, 'prompt');
+      expect(JSON.parse(readFileSync(firstIndex, 'utf8')).accounts[0]).toMatchObject({
+        needsLogin: true, lastAuthError: expect.stringContaining('sign-in'),
+      });
+
+      clearProviderSpawnSlots();
+      const second = setup(adapterFrom(() => ({ pid: 22, kill() {}, completion: Promise.resolve({ exitCode: 0, resultText: 'ok' }) }), 'codex'));
+      second.node.agent = { provider: 'codex', permission: 'safe' };
+      const secondIndex = seedIndex({ needsLogin: true, lastAuthError: 'stale', lastInvalidatedAt: '2026-01-01T00:00:00.000Z' });
+      await runNode(second.node, stage, 'prompt');
+      const cleared = JSON.parse(readFileSync(secondIndex, 'utf8')).accounts[0];
+      expect(cleared.needsLogin).toBe(false);
+      expect(cleared.lastAuthError).toBeUndefined();
+      expect(cleared.lastValidatedAt).toBeTruthy();
+    } finally {
+      if (priorCodexBin === undefined) delete process.env.MAT_CODEX_BIN;
+      else process.env.MAT_CODEX_BIN = priorCodexBin;
+      if (priorNodeBin === undefined) delete process.env.MAT_NODE_BIN;
+      else process.env.MAT_NODE_BIN = priorNodeBin;
+      if (priorOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = priorOpenAiKey;
+    }
+  });
+
+  it('refuses to spawn a codex turn while a codex sign-in ceremony is active', async () => {
+    const priorCodexHome = process.env.CODEX_HOME;
+    const priorCodexBin = process.env.MAT_CODEX_BIN;
+    const priorNodeBin = process.env.MAT_NODE_BIN;
+    process.env.MAT_CODEX_BIN = process.execPath;
+    process.env.MAT_NODE_BIN = process.execPath;
+    const result = setup(adapterFrom(() => ({ pid: 23, kill() {}, completion: Promise.resolve({ exitCode: 0, resultText: 'ok' }) }), 'codex'));
+    result.node.agent = { provider: 'codex', permission: 'safe' };
+    // Empty fake home keeps the ceremony's best-effort snapshot away from any
+    // real ~/.codex; the harmless recipe never runs a provider CLI.
+    process.env.CODEX_HOME = join(process.env.MAT_DATA_DIR!, 'codex-home');
+    setSignInRecipeForTests('codex', {
+      mode: 'device', command: process.execPath, args: ['-e', 'setTimeout(() => process.exit(0), 3000)'], trustedHosts: ['openai.com'],
+    });
+    setSignInTimingForTests({ urlWaitMs: 400 });
+    const ceremony = startSignIn('codex');
+    try {
+      await runNode(result.node, stage, 'prompt');
+      expect(result.node.status).toBe('failed');
+      expect(result.node.error).toContain('sign-in is in progress');
+    } finally {
+      resetSignInForTests();
+      await ceremony;
+      setSignInRecipeForTests('codex', undefined);
+      setSignInTimingForTests();
+      if (priorCodexHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = priorCodexHome;
+      if (priorCodexBin === undefined) delete process.env.MAT_CODEX_BIN;
+      else process.env.MAT_CODEX_BIN = priorCodexBin;
+      if (priorNodeBin === undefined) delete process.env.MAT_NODE_BIN;
+      else process.env.MAT_NODE_BIN = priorNodeBin;
+    }
   });
 
   it('redacts environment values from persisted prompts, provider output, snapshots, and raw logs', async () => {

@@ -2,22 +2,28 @@ import { randomUUID } from 'node:crypto';
 import type { ProviderId, ProviderSignInCodeResponse, ProviderSignInMode, ProviderSignInStartResponse, ProviderSignInStatusResponse } from '@mat/shared';
 import { diag } from '../diag.js';
 import { redactEnvironmentValues } from '../redact.js';
+import { resolveRuntimeBinary, runtimeBinaryForSpawn } from '../runtime/resolve.js';
 import { spawnManaged, type ManagedProcess } from '../spawn.js';
+import { getDataDir } from '../store/dataDir.js';
 import { clearAuthAlert } from './auth.js';
+import { captureCurrent, markActiveValid } from './codex/accounts.js';
+import { codexSessionRuntime } from './codex/runtime.js';
 
 // In-app sign-in drives each CLI's own login flow over piped stdio — the BAT
 // (better-agent-terminal) pattern. MAT spawns a fixed recipe, surfaces the
 // sign-in URL (and device code) the CLI prints, and either forwards the pasted
 // callback code to the CLI's stdin (paste-code mode) or waits for the CLI's own
 // polling to finish (device mode). The CLI performs the OAuth exchange and owns
-// its credential store; MAT never reads or writes stored credentials and never
-// logs the URL, code, or CLI output to diagnostics.
+// its OAuth exchange. MAT snapshots only Codex auth.json at the documented
+// account-store hooks and never logs the URL, code, CLI output, or credentials.
 
 export interface SignInRecipe {
   mode: ProviderSignInMode;
   command: string;
+  family?: 'claude' | 'codex';
   args: string[];
   trustedHosts: string[];
+  unsetEnv?: string[];
   /** The CLI discards any existing login as soon as this flow starts. */
   replacesExistingLogin?: boolean;
   statusProbe?: { command: string; args: string[]; loggedInPattern?: RegExp };
@@ -33,13 +39,16 @@ const recipes: Partial<Record<ProviderId, SignInRecipe>> = {
   claude: {
     mode: 'paste-code',
     command: 'claude', args: ['auth', 'login'],
+    family: 'claude',
     trustedHosts: ['claude.ai', 'claude.com', 'anthropic.com'],
     statusProbe: { command: 'claude', args: ['auth', 'status'], loggedInPattern: /"loggedIn"\s*:\s*true/ },
   },
   codex: {
     mode: 'device',
     command: 'codex', args: ['login', '--device-auth'],
+    family: 'codex',
     trustedHosts: ['openai.com', 'chatgpt.com'],
+    unsetEnv: ['OPENAI_API_KEY'],
     replacesExistingLogin: true,
     statusProbe: { command: 'codex', args: ['login', 'status'] },
   },
@@ -51,6 +60,7 @@ const recipes: Partial<Record<ProviderId, SignInRecipe>> = {
 };
 
 export const SIGNIN_BUSY = 'Another sign-in is already in progress.';
+export const SIGNIN_RUNTIME_BUSY = 'Cannot sign in to codex while a turn is running.';
 export const SIGNIN_NOT_SUPPORTED = 'In-app sign-in is not available for this provider.';
 export const SIGNIN_NO_URL = 'The sign-in command did not produce a login URL.';
 export const SIGNIN_CANCELLED = 'The sign-in was cancelled.';
@@ -147,6 +157,19 @@ function outputExcerpt(session: SignInSession): string {
   return redactEnvironmentValues(session.output.slice(-EXCERPT_MAX).trim());
 }
 
+function sanitizeFailureExcerpt(text: string): string {
+  return redactEnvironmentValues(text)
+    .replace(/\b[A-Z0-9]{4,10}-[A-Z0-9]{4,10}\b/g, '<redacted-code>')
+    .replace(/https?:\/\/\S+/g, '<redacted-url>')
+    .slice(-600);
+}
+
+async function commandForRecipe(recipe: SignInRecipe, command: string): Promise<string> {
+  if (!recipe.family) return command;
+  return (await resolveRuntimeBinary(getDataDir(), recipe.family))
+    ?? runtimeBinaryForSpawn(getDataDir(), recipe.family);
+}
+
 function retireLater(session: SignInSession): void {
   session.retentionTimer = setTimeout(() => {
     sessions.delete(session.loginId);
@@ -157,6 +180,12 @@ function retireLater(session: SignInSession): void {
 async function runStatusProbe(recipe: SignInRecipe): Promise<{ verified: boolean; statusDetail?: string }> {
   const probe = recipe.statusProbe;
   if (!probe) return { verified: true };
+  let command: string;
+  try {
+    command = await commandForRecipe(recipe, probe.command);
+  } catch {
+    return { verified: false };
+  }
   return new Promise((resolve) => {
     let output = '';
     let settled = false;
@@ -173,8 +202,9 @@ async function runStatusProbe(recipe: SignInRecipe): Promise<{ verified: boolean
     let managed: ManagedProcess;
     try {
       managed = spawnManaged({
-        command: probe.command, args: probe.args, cwd: process.cwd(),
+        command, args: probe.args, cwd: process.cwd(),
         env: { TERM: 'dumb' }, timeoutMs: STATUS_PROBE_TIMEOUT_MS,
+        ...(recipe.unsetEnv ? { unsetEnv: recipe.unsetEnv } : {}),
         onTimeout: () => finish(false),
       });
     } catch {
@@ -205,7 +235,13 @@ async function settleSession(session: SignInSession, recipe: SignInRecipe): Prom
   } else if (session.exitCode === 0) result = { ok: false, error: SIGNIN_REJECTED };
   else result = { ok: false, error: failureInOutput ? SIGNIN_REJECTED : signInExitError(session.exitCode) };
 
-  if (result.ok) clearAuthAlert(session.providerId);
+  if (result.ok) {
+    clearAuthAlert(session.providerId);
+    if (session.providerId === 'codex') {
+      try { captureCurrent(); markActiveValid(); } catch { /* best effort */ }
+      void codexSessionRuntime().recycleForAccountChange().catch(() => undefined);
+    }
+  }
   session.terminal = result;
   if (activeSession === session) activeSession = undefined;
   diag(null, 'signin', {
@@ -229,6 +265,9 @@ export async function startSignIn(providerId: ProviderId): Promise<ProviderSignI
   // Credential stores are host-global; never let a second sign-in silently
   // supersede one that is mid-ceremony.
   if (activeSession) return { ok: false, error: SIGNIN_BUSY };
+  // `codex login --device-auth` discards the live login at flow start and the
+  // completion recycle would drop the app-server mid-turn — refuse like BAT.
+  if (providerId === 'codex' && codexSessionRuntime().busy()) return { ok: false, error: SIGNIN_RUNTIME_BUSY };
 
   const session: SignInSession = {
     loginId: randomUUID(), providerId, mode: recipe.mode,
@@ -236,19 +275,29 @@ export async function startSignIn(providerId: ProviderId): Promise<ProviderSignI
     cancelled: false, timedOut: false, codeSubmitted: false,
     urlWaiters: [], settleWaiters: [], startedAt: Date.now(),
   };
+  // Reserve the ceremony synchronously: the awaits below (runtime resolution)
+  // must not open a window where a second sign-in or a concurrent account
+  // mutation observes no active session.
+  activeSession = session;
+  sessions.set(session.loginId, session);
+  if (providerId === 'codex') {
+    try { captureCurrent(); } catch { /* a missing outgoing auth.json is expected */ }
+  }
   try {
+    const command = await commandForRecipe(recipe, recipe.command);
     session.managed = spawnManaged({
-      command: recipe.command, args: recipe.args, cwd: process.cwd(),
+      command, args: recipe.args, cwd: process.cwd(),
       stdinOpen: recipe.mode === 'paste-code',
       env: { TERM: 'dumb' },
+      ...(recipe.unsetEnv ? { unsetEnv: recipe.unsetEnv } : {}),
       timeoutMs: sessionTimeoutMs,
       onTimeout: () => { session.timedOut = true; },
     });
   } catch (error) {
+    if (activeSession === session) activeSession = undefined;
+    sessions.delete(session.loginId);
     return { ok: false, error: redactEnvironmentValues(error instanceof Error ? error.message : String(error)).slice(0, 200) };
   }
-  activeSession = session;
-  sessions.set(session.loginId, session);
 
   const child = session.managed.child;
   const onChunk = (chunk: Buffer): void => {
@@ -283,7 +332,7 @@ export async function startSignIn(providerId: ProviderId): Promise<ProviderSignI
       session.managed.killGroup();
     }
     const error = session.terminal?.error ?? SIGNIN_NO_URL;
-    return { ok: false, loginId: session.loginId, error, outputExcerpt: outputExcerpt(session) };
+    return { ok: false, loginId: session.loginId, error, outputExcerpt: sanitizeFailureExcerpt(session.output) };
   }
   return {
     ok: true, loginId: session.loginId, mode: session.mode, url: session.url,
@@ -292,18 +341,25 @@ export async function startSignIn(providerId: ProviderId): Promise<ProviderSignI
   };
 }
 
+export function isSignInActive(): boolean {
+  return activeSession !== undefined;
+}
+
+export function activeSignInProvider(): ProviderId | undefined {
+  return activeSession?.providerId;
+}
+
 export function signInStatus(loginId: string): ProviderSignInStatusResponse {
   const session = sessions.get(loginId);
   if (!session) return { phase: 'failed', error: SIGNIN_UNKNOWN_SESSION };
   const base = {
     ...(session.url ? { url: session.url } : {}),
     ...(session.userCode ? { userCode: session.userCode } : {}),
-    outputExcerpt: outputExcerpt(session),
   };
-  if (!session.terminal) return { phase: 'pending', ...base };
+  if (!session.terminal) return { phase: 'pending', ...base, outputExcerpt: outputExcerpt(session) };
   return session.terminal.ok
-    ? { phase: 'succeeded', ...base, ...(session.terminal.statusDetail ? { statusDetail: session.terminal.statusDetail } : {}) }
-    : { phase: 'failed', ...base, ...(session.terminal.error ? { error: session.terminal.error } : {}) };
+    ? { phase: 'succeeded', ...base, outputExcerpt: outputExcerpt(session), ...(session.terminal.statusDetail ? { statusDetail: session.terminal.statusDetail } : {}) }
+    : { phase: 'failed', ...base, outputExcerpt: sanitizeFailureExcerpt(session.output), ...(session.terminal.error ? { error: session.terminal.error } : {}) };
 }
 
 export async function submitSignInCode(loginId: string, code: string): Promise<ProviderSignInCodeResponse> {
@@ -327,7 +383,7 @@ export async function submitSignInCode(loginId: string, code: string): Promise<P
   const terminal = session.terminal ?? { ok: false, error: SIGNIN_TIMEOUT };
   return terminal.ok
     ? { ok: true, ...(terminal.statusDetail ? { statusDetail: terminal.statusDetail } : {}), outputExcerpt: outputExcerpt(session) }
-    : { ok: false, ...(terminal.error ? { error: terminal.error } : {}), outputExcerpt: outputExcerpt(session) };
+    : { ok: false, ...(terminal.error ? { error: terminal.error } : {}), outputExcerpt: sanitizeFailureExcerpt(session.output) };
 }
 
 export function cancelSignIn(loginId: string): { ok: boolean; error?: string } {

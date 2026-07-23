@@ -16,6 +16,8 @@ vi.mock('zustand', () => ({ useStore: (store: { getState(): unknown }, selector:
 const apiMocks = {
   installProvider: vi.fn(), getProviders: vi.fn(), refreshProviders: vi.fn(), updateProvider: vi.fn(),
   startSignIn: vi.fn(), signInStatus: vi.fn(), submitSignInCode: vi.fn(), cancelSignIn: vi.fn(),
+  getCodexAccounts: vi.fn(), captureCodexAccount: vi.fn(), switchCodexAccount: vi.fn(), removeCodexAccount: vi.fn(),
+  getCodexApiKey: vi.fn(), setCodexApiKey: vi.fn(), clearCodexApiKey: vi.fn(), getClaudeAccounts: vi.fn(),
 };
 const api = apiMocks as unknown as ApiClient;
 const mounted: Array<{ container: HTMLDivElement; root: Root }> = [];
@@ -37,6 +39,9 @@ const unavailable: ProviderInfo = {
 beforeEach(() => {
   vi.clearAllMocks();
   apiMocks.refreshProviders.mockResolvedValue([unavailable]);
+  apiMocks.getCodexAccounts.mockResolvedValue({ schemaVersion: 1, migrated: false, accounts: [] });
+  apiMocks.getCodexApiKey.mockResolvedValue({ configured: false });
+  apiMocks.getClaudeAccounts.mockResolvedValue({ accounts: [] });
   matStore.setState({ providers: [unavailable] });
 });
 
@@ -49,7 +54,7 @@ afterEach(() => {
 });
 
 describe('ProviderSetupButton', () => {
-  it('shows the canonical missing-CLI guidance in Traditional Chinese without rewriting arbitrary errors', () => {
+  it('shows the canonical missing-CLI guidance in Traditional Chinese without rewriting arbitrary errors', async () => {
     localStorage.setItem('mat-ui-preferences-v1', JSON.stringify({ language: 'zh-TW', theme: 'dark' }));
     const codex: ProviderInfo = {
       ...unavailable,
@@ -59,6 +64,7 @@ describe('ProviderSetupButton', () => {
     render(<UiPreferencesProvider><ProviderSetupButton provider={codex} api={api} /></UiPreferencesProvider>);
     act(() => fireEvent.click(screen.getByRole('button', { name: '設定 codex' })));
     expect(screen.getByText('`codex` CLI 不在 PATH 中。請先安裝它，或從工作流程移除此代理程式。')).toBeTruthy();
+    await waitFor(() => expect(apiMocks.getCodexAccounts).toHaveBeenCalledOnce());
   });
 
   it('hard-exempts mock even when passed impossible unavailable and auth state', () => {
@@ -312,5 +318,102 @@ describe('ProviderSetupButton sign-in wizard', () => {
 
     await waitFor(() => expect(screen.getByText('The updater exited with code 3.')).toBeTruthy());
     expect(screen.getByText(/npm ERR! tarball corrupted/)).toBeTruthy();
+  });
+});
+
+describe('ProviderSetupButton account and API-key controls', () => {
+  const codexReady: ProviderInfo = {
+    id: 'codex', tier: 'rich', ok: true, version: 'codex 1.0.0', installable: true,
+    models: ['gpt'], defaultModel: 'gpt', signIn: { mode: 'device' },
+  };
+  const accountIndex = {
+    schemaVersion: 1 as const,
+    migrated: false,
+    activeAccountId: 'active',
+    accounts: [
+      { id: 'active', email: 'active@example.test', label: 'Active account', createdAt: '2026-01-01T00:00:00.000Z', needsLogin: false },
+      { id: 'stale', email: 'stale@example.test', label: 'Stale account', createdAt: '2026-01-02T00:00:00.000Z', needsLogin: true, lastAuthError: 'token expired' },
+      { id: 'other', email: 'other@example.test', label: 'Other account', createdAt: '2026-01-03T00:00:00.000Z', needsLogin: false },
+    ],
+  };
+
+  async function openCodex(): Promise<HTMLElement> {
+    render(<ProviderSetupButton provider={codexReady} api={api} />);
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Setup codex' })));
+    await waitFor(() => expect(screen.getByText('Active account · active@example.test')).toBeTruthy());
+    return screen.getByRole('dialog', { name: 'Setup codex' });
+  }
+
+  it('renders active and needs-login badges and disables switching to a stale account', async () => {
+    apiMocks.getCodexAccounts.mockResolvedValue(accountIndex);
+    const dialog = await openCodex();
+    expect(within(dialog).getByText('Active')).toBeTruthy();
+    expect(within(dialog).getByText('Needs login').getAttribute('title')).toBe('token expired');
+    const staleRow = within(dialog).getByText('Stale account · stale@example.test').closest('div.rounded') as HTMLElement;
+    expect((within(staleRow).getByRole('button', { name: 'Switch' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('refetches after switch success and surfaces a server refusal verbatim', async () => {
+    apiMocks.getCodexAccounts.mockResolvedValue(accountIndex);
+    apiMocks.switchCodexAccount.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ ok: false, error: 'Cannot switch codex account while a turn is running.' });
+    const dialog = await openCodex();
+    const otherRow = within(dialog).getByText('Other account · other@example.test').closest('div.rounded') as HTMLElement;
+    await act(async () => { fireEvent.click(within(otherRow).getByRole('button', { name: 'Switch' })); await Promise.resolve(); });
+    await waitFor(() => expect(apiMocks.getCodexAccounts).toHaveBeenCalledTimes(2));
+    await act(async () => { fireEvent.click(within(otherRow).getByRole('button', { name: 'Switch' })); await Promise.resolve(); });
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Cannot switch codex account while a turn is running.'));
+  });
+
+  it('captures and removes only after confirmation', async () => {
+    apiMocks.getCodexAccounts.mockResolvedValue(accountIndex);
+    apiMocks.captureCodexAccount.mockResolvedValue({ ok: true });
+    apiMocks.removeCodexAccount.mockResolvedValue({ ok: true });
+    const dialog = await openCodex();
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Capture current login' })); await Promise.resolve(); });
+    expect(apiMocks.captureCodexAccount).toHaveBeenCalledOnce();
+    const otherRow = within(dialog).getByText('Other account · other@example.test').closest('div.rounded') as HTMLElement;
+    act(() => fireEvent.click(within(otherRow).getByRole('button', { name: 'Remove' })));
+    expect(apiMocks.removeCodexAccount).not.toHaveBeenCalled();
+    await act(async () => { fireEvent.click(within(otherRow).getByRole('button', { name: 'Confirm remove' })); await Promise.resolve(); });
+    expect(apiMocks.removeCodexAccount).toHaveBeenCalledWith('other');
+  });
+
+  it.each([
+    [{ configured: true, source: 'file' }, 'Configured (file)'],
+    [{ configured: true, source: 'env' }, 'Configured (environment)'],
+    [{ configured: false }, 'Not configured'],
+  ])('renders API-key status %#', async (status, label) => {
+    apiMocks.getCodexAccounts.mockResolvedValue({ ...accountIndex, accounts: [] });
+    apiMocks.getCodexApiKey.mockResolvedValue(status);
+    render(<ProviderSetupButton provider={codexReady} api={api} />);
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Setup codex' })));
+    await waitFor(() => expect(screen.getByText(label)).toBeTruthy());
+  });
+
+  it('submits the key, clears it from the DOM, and supports DELETE', async () => {
+    apiMocks.getCodexAccounts.mockResolvedValue({ ...accountIndex, accounts: [] });
+    apiMocks.getCodexApiKey.mockResolvedValue({ configured: true, source: 'file' });
+    apiMocks.setCodexApiKey.mockResolvedValue({ configured: true, source: 'file' });
+    apiMocks.clearCodexApiKey.mockResolvedValue({ configured: false });
+    render(<ProviderSetupButton provider={codexReady} api={api} />);
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Setup codex' })));
+    const input = await screen.findByLabelText('OpenAI API key') as HTMLInputElement;
+    act(() => fireEvent.change(input, { target: { value: 'sk-test-secret' } }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })); await Promise.resolve(); });
+    expect(apiMocks.setCodexApiKey).toHaveBeenCalledWith('sk-test-secret');
+    expect(input.value).toBe('');
+    expect(document.body.textContent).not.toContain('sk-test-secret');
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Clear' })); await Promise.resolve(); });
+    expect(apiMocks.clearCodexApiKey).toHaveBeenCalledOnce();
+  });
+
+  it('renders Claude accounts read-only without account mutation controls', async () => {
+    const claudeReady: ProviderInfo = { id: 'claude', tier: 'rich', ok: true, version: 'claude 1', installable: true, models: ['sonnet'], defaultModel: 'sonnet', signIn: { mode: 'paste-code' } };
+    apiMocks.getClaudeAccounts.mockResolvedValue({ activeAccountId: 'c1', accounts: [{ id: 'c1', email: 'one@example.test', subscriptionType: 'max' }, { id: 'c2', email: 'two@example.test', isDefault: true }] });
+    render(<ProviderSetupButton provider={claudeReady} api={api} />);
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Setup claude' })));
+    await waitFor(() => expect(screen.getByText('one@example.test')).toBeTruthy());
+    expect(screen.getByText(/max/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Switch|Remove|Capture current login/ })).toBeNull();
   });
 });

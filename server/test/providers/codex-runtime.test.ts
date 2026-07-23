@@ -8,6 +8,7 @@ import { spawnCodex } from '../../src/adapters/codex.js';
 import type { ResolvedNodeSpec } from '../../src/adapters/base.js';
 import { CodexConnection } from '../../src/providers/codex/connection.js';
 import { resetCodexSessionRuntimeForTest } from '../../src/providers/codex/runtime.js';
+import { SIGNIN_RUNTIME_BUSY, resetSignInForTests, setSignInRecipeForTests, startSignIn } from '../../src/providers/signin.js';
 
 const fixturePath = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'fake-app-server.mjs');
 const roots: string[] = [];
@@ -54,6 +55,7 @@ function setup(scenario: Record<string, unknown>, opts: { missingBinary?: boolea
 
 afterEach(() => {
   resetCodexSessionRuntimeForTest();
+  resetSignInForTests();
   delete process.env.MAT_CODEX_RUNTIME;
   delete process.env.MAT_CODEX_BIN;
   delete process.env.MAT_FAKE_APPSERVER_SCENARIO;
@@ -93,6 +95,29 @@ describe('Codex session runtime', () => {
     await vi.waitFor(() => expect(records(recordFile).some((entry) => entry.direction === 'out' && entry.message.method === 'turn/started')).toBe(true), { timeout: 5_000, interval: 20 });
     run.kill();
     await expect(run.completion).resolves.toMatchObject({ exitCode: null, signal: 'SIGTERM', sessionRef: 'thread-1' });
+  }, 30_000);
+
+  it('refuses codex sign-in while a turn is running', async () => {
+    const { recordFile } = setup({ responses: {
+      'thread/start': { result: { thread: { id: 'thread-1' } } },
+      'turn/start': { result: { turn: { id: 'turn-1' } } },
+    } });
+    // Hermetic even if the refusal regressed: empty fake home (capture refuses
+    // before writing) and a harmless test recipe instead of the real codex CLI.
+    const originalCodexHome = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = join(dirname(recordFile), 'codex-home');
+    setSignInRecipeForTests('codex', {
+      mode: 'device', command: process.execPath, args: ['-e', 'setTimeout(() => process.exit(0), 3000)'], trustedHosts: ['openai.com'],
+    });
+    try {
+      const run = spawnCodex(spec(), { onEvent: () => undefined, onRaw: () => undefined });
+      await expect(startSignIn('codex')).resolves.toMatchObject({ ok: false, error: SIGNIN_RUNTIME_BUSY });
+      run.kill();
+      await run.completion;
+    } finally {
+      if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = originalCodexHome;
+    }
   }, 30_000);
 
   it('resolves provider failure instead of rejecting', async () => {

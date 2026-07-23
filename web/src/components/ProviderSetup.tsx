@@ -1,6 +1,6 @@
-import type { ProviderInfo } from '@mat/shared';
+import type { ClaudeAccountIndexResponse, CodexAccountIndex, ProviderInfo } from '@mat/shared';
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { apiClient, type ApiClient } from '../api/client.js';
+import { apiClient, type ApiClient, type CodexApiKeyStatus } from '../api/client.js';
 import { matStore, useMatStore } from '../app/store.js';
 import { displayAuthAlertMessage, displayProviderDetail, displaySignInMessage } from '../i18n/displayText.js';
 import { useUiPreferences } from '../i18n/UiPreferences.js';
@@ -35,16 +35,22 @@ export function ProviderSetupButton({ provider, api = apiClient }: { provider: P
   const [copied, setCopied] = useState<'install' | 'sign-in' | 'signin-url'>();
   const [signInProgress, setSignInProgress] = useState<SignInProgress>();
   const [signInCode, setSignInCode] = useState('');
+  const [codexAccounts, setCodexAccounts] = useState<CodexAccountIndex>();
+  const [claudeAccounts, setClaudeAccounts] = useState<ClaudeAccountIndexResponse>();
+  const [apiKeyStatus, setApiKeyStatus] = useState<CodexApiKeyStatus>();
+  const [accountBusy, setAccountBusy] = useState(false);
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string>();
+  const apiKeyRef = useRef<HTMLInputElement>(null);
   const dialogId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const busy = installing || updating;
-  const setupAvailable = provider.id !== 'mock' && (!provider.ok || Boolean(provider.authAlert) || provider.updatable === true);
+  const setupAvailable = provider.id !== 'mock' && (!provider.ok || Boolean(provider.authAlert) || provider.updatable === true || provider.id === 'codex' || provider.id === 'claude');
   const signInAvailable = provider.ok && provider.signIn !== undefined;
 
   useEffect(() => {
     setOpen(false); setInstalling(false); setUpdating(false); setError(undefined); setLogTail(undefined); setNotice(undefined); setRechecking(false); setCopied(undefined);
-    setSignInProgress(undefined); setSignInCode('');
+    setSignInProgress(undefined); setSignInCode(''); setCodexAccounts(undefined); setClaudeAccounts(undefined); setApiKeyStatus(undefined); setConfirmRemoveId(undefined);
   }, [provider.id]);
   useEffect(() => {
     if (setupAvailable || notice) return;
@@ -67,6 +73,21 @@ export function ProviderSetupButton({ provider, api = apiClient }: { provider: P
       hostDialog?.querySelector<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')?.focus();
     };
   }, [open]);
+
+  const refreshAccountData = async () => {
+    if (provider.id === 'codex') {
+      const [accounts, keyStatus] = await Promise.all([api.getCodexAccounts(), api.getCodexApiKey()]);
+      setCodexAccounts(accounts);
+      setApiKeyStatus(keyStatus);
+    } else if (provider.id === 'claude') {
+      setClaudeAccounts(await api.getClaudeAccounts());
+    }
+  };
+  useEffect(() => {
+    if (!open || (provider.id !== 'codex' && provider.id !== 'claude')) return;
+    void refreshAccountData().catch((caught: unknown) => setError(caught instanceof Error ? caught.message : t('provider.setupFailed')));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, provider.id]);
 
   const refreshAfterAction = async (fallback?: ProviderInfo): Promise<ProviderInfo | undefined> => {
     try {
@@ -104,6 +125,7 @@ export function ProviderSetupButton({ provider, api = apiClient }: { provider: P
           setSignInProgress(undefined);
           setNotice({ tone: 'success', text: signInSuccessText(provider.id, status.statusDetail, locale, t) });
           await refreshAfterAction();
+          await refreshAccountData();
         } else {
           setSignInProgress((current) => current?.loginId === signInLoginId ? {
             ...current, phase: 'failed',
@@ -214,6 +236,7 @@ export function ProviderSetupButton({ provider, api = apiClient }: { provider: P
         setSignInCode('');
         setNotice({ tone: 'success', text: signInSuccessText(provider.id, result.statusDetail, locale, t) });
         await refreshAfterAction();
+        await refreshAccountData();
       } else {
         setSignInProgress((current) => current ? {
           ...current, phase: 'failed',
@@ -232,6 +255,38 @@ export function ProviderSetupButton({ provider, api = apiClient }: { provider: P
     if (!loginId) return;
     try { await api.cancelSignIn(provider.id, loginId); }
     catch { /* The server times abandoned sessions out on its own. */ }
+  };
+  const mutateCodexAccount = async (action: () => Promise<{ ok: boolean; error?: string }>) => {
+    setAccountBusy(true); setError(undefined);
+    try {
+      const result = await action();
+      if (!result.ok) setError(result.error ?? t('provider.setupFailed'));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : t('provider.setupFailed'));
+    } finally {
+      try { await refreshAccountData(); } catch { /* Preserve the mutation result. */ }
+      setAccountBusy(false);
+    }
+  };
+  const saveApiKey = async () => {
+    const input = apiKeyRef.current;
+    const key = input?.value ?? '';
+    if (!key) return;
+    setAccountBusy(true); setError(undefined);
+    try {
+      setApiKeyStatus(await api.setCodexApiKey(key));
+      if (input) input.value = '';
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : t('provider.setupFailed'));
+    } finally {
+      setAccountBusy(false);
+    }
+  };
+  const clearApiKey = async () => {
+    setAccountBusy(true); setError(undefined);
+    try { setApiKeyStatus(await api.clearCodexApiKey()); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : t('provider.setupFailed')); }
+    finally { setAccountBusy(false); }
   };
   const copy = async (value: string, kind: 'install' | 'sign-in' | 'signin-url') => {
     try { await navigator.clipboard.writeText(value); setCopied(kind); setError(undefined); }
@@ -255,6 +310,41 @@ export function ProviderSetupButton({ provider, api = apiClient }: { provider: P
       {runtime && <p className="mt-2 text-[10px] text-muted">{t('runtime.summary', { state: t(runtime.state === 'managed' ? 'runtime.state.managed' : runtime.state === 'external' ? 'runtime.state.external' : runtime.state === 'broken' ? 'runtime.state.broken' : 'runtime.state.missing'), version: runtime.managedVersion ?? '—' })}</p>}
       <p className="mt-2 text-xs text-muted">{provider.version ?? (provider.detail ? displayProviderDetail(provider.id, provider.detail, locale) : t('provider.notDetected'))}</p>
       {provider.authAlert && <p className="mt-2 whitespace-pre-line break-words text-xs text-amber-200">{displayAuthAlertMessage(provider.authAlert.message, locale)}</p>}
+      {provider.id === 'codex' && <div className="mt-3 rounded border border-border/80 bg-canvas/50 p-2">
+        <strong className="text-[11px] text-muted">{t('accounts.codexTitle')}</strong>
+        <div className="mt-2 space-y-2">
+          {codexAccounts?.accounts.map((account) => {
+            const active = account.id === codexAccounts.activeAccountId;
+            return <div key={account.id} className="rounded border border-border/60 p-2 text-[11px]">
+              <div className="flex flex-wrap items-center gap-1">
+                <span className="break-all text-ink">{account.label}{account.email && account.email !== account.label ? ` · ${account.email}` : ''}</span>
+                {active && <span className="rounded bg-emerald-900/50 px-1 text-emerald-200">{t('accounts.active')}</span>}
+                {account.needsLogin && <span title={account.lastAuthError} className="rounded bg-amber-900/50 px-1 text-amber-200">{t('accounts.needsLogin')}</span>}
+              </div>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {!active && <button type="button" disabled={accountBusy || account.needsLogin} onClick={() => void mutateCodexAccount(() => api.switchCodexAccount(account.id))} className="rounded border border-border px-1.5 py-0.5 disabled:opacity-50">{t('accounts.switch')}</button>}
+                {confirmRemoveId === account.id
+                  ? <><button type="button" disabled={accountBusy} onClick={() => { setConfirmRemoveId(undefined); void mutateCodexAccount(() => api.removeCodexAccount(account.id)); }} className="rounded border border-red-700 px-1.5 py-0.5 text-red-200">{t('accounts.confirmRemove')}</button><button type="button" onClick={() => setConfirmRemoveId(undefined)} className="px-1.5 py-0.5 text-muted">{t('accounts.cancel')}</button></>
+                  : <button type="button" disabled={accountBusy} onClick={() => setConfirmRemoveId(account.id)} className="rounded border border-border px-1.5 py-0.5">{t('accounts.remove')}</button>}
+              </div>
+            </div>;
+          })}
+        </div>
+        <button type="button" disabled={accountBusy} onClick={() => void mutateCodexAccount(() => api.captureCodexAccount())} className="mt-2 rounded border border-accent px-2 py-1 text-xs text-accentForeground disabled:opacity-50">{t('accounts.capture')}</button>
+        <div className="mt-3 border-t border-border/60 pt-2">
+          <div className="flex items-center justify-between gap-2"><strong className="text-[11px] text-muted">{t('apiKey.title')}</strong><span className="text-[10px] text-muted">{apiKeyStatus?.configured ? t(apiKeyStatus.source === 'env' ? 'apiKey.configuredEnv' : 'apiKey.configuredFile') : t('apiKey.notConfigured')}</span></div>
+          <div className="mt-1 flex gap-1">
+            <input ref={apiKeyRef} type="password" aria-label={t('apiKey.input')} autoComplete="off" spellCheck={false} className="min-w-0 flex-1 rounded border border-border bg-canvas px-2 py-1 text-xs text-ink" />
+            <button type="button" disabled={accountBusy} onClick={() => void saveApiKey()} className="rounded border border-accent px-2 py-1 text-xs">{t('apiKey.save')}</button>
+            <button type="button" disabled={accountBusy || !apiKeyStatus?.configured} onClick={() => void clearApiKey()} className="rounded border border-border px-2 py-1 text-xs disabled:opacity-50">{t('apiKey.clear')}</button>
+          </div>
+          {apiKeyStatus?.source === 'env' && <p className="mt-1 text-[10px] text-muted">{t('apiKey.envNote')}</p>}
+        </div>
+      </div>}
+      {provider.id === 'claude' && claudeAccounts && claudeAccounts.accounts.length > 0 && <div className="mt-3 rounded border border-border/80 bg-canvas/50 p-2">
+        <strong className="text-[11px] text-muted">{t('accounts.claudeTitle')}</strong>
+        <div className="mt-1 space-y-1">{claudeAccounts.accounts.map((account) => <div key={account.id} className="flex flex-wrap items-center gap-1 text-[11px]"><span className="break-all text-ink">{account.email}</span>{account.subscriptionType && <span className="text-muted">· {account.subscriptionType}</span>}{(account.id === claudeAccounts.activeAccountId || account.isDefault) && <span className="rounded bg-emerald-900/50 px-1 text-emerald-200">{account.id === claudeAccounts.activeAccountId ? t('accounts.active') : t('accounts.default')}</span>}</div>)}</div>
+      </div>}
       {signInAvailable && <div className="mt-3 rounded border border-border/80 bg-canvas/50 p-2">
         <strong className="text-[11px] text-muted">{t('signin.title')}</strong>
         {!signInProgress && <>
