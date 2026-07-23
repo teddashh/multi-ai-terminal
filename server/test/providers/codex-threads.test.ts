@@ -287,7 +287,12 @@ describe('CodexThreadManager', () => {
     await waitForRecord(recordFile, (entry) => entry.direction === 'in' && entry.message.method === 'turn/start' && entry.message.params.threadId === 'thread-1');
     const b = manager.startTurn('B', { ...turnOptions, prompt: 'B' });
     await expect(Promise.all([a, b])).resolves.toMatchObject([{ status: 'completed' }, { status: 'completed' }]);
-    expect(seen.A.join('')).toBe('A-crossA-own');
+    // A-own and A-cross ride two independent real-time timelines (A's and B's
+    // notification scripts), so their relative order is scheduler-dependent.
+    const joinedA = seen.A.join('');
+    expect(joinedA).toContain('A-own');
+    expect(joinedA).toContain('A-cross');
+    expect(joinedA).toHaveLength('A-ownA-cross'.length);
     expect(seen.B.join('')).toBe('B-own');
     expect(`${seen.A.join('')}${seen.B.join('')}`).not.toContain('UNKNOWN');
   }, 30_000);
