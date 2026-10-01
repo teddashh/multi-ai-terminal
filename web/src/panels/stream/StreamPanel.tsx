@@ -17,7 +17,7 @@ const ROLE_STYLE: Record<EventRole, string> = {
   thinking: 'border-accentBorder text-accentForeground', system: 'border-border text-muted', decision: 'border-emerald-700 text-emerald-200',
 };
 
-// Referentially stable fallback — a fresh `[]` per selector call re-renders forever (React #185).
+// Referentially stable fallback: a fresh `[]` per selector call re-renders forever (React #185).
 const EMPTY_EVENTS: readonly AgentEvent[] = [];
 
 export interface StreamPanelProps {
@@ -293,7 +293,7 @@ export function StreamPanel({ embedded = false, hydrating = false, visible = tru
       </div>
       {focusedNodeRunId && <div className="mt-2 flex items-center gap-2 rounded bg-sky-950/30 px-2 py-1 text-[11px] text-sky-200"><span className="truncate">{t('stream.focused', { node: focusedNodeLabel(selectedRun, focusedNodeRunId, locale) })}</span><button type="button" onClick={() => focusNode(undefined)} className="ml-auto rounded px-1.5 py-0.5 hover:bg-sky-900">{t('stream.clear')}</button></div>}
       {hydrating && <p role="status" className="mt-2 text-xs text-sky-300">{t('stream.loadingEvidence')}</p>}
-      {evidenceGaps.length > 0 && <div role="alert" className="mt-2 rounded border border-red-900 bg-red-950/30 px-2 py-1.5 text-xs text-red-200">{t('stream.evidenceGap', { unit: t(evidenceGaps.length === 1 ? 'stream.gap' : 'stream.gaps'), ranges: evidenceGaps.slice(0, 3).map((gap) => `#${gap.fromSeq}–${gap.toSeq}`).join(', '), more: evidenceGaps.length > 3 ? t('stream.moreGap', { count: evidenceGaps.length - 3 }) : '' })}</div>}
+      {evidenceGaps.length > 0 && <div role="alert" className="mt-2 rounded border border-red-900 bg-red-950/30 px-2 py-1.5 text-xs text-red-200">{t('stream.evidenceGap', { unit: t(evidenceGaps.length === 1 ? 'stream.gap' : 'stream.gaps'), ranges: evidenceGaps.slice(0, 3).map((gap) => `#${gap.fromSeq}-${gap.toSeq}`).join(', '), more: evidenceGaps.length > 3 ? t('stream.moreGap', { count: evidenceGaps.length - 3 }) : '' })}</div>}
       {error && <p role="alert" className="mt-2 text-xs text-red-300">{error}</p>}
     </header>
     {!effectiveRunId ? <div className="p-4 text-xs text-muted">{t('stream.noRun')}</div>

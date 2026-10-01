@@ -36,7 +36,7 @@ function renderPanel(element: ReactElement): void {
 
 const workspaces: Workspace[] = [
   {
-    id: 'w1', name: 'Castle', path: '/home/ted/projects/castle', isGit: true, verifyCommand: 'npm test', verifyTimeoutSec: 90,
+    id: 'w1', name: 'Demo', path: '/home/dev/projects/demo', isGit: true, verifyCommand: 'npm test', verifyTimeoutSec: 90,
     lastRun: { runId: 'r1', workflowName: 'Planning', status: 'done', at: Date.now() - 2 * 60 * 60_000 },
   },
   { id: 'w2', name: 'Notes', path: '/srv/notes', isGit: false },
@@ -64,12 +64,12 @@ describe('WorkspacePanel', () => {
 
   it('fills the path from the Tauri folder picker', async () => {
     (window as Window & { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__ = {};
-    dialogMocks.open.mockResolvedValueOnce(String.raw`C:\projects\castle`);
+    dialogMocks.open.mockResolvedValueOnce(String.raw`C:\projects\demo`);
     renderPanel(<WorkspacePanel />);
     act(() => fireEvent.click(screen.getByRole('button', { name: 'Add workspace' })));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Browse…' })); });
     expect(dialogMocks.open).toHaveBeenCalledWith({ directory: true, multiple: false });
-    expect((screen.getByLabelText('Absolute path') as HTMLInputElement).value).toBe(String.raw`C:\projects\castle`);
+    expect((screen.getByLabelText('Absolute path') as HTMLInputElement).value).toBe(String.raw`C:\projects\demo`);
   });
 
   it('keeps a string rejection from Tauri visible for troubleshooting', async () => {
@@ -87,8 +87,8 @@ describe('WorkspacePanel', () => {
     renderPanel(<WorkspacePanel />);
 
     expect(screen.getByRole('heading', { name: 'Workspaces' })).toBeTruthy();
-    expect(screen.getByText('Castle')).toBeTruthy();
-    expect(screen.getByText('…/projects/castle')).toBeTruthy();
+    expect(screen.getByText('Demo')).toBeTruthy();
+    expect(screen.getByText('…/projects/demo')).toBeTruthy();
     expect(screen.getByText(/Planning · done · 2h ago/)).toBeTruthy();
     expect(screen.getByText('git')).toBeTruthy();
     expect(screen.getByLabelText('Run in progress')).toBeTruthy();
@@ -110,14 +110,14 @@ describe('WorkspacePanel', () => {
   });
 
   it('edits and clears verification settings with null', async () => {
-    apiMocks.updateWorkspace.mockResolvedValueOnce({ ...workspaces[0], name: 'Castle Updated', verifyCommand: undefined, verifyTimeoutSec: undefined });
+    apiMocks.updateWorkspace.mockResolvedValueOnce({ ...workspaces[0], name: 'Demo Updated', verifyCommand: undefined, verifyTimeoutSec: undefined });
     renderPanel(<WorkspacePanel />);
     act(() => fireEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0]!));
     expect((screen.getByLabelText('Verify command') as HTMLInputElement).value).toBe('npm test');
-    act(() => fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Castle Updated' } }));
+    act(() => fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Demo Updated' } }));
     act(() => fireEvent.change(screen.getByLabelText('Verify command'), { target: { value: '' } }));
     act(() => fireEvent.change(screen.getByLabelText('Verify timeout (seconds)'), { target: { value: '' } }));
     await act(async () => { fireEvent.submit(screen.getByRole('form', { name: 'Edit workspace' })); });
-    expect(apiMocks.updateWorkspace).toHaveBeenCalledWith('w1', { name: 'Castle Updated', verifyCommand: null, verifyTimeoutSec: null });
+    expect(apiMocks.updateWorkspace).toHaveBeenCalledWith('w1', { name: 'Demo Updated', verifyCommand: null, verifyTimeoutSec: null });
   });
 });

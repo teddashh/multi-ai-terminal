@@ -102,7 +102,7 @@ describe('StreamPanel smoke', () => {
   it('shows an explicit in-feed notice when the memory ring starts after seq 1', async () => {
     matStore.setState({ events: { r1: events.map((event) => ({ ...event, seq: event.seq + 20 })) } });
     renderWithWorkspaceReact(<StreamPanel />);
-    await waitFor(() => expect(screen.getByText('Older events trimmed from memory — showing from seq 21')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Older events trimmed from memory, showing from seq 21')).toBeTruthy());
   });
 
   it('leaves run history and replay hydration to its parent when embedded', async () => {

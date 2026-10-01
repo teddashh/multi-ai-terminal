@@ -77,7 +77,7 @@ describe('humanizeError', () => {
 
   it('unwraps double-encoded Codex API failures', () => {
     const nested = JSON.stringify({ message: JSON.stringify({ type: 'error', status: 400, error: { type: 'invalid_request_error', message: 'Unsupported input.' } }) });
-    expect(humanizeError(nested, 'codex')).toBe('codex: 400 invalid_request_error — Unsupported input.');
+    expect(humanizeError(nested, 'codex')).toBe('codex: 400 invalid_request_error: Unsupported input.');
   });
 
   it('passes plain text through unchanged', () => {

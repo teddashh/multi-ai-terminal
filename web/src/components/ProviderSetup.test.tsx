@@ -94,7 +94,7 @@ describe('ProviderSetupButton', () => {
 
     act(() => fireEvent.click(screen.getByRole('button', { name: 'Setup openrouter' })));
     const dialog = screen.getByRole('dialog', { name: 'Setup openrouter' });
-    expect(within(dialog).getByText('Runtime: codex · — · missing')).toBeTruthy();
+    expect(within(dialog).getByText('Runtime: codex · - · missing')).toBeTruthy();
     expect(within(dialog).getByText('OPENROUTER_API_KEY', { selector: 'code' })).toBeTruthy();
     expect(within(dialog).getByText('No').getAttribute('data-configured')).toBe('false');
     expect(within(dialog).queryByText(/openrouter CLI/i)).toBeNull();

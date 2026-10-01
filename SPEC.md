@@ -1,6 +1,6 @@
-# Multi-AI Terminal — Product & Engineering Spec (v1.5)
+# Multi-AI Terminal: Product & Engineering Spec (v1.5)
 
-> v1.1 incorporates the 4-model panel review (codex gpt-5.6-sol, agy Gemini 3.1 Pro, grok 4.5, Claude Fable 5 — all verdicts: revise; findings merged, see docs/spec-review-panel.md). The normative v1.2 evidence-plane, v1.3 steering/debug-plane, v1.4 evidence-workbench UX, and v1.5 provider-recovery/localized-UI amendments are integrated below and summarized at the end. The BAT-runtime alignment is integrated through product v0.2.10.
+> v1.1 incorporates the 4-model panel review (codex gpt-5.6-sol, agy Gemini 3.1 Pro, grok 4.5, Claude Fable 5; all verdicts: revise; findings merged, see docs/spec-review-panel.md). The normative v1.2 evidence-plane, v1.3 steering/debug-plane, v1.4 evidence-workbench UX, and v1.5 provider-recovery/localized-UI amendments are integrated below and summarized at the end. The BAT-runtime alignment is integrated through product v0.2.10.
 > Base date: 2026-07-18. Amended through 2026-07-23.
 
 ## 0. What this is
@@ -12,7 +12,7 @@ Successor concept to `multi-ai-chat-desktop` (webchat orchestration), rebuilt on
 ### Decisions locked by the 12-round design debate (do not relitigate)
 
 1. **Do not reuse multi-ai-chat-desktop's runtime** (webview automation). Borrow only UI mental model + design tokens.
-2. **Single primary data stream = a headless machine interface.** Workflow nodes use JSONL CLI output, Codex app-server JSON-RPC/JSONL, or the Claude Agent SDK; none uses an interactive PTY, ANSI terminal parsing, or xterm.js. *(The debated "read-only raw-PTY pane" fallback for non-JSONL CLIs is superseded by the `plain` tier in §4.4 — same observability, less machinery.)*
+2. **Single primary data stream = a headless machine interface.** Workflow nodes use JSONL CLI output, Codex app-server JSON-RPC/JSONL, or the Claude Agent SDK; none uses an interactive PTY, ANSI terminal parsing, or xterm.js. *(The debated "read-only raw-PTY pane" fallback for non-JSONL CLIs is superseded by the `plain` tier in §4.4: same observability, less machinery.)*
 3. **Per-provider runtimes normalize output to one evidence schema.** Native translators plus the single manager bridge own hard-coded mappings. Providers without structured output (agy) remain `plain` tier: stdout streams in as chunked agent text.
 4. **Presentation layer is a styled message panel** (React list, four categories + status). This is the product's differentiation, written from scratch.
 5. **Orchestrator = a real LLM agent, minimum-branch.** Deterministic trunk (fan-out stage → join → gate → next stage); the LLM decides only at gates: advance / retry(nodes, addendum) / abort, emitting a machine-parseable decision + rationale (decision log is first-class UI data).
@@ -79,7 +79,7 @@ multi-ai-terminal/
         └── panels/stream/      # aggregated feed, filters, replay
 ```
 
-## 3. Shared contracts (normative — wave-0 implements these EXACTLY; wave-1 may not edit)
+## 3. Shared contracts (normative: wave-0 implements these EXACTLY; wave-1 may not edit)
 
 ### 3.1 Normalized event schema
 
@@ -96,8 +96,8 @@ export type EventKind =
 export interface Usage { inputTokens?: number; outputTokens?: number; costUsd?: number }
 
 export interface AgentEvent {
-  id: string;                // nanoid — assigned by eventLog.append
-  seq: number;               // monotonic per run — assigned by eventLog.append
+  id: string;                // nanoid, assigned by eventLog.append
+  seq: number;               // monotonic per run, assigned by eventLog.append
   runId: string;
   stageId: string | null;    // null: run-level events and the orchestrator node
   nodeRunId: string | null;  // null: run-level system events
@@ -107,16 +107,16 @@ export interface AgentEvent {
   text: string;
   tool?: { toolCallId?: string; name: string; input?: string; output?: string; isError?: boolean };
   data?: Record<string, unknown>;
-  ts: number;                // epoch ms — assigned by eventLog.append
+  ts: number;                // epoch ms, assigned by eventLog.append
 }
 ```
 
 **Pipeline ownership rules (normative):**
 1. **Adapters emit CONTENT events only** (`message`, `thinking`, `tool_use`, `tool_result`) via `onEvent` with fields `{role, kind, text, tool?, data?}`. They never emit lifecycle events and never touch identity fields.
-2. **nodeRunner (engine) emits ALL lifecycle events**: the synthesized `role:'user', kind:'message'` prompt event (see rule 3), `status` (`spawned`/`running`/`stalled`/`retry`/`killed`), `result`, `error` — all with `role:'system'` except the user prompt event. It stamps `runId/stageId/nodeRunId/attempt` on every event (adapter or lifecycle) before append.
+2. **nodeRunner (engine) emits ALL lifecycle events**: the synthesized `role:'user', kind:'message'` prompt event (see rule 3), `status` (`spawned`/`running`/`stalled`/`retry`/`killed`), `result`, `error`, all with `role:'system'` except the user prompt event. It stamps `runId/stageId/nodeRunId/attempt` on every event (adapter or lifecycle) before append.
 3. **The engine synthesizes the 'your' category**: at every attempt start (initial + each retry), BEFORE `status:spawned`, it appends a `role:'user', kind:'message'` event whose text is the final rendered prompt (with retry addendum when applicable). No CLI echoes prompts; without this rule the headline "your" category would be empty.
 4. **eventLog.append is the single writer** (§7): per-run FIFO queue; assigns `id/seq/ts`; appends durably to `events.jsonl`; ONLY THEN `wsHub.broadcast(event)`. Synchronous interface: `appendEvent(runId, partial): AgentEvent`.
-5. **Events are immutable.** Streaming deltas (grok tokens, agy stdout) are coalesced per (nodeRunId, kind) and flushed on kind-change, ≥1500 ms, or ≥2 KB buffer — each flush appends a NEW event with `data:{continued:true}` after the first. The Narrative projection and digest builder may merge only adjacent, identity-compatible continuation events into one readable/logical block. Timeline retains every source event with its original `id` and `seq`; tool halves and duplicate prompts may receive adjacent-only visual grouping, but the representation must expand back into monotonically increasing source sequence order.
+5. **Events are immutable.** Streaming deltas (grok tokens, agy stdout) are coalesced per (nodeRunId, kind) and flushed on kind-change, ≥1500 ms, or ≥2 KB buffer; each flush appends a NEW event with `data:{continued:true}` after the first. The Narrative projection and digest builder may merge only adjacent, identity-compatible continuation events into one readable/logical block. Timeline retains every source event with its original `id` and `seq`; tool halves and duplicate prompts may receive adjacent-only visual grouping, but the representation must expand back into monotonically increasing source sequence order.
 6. Non-JSON stdout lines from `rich`-tier CLIs are silently skipped for normalization but always land in the raw log.
 7. Every raw stdout/stderr line is appended to `raw/<nodeRunId>.a<attempt>.jsonl` as `{s:'out'|'err', l:string, ts:number}` after source-aware environment-value redaction. Ordering and stream identity are preserved; secrets are not.
 
@@ -160,8 +160,8 @@ export interface Stage {
   slots: Slot[];                        // Σ slot.count ≤ 12 per stage (zod-enforced)
   isolation: 'none' | 'worktree';
   join: 'all';
-  timeoutSec: number;                   // default 1800 — per-attempt hard kill
-  stallSec: number;                     // default 240 — see §5 stall
+  timeoutSec: number;                   // default 1800; per-attempt hard kill
+  stallSec: number;                     // default 240; see §5 stall
   gate: boolean;                        // default true
 }
 export interface OrchestratorConfig {
@@ -189,7 +189,7 @@ export type NodeRunStatus = 'queued'|'running'|'stalled'|'done'|'failed'|'killed
 export type RunStatus = 'created'|'running'|'gating'|'done'|'failed'|'aborted';
 
 export interface NodeRun {
-  nodeRunId: string;         // `${stageId}.${slotId}.${instanceIndex}` — 0-based, IMMUTABLE across retries.
+  nodeRunId: string;         // `${stageId}.${slotId}.${instanceIndex}`, 0-based, IMMUTABLE across retries.
                              // Reserved: 'orchestrator'. No provider names in ids.
   stageId: string | null;    // null only for the orchestrator node
   slotId: string; instanceIndex: number;
@@ -226,7 +226,7 @@ export interface RunSnapshot {
     name: string; path: string; isGit: boolean;
     verifyCommand?: string; verifyTimeoutSec?: number;
   };
-  workflow: WorkflowDef;                     // immutable resolved copy — the only workflow source at runtime
+  workflow: WorkflowDef;                     // immutable resolved copy: the only workflow source at runtime
   task: string; status: RunStatus;
   currentStageId?: string;
   nodes: NodeRun[];                          // includes the reserved orchestrator NodeRun when enabled
@@ -299,7 +299,7 @@ export interface Adapter {
 - Prompt delivery (ARG_MAX safety): Claude Agent SDK and Codex app-server use their machine protocols; legacy claude/codex transports use stdin; grok uses `--prompt-file`; agy uses argv (cap 200 KB, else a failed outcome).
 - Binary resolution: `MAT_<FAMILY>_BIN` absolute override → catalog-pinned managed path → PATH-discovered runtime. On desktop startup, missing supported managed artifacts may be bootstrapped automatically; every artifact is verified before publication and stored below `<dataDir>/runtimes/`.
 
-### 4.1 claude (rich) — Agent SDK session runtime; legacy CLI fixture path
+### 4.1 claude (rich): Agent SDK session runtime; legacy CLI fixture path
 
 The production path uses `@anthropic-ai/claude-agent-sdk` with a per-session streaming `LiveQuery`, resume/rebuild semantics, interrupt support, and the resolved catalog-pinned `claude` executable. `MAT_CLAUDE_RUNTIME=cli` is an explicit legacy mode, not an automatic failover. Its verified one-shot invocation remains:
 
@@ -311,7 +311,7 @@ The production path uses `@anthropic-ai/claude-agent-sdk` with a per-session str
 - Legacy mapping: `system/init` → capture sessionRef; `assistant.message.content[]`: `text`→agent/message, `thinking`→thinking/thinking, `tool_use`→tool/tool_use (toolCallId=id, input JSON-stringified, 4 KB truncate); `user.message.content[].tool_result`→tool/tool_result (toolCallId=tool_use_id, 4 KB truncate); `result`→outcome {exitCode 0, usage {inputTokens:usage.input_tokens, outputTokens:usage.output_tokens, costUsd:total_cost_usd}, resultText: result ?? accumulated}. Skip `rate_limit_event`, `system/*` others (raw log only).
 - Legacy effort is not mapped. Legacy resume uses `--resume <sessionRef>` + a new prompt on stdin; the Agent SDK runtime owns production session continuity.
 
-### 4.2 codex (rich) — persistent app-server runtime; legacy CLI fixture path
+### 4.2 codex (rich): persistent app-server runtime; legacy CLI fixture path
 
 The production path is one lazy shared `codex app-server` JSON-RPC/JSONL controller with per-session serialization, thread ownership/resume, turn interrupt, stale-event filtering, approval handling, and idle recycle. `MAT_CODEX_RUNTIME=exec` is the explicit one-shot legacy mode. Its verified invocation remains:
 
@@ -322,9 +322,9 @@ codex exec --json -m gpt-5.6-sol [-c model_reasoning_effort=E] --cd <CWD> \
 - Legacy mapping: `thread.started`→sessionRef=thread_id; `item.started {item.type:'command_execution'}`→tool/tool_use (toolCallId=item.id, name 'shell', input=command); `item.completed {command_execution}`→tool/tool_result (output=aggregated_output, isError=exit_code≠0); `item.completed {agent_message}`→agent/message (resultText=last); `item.*` reasoning→thinking; unknown item types→tool rows named by item.type; `turn.completed`→usage {inputTokens, outputTokens}; `turn.failed`/`error`→error.
 - `--skip-git-repo-check` always (non-git workspaces are supported).
 - effort map low|medium|high|xhigh → `-c model_reasoning_effort=<v>`.
-- Resume (orchestrator only): `codex exec resume <thread_id> --json -m <same> -c model_reasoning_effort=<same> --cd <same> --sandbox <same> --skip-git-repo-check -` — ALL flags re-passed explicitly.
+- Resume (orchestrator only): `codex exec resume <thread_id> --json -m <same> -c model_reasoning_effort=<same> --cd <same> --sandbox <same> --skip-git-repo-check -` (ALL flags re-passed explicitly).
 
-### 4.3 grok (rich) — verified, Grok Build TUI headless (fixtures: grok.jsonl, grok-tool.jsonl)
+### 4.3 grok (rich): verified, Grok Build TUI headless (fixtures: grok.jsonl, grok-tool.jsonl)
 
 The streaming-JSON transport is wrapped by the common FIFO `CliSessionManager`; the manager preserves resumable-session serialization and normalizes killed/error outcomes without changing the transport's observable event tier.
 
@@ -333,12 +333,12 @@ grok --prompt-file <FILE> --output-format streaming-json [-m grok-4.5] \
   [--reasoning-effort E] --cwd <CWD> [--permission-mode PM] [--max-turns N]
 ```
 - grok ≥ 0.2.93: `-p/--single` takes an inline prompt VALUE; do not combine it with `--prompt-file` (live-smoke verified 2026-07-18: `--prompt-file` alone selects headless mode).
-- **Probe-confirmed reality: streaming-json emits ONLY `thought`/`text`/`end` events.** Tool calls execute silently between thought tokens — there are NO tool events in v1; grok nodes show no tool rows and the digest reports tool-count "n/a" for grok. Unknown event types, if they ever appear, → tool rows named by type (forward-compat).
-- `thought` deltas → coalesce → thinking; `text` deltas → coalesce → agent/message (resultText = full text); `end` → outcome {exitCode 0, sessionRef=sessionId}. Silent gaps during tools are expected — see §5 stall.
+- **Probe-confirmed reality: streaming-json emits ONLY `thought`/`text`/`end` events.** Tool calls execute silently between thought tokens: there are NO tool events in v1; grok nodes show no tool rows and the digest reports tool-count "n/a" for grok. Unknown event types, if they ever appear, → tool rows named by type (forward-compat).
+- `thought` deltas → coalesce → thinking; `text` deltas → coalesce → agent/message (resultText = full text); `end` → outcome {exitCode 0, sessionRef=sessionId}. Silent gaps during tools are expected (see §5 stall).
 - Resume (orchestrator only): `grok -r <sessionRef> --prompt-file <FILE> --output-format streaming-json` + same flags.
 - Orchestrator-as-grok bonus: pass `--json-schema` for hard decision enforcement.
 
-### 4.4 agy (plain) — verified; Antigravity CLI, no JSON mode (fixture: agy.log)
+### 4.4 agy (plain): verified; Antigravity CLI, no JSON mode (fixture: agy.log)
 
 The plain-text transport is wrapped by the same FIFO `CliSessionManager` but remains non-resumable. The manager does not invent tool evidence or a richer native protocol.
 
@@ -349,21 +349,21 @@ agy -p "<PROMPT>" --model "Gemini 3.1 Pro (High)" [--print-timeout 45m] [--dange
 - Model catalog (from CLI): `Gemini 3.5 Flash (Medium|High|Low)`, `Gemini 3.1 Pro (Low|High)`, `Claude Sonnet 4.6 (Thinking)`, `Claude Opus 4.6 (Thinking)`, `GPT-OSS 120B (Medium)`. effort picks the matching (High|Low) display-name variant when the base model matches; else ignored.
 - No resume v1. Default stall floor 600 s (§5).
 
-### 4.5 openrouter (rich) — Codex-as-runtime
+### 4.5 openrouter (rich): Codex-as-runtime
 
 OpenRouter has no CLI or agent runtime of its own. MAT drives it through the same persistent Codex app-server with `modelProvider:'openrouter'`, a fixed OpenAI-compatible provider config under an isolated `<dataDir>/openrouter-codex-home`, and `OPENROUTER_API_KEY` passed only to the child environment. No OpenAI/Codex OAuth credential is copied into that home, and MAT never persists or exposes the OpenRouter key value.
 
-`GET /api/providers/openrouter/models` loads the bounded public catalog with live/stale/fallback provenance. The UI first selects a model group and then a version. The selected version id — including a `~vendor/model-latest` alias or a pinned vendor slug — is the exact request slug persisted in `AgentBinding.model` and sent to `thread/start`/`turn/start`; MAT must not reconstruct it from a display label. Custom exact slugs remain available. Tool quality and supported features vary by the selected upstream model and are surfaced honestly.
+`GET /api/providers/openrouter/models` loads the bounded public catalog with live/stale/fallback provenance. The UI first selects a model group and then a version. The selected version id (including a `~vendor/model-latest` alias or a pinned vendor slug) is the exact request slug persisted in `AgentBinding.model` and sent to `thread/start`/`turn/start`; MAT must not reconstruct it from a display label. Custom exact slugs remain available. Tool quality and supported features vary by the selected upstream model and are surfaced honestly.
 
 ### 4.6 Permission tier mapping (implementer: verify each flag against `--help`; nearest safe equivalent + comment if absent)
 
 | tier | claude | codex | grok | agy | openrouter |
 |------|--------|-------|------|-----|------------|
 | safe | `--permission-mode plan` | `--sandbox read-only` | `--permission-mode plan` | prompt-level read-only instruction | Codex `read-only` sandbox |
-| auto (default) | `--permission-mode acceptEdits` | `--sandbox workspace-write` | `--permission-mode acceptEdits` | — | Codex `workspace-write` sandbox |
+| auto (default) | `--permission-mode acceptEdits` | `--sandbox workspace-write` | `--permission-mode acceptEdits` | n/a | Codex `workspace-write` sandbox |
 | full | `--dangerously-skip-permissions` | `--sandbox danger-full-access` | `--permission-mode bypassPermissions` | `--dangerously-skip-permissions` | Codex `danger-full-access` sandbox |
 
-### 4.7 spawn.ts — process hygiene
+### 4.7 spawn.ts: process hygiene
 
 - env: inherit minus `LD_LIBRARY_PATH` (BAT AppImage breaks child TLS); ensure PATH includes `~/.local/bin`, `/usr/local/bin`.
 - `stdio: ['pipe'|'ignore','pipe','pipe']` per adapter (stdin pipe only to write the prompt, then end()).
@@ -374,7 +374,7 @@ OpenRouter has no CLI or agent runtime of its own. MAT drives it through the sam
 
 ### 4.8 mock (rich)
 
-Deterministic scripted adapter for tests/demo. Model string programs it: `ok` (thinking→tool_use→tool_result→message→result), `fail` (error + exit 1), `slow:<ms>` (delays between events), `noisy` (many coalescable chunks). **Echo mode (all models)**: if `promptText` contains the marker `MOCK_REPLY:`, the final agent message text is everything after the marker — this lets engine tests script orchestrator decisions through prompt templates. Used by engine/API tests and `--demo`.
+Deterministic scripted adapter for tests/demo. Model string programs it: `ok` (thinking→tool_use→tool_result→message→result), `fail` (error + exit 1), `slow:<ms>` (delays between events), `noisy` (many coalescable chunks). **Echo mode (all models)**: if `promptText` contains the marker `MOCK_REPLY:`, the final agent message text is everything after the marker; this lets engine tests script orchestrator decisions through prompt templates. Used by engine/API tests and `--demo`.
 
 ## 5. Workflow engine (server/src/engine)
 
@@ -388,12 +388,12 @@ Node failure ≠ run failure (gate decides). All nodes of a stage failed AND orc
 ```
 
 - Concurrency: ≤ `workflow.maxParallel` node processes per run; FIFO queue.
-- **Stall**: timer driven by RAW activity (`onRaw` lines OR content events — whichever last). No activity for `effectiveStallSec` → one-shot `status:stalled` event + badge; any subsequent activity → `status:running` (detail 'recovered') and the timer re-arms. `effectiveStallSec = max(stage.stallSec, adapter floor)` — floors: agy 600 s, others stage value. Stalled is non-terminal and never blocks joins.
-- **Retry semantics (normative)**: candidates NEVER resume sessions — each retry = fresh spawn, full template re-render with `{{retry_addendum}}`; same NodeRun mutated (attempt+1, status queued, timers reset); engine emits `status:retry {attempt}` boundary event; per-attempt raw logs/patches/worktrees (keys include `.a<attempt>`).
+- **Stall**: timer driven by RAW activity (`onRaw` lines OR content events, whichever last). No activity for `effectiveStallSec` → one-shot `status:stalled` event + badge; any subsequent activity → `status:running` (detail 'recovered') and the timer re-arms. `effectiveStallSec = max(stage.stallSec, adapter floor)`; floors: agy 600 s, others stage value. Stalled is non-terminal and never blocks joins.
+- **Retry semantics (normative)**: candidates NEVER resume sessions: each retry = fresh spawn, full template re-render with `{{retry_addendum}}`; same NodeRun mutated (attempt+1, status queued, timers reset); engine emits `status:retry {attempt}` boundary event; per-attempt raw logs/patches/worktrees (keys include `.a<attempt>`).
 - **Worktrees** (`stage.isolation==='worktree'`): requires `workspace.isGit` (else warning event + fallback none). If the workspace repo is dirty → warning event (agents branch from HEAD; user WIP is invisible to them) but proceed. Per attempt:
-  1. Remove leftovers: `git worktree remove --force <dir>` + `git branch -D <branch>` if they exist (retry safety — worktree add crashes otherwise).
+  1. Remove leftovers: `git worktree remove --force <dir>` + `git branch -D <branch>` if they exist (retry safety: worktree add crashes otherwise).
   2. `git worktree add <dataDir>/runs/<runId>/wt/<nodeRunId>.a<attempt> -b mat/<runId>/<nodeRunId>-a<attempt> HEAD`; record `baseCommit = rev-parse HEAD`.
-  3. On node end: `git -C <wt> add -A && git -C <wt> diff --cached --binary <baseCommit>` → `artifacts/<nodeRunId>.a<attempt>.patch` (+ diffstat into NodeRun). `add -A` is mandatory — plain diff misses untracked files.
+  3. On node end: `git -C <wt> add -A && git -C <wt> diff --cached --binary <baseCommit>` → `artifacts/<nodeRunId>.a<attempt>.patch` (+ diffstat into NodeRun). `add -A` is mandatory: plain diff misses untracked files.
   4. Prune all run worktrees+branches on run delete and via "Clean worktrees".
 - **Artifact handoff**: next-stage templates receive `{{patches}}` (concatenated patch text, per-patch header `--- patch <nodeRunId> (<label>) ---`, total cap 30 000 chars with truncation markers) and `{{artifact_paths}}` (absolute paths, one per line). Presets use them (§10).
 
@@ -409,7 +409,7 @@ Per candidate: label, provider/model, status, attempt, duration, usage, tool-cal
 
 ## 6. Orchestrator (server/src/orchestrator)
 
-- Represented as a reserved NodeRun `{nodeRunId:'orchestrator', stageId:null, slotId:'orchestrator', instanceIndex:0}` present in `RunSnapshot.nodes` whenever enabled — it gets a normal node card, stream, status, accumulated usage. Its events carry `stageId:null`, current `attempt` = gate evaluation count.
+- Represented as a reserved NodeRun `{nodeRunId:'orchestrator', stageId:null, slotId:'orchestrator', instanceIndex:0}` present in `RunSnapshot.nodes` whenever enabled; it gets a normal node card, stream, status, accumulated usage. Its events carry `stageId:null`, current `attempt` = gate evaluation count.
 - Spawned headless **per gate**; claude/codex/grok orchestrators resume their session across gates (full flag re-pass, §4); agy or resume-failure → fresh spawn with full brief re-injection.
 - Gate flow: engine builds digest (§5.1) → orchestrator prompt (prompts.ts): role brief, goal, stage results, THEN "reply with reasoning, then a fenced ```json block matching:"
 
@@ -425,7 +425,7 @@ Per candidate: label, provider/model, status, attempt, duration, usage, tool-cal
 
 Mustache-lite `{{var}}` (engine-implemented, no dep; unknown vars → empty): `{{task}} {{workspace_name}} {{workspace_path}} {{stage_name}} {{slot_label}} {{instance_index}} {{prior_stage_digest}} {{orchestrator_context}} {{retry_addendum}} {{patches}} {{artifact_paths}}`.
 
-## 7. Persistence — `<dataDir>` default `~/.multi-ai-terminal` (override `--data-dir` / `MAT_DATA_DIR`)
+## 7. Persistence: `<dataDir>` default `~/.multi-ai-terminal` (override `--data-dir` / `MAT_DATA_DIR`)
 
 ```
 workspaces.json                          workflows/<id>.json (custom only)
@@ -461,8 +461,8 @@ GET  /api/runs/:id/debug-bundle               → application/zip debug bundle v
 GET  /api/runs/:id/patches/:nodeRunId         → text/plain latest-attempt patch content
 POST /api/runs/:id/abort
 POST /api/runs/:id/nodes/:nodeRunId/kill
-POST /api/runs/:id/steer                      SteerRequest — FIFO interrupt (default) or queue
-POST /api/runs/:id/stages/:stageId/retry      RetryStageRequest — valid while gating at that stage, or when the
+POST /api/runs/:id/steer                      SteerRequest: FIFO interrupt (default) or queue
+POST /api/runs/:id/stages/:stageId/retry      RetryStageRequest: valid while gating at that stage, or when the
                                               run is terminal and stageId was the last executed stage (run re-enters running(k));
                                               counts against the stage's gate budget
 POST /api/runs/:id/nodes/:nodeRunId/apply-patch → ApplyPatchResponse   # git apply --3way --binary in workspace;
@@ -477,7 +477,7 @@ WS `/ws[?token=]`: client `{type:'sub'|'unsub', runId}`; server pushes per §3.4
 
 Evidence workbench: an 84 px icon+text navigation rail, collapsible Launchpad, collapsible activity inspector, and a flexible Run Workspace. Launchpad/inspector widths use the independent `mat-shell-layout-v2` preference and keyboard-accessible dividers. Collapsing or navigating hides panels without unmounting them, so task, workspace, and model-editor drafts survive.
 
-1. **Projects**: workspace cards — name, short path, `lastRun` badge ("Planning · done · 2h ago"), live pulse when running; add-workspace dialog (server validates; shows isGit chip). Projects is a Launchpad view selected from the rail, not a permanently competing column.
+1. **Projects**: workspace cards with name, short path, `lastRun` badge ("Planning · done · 2h ago"), live pulse when running; add-workspace dialog (server validates; shows isGit chip). Projects is a Launchpad view selected from the rail, not a permanently competing column.
 2. **Launch**: the default Launchpad view leads with visual workflow-mode choices, provider readiness, task, and Start. "CLI detected" never claims authentication; a recent observed auth failure is labeled as such. **Customize** opens the advanced stage editor, orchestrator binding, slot editors, and agent palette in a focus-trapped drawer. Slot editing keeps the explicit custom-model input: never use `<datalist>` and never auto-collapse while a custom value is being typed. Editing a builtin mutates an ephemeral run-scoped `workflowOverride`; Duplicate is required to save it.
 3. **Activity inspector**: the existing run/node evidence controls stay persistently mounted. Stage groups and node cards show provider identity, state, elapsed time, last evidence, usage, verification, handoff, patch, kill/retry controls, steering, Report, and Debug. The rail may hide this region without discarding dialog or composer state.
 4. **Run Workspace**: one shared run selector owns live/history identity and replay hydration for every evidence view. It must never replace `activeRunId` when the user chooses a historical `viewedRunId`. Node chips plus All/Running/Attention presets focus both the inspector and evidence views. A run that finishes while open remains the same live session for follow/read controls; a terminal run selected after reload is a replay.
@@ -488,19 +488,19 @@ Evidence workbench: an 84 px icon+text navigation rail, collapsible Launchpad, c
 9. **Language + theme tokens**: system/en/zh-TW language and Midnight/Daylight/Aurora theme choices persist in `mat-ui-preferences-v1`; `main.tsx` applies them before React mounts. Visible chrome and troubleshooting copy must use the typed dictionary. Neutral surfaces/text use semantic `canvas/panel/surface/raised/control/border/ink/muted` tokens rather than fixed zinc colors. Aurora is a restrained violet/gold/teal palette; provider identity colors remain claude `#d97706`, codex `#10a37f`, agy `#4285f4`, grok `#e11d48`, mock `#71717a`.
 10. **zustand store**: state includes workspaces, workflows, providers, workspace selection, ephemeral workflow edits, separate active/live and viewed/replay run identities, run snapshots, bounded per-run event windows (the server remains the complete record), WebSocket/evidence-integrity state, filters, and focused-node UI state. Panels consume it through stable selectors; selectors must not allocate fresh fallback arrays or objects because that caused the React #185 black-screen loop.
 
-## 10. Builtin presets (shared/src/presets) — also the reference examples for §6.2
+## 10. Builtin presets (shared/src/presets), also the reference examples for §6.2
 
-1. **planning.json** — Round Table (gate ✓, isolation none): R1 codex/gpt-5.6-sol/high, R2 claude/sonnet, R3 grok/grok-4.5 — independent implementation plans. Final Review: claude/opus, permission safe, template uses `{{prior_stage_digest}}`. Orchestrator claude/sonnet enabled.
-2. **build.json** — Implement (isolation worktree, gate ✓): codex/gpt-5.6-sol/high ×2. Review: grok + claude on `{{patches}}`. Orchestrator enabled.
-3. **review.json** — Review (permission safe, gate off): claude, codex, grok, agy ×1. Synthesize: claude merges verdicts via `{{prior_stage_digest}}`. Orchestrator disabled.
-4. **pipeline.json** — Implement → Test → Review: worktree-isolated implementation and test stages carry patches and verification evidence forward; `requireVerified` protects the evidence gates.
+1. **planning.json**: Round Table (gate ✓, isolation none): R1 codex/gpt-5.6-sol/high, R2 claude/sonnet, R3 grok/grok-4.5 (independent implementation plans). Final Review: claude/opus, permission safe, template uses `{{prior_stage_digest}}`. Orchestrator claude/sonnet enabled.
+2. **build.json**: Implement (isolation worktree, gate ✓): codex/gpt-5.6-sol/high ×2. Review: grok + claude on `{{patches}}`. Orchestrator enabled.
+3. **review.json**: Review (permission safe, gate off): claude, codex, grok, agy ×1. Synthesize: claude merges verdicts via `{{prior_stage_digest}}`. Orchestrator disabled.
+4. **pipeline.json**: Implement → Test → Review: worktree-isolated implementation and test stages carry patches and verification evidence forward; `requireVerified` protects the evidence gates.
 
 ## 11. Testing & acceptance
 
 - Fixtures: **cleaned real captures vendored by wave-0 from `/tmp/mat-probes/clean/`** → `server/test/fixtures/{claude.jsonl, claude-tool.jsonl, codex.jsonl, codex-tool.jsonl, codex.dirty.jsonl, grok.jsonl, grok-tool.jsonl, agy.log}`. `codex.dirty.jsonl` (stderr banner interleaved) exercises §3.1 rule 6.
 - Unit: adapters × fixtures → exact expected event sequences incl. coalescing and outcome fields; line-buffer edges; decision.ts (happy, re-ask, degraded, invalid-id filtering); template rendering; digest budget math; store atomicity + seq recovery.
 - Engine (mock adapter): happy 2-stage fan-out 3; retry loop honoring budgets + `status:retry` boundaries + user-event synthesis per attempt; all-fail; abort mid-stage; stall mark+recover; worktree lifecycle incl. retry re-add and untracked-file patch capture (real temp git repo); crash sweep (simulated stale run.json).
-- API: fastify inject — full run lifecycle with mock provider, WS order = after-append, afterSeq catch-up, retry-stage validity matrix, apply-patch 3way conflict path, token auth on/off.
+- API (fastify inject): full run lifecycle with mock provider, WS order = after-append, afterSeq catch-up, retry-stage validity matrix, apply-patch 3way conflict path, token auth on/off.
 - Browser smoke: `npm run smoke:browser` launches the built server and production React bundle in real Chrome/Chromium; it guards mount, compact shell geometry, visible navigation labels, zh-TW and three-theme persistence, Health semantics, Narrative-first rendering, Timeline scrolling/follow mode, live switching/completion, verification/report, steering, and debug export. CI must keep this on Linux and Windows because jsdom missed the React #185 black screen.
 - Artifact evidence: `npm run evidence` runs five independent black-box instruments: `tools/evidence/repro-v016.mjs`, `repro-v017.mjs`, `repro-v018.mjs`, `repro-v019.mjs`, and `repro-runtime-contract.mjs`. The last uses `fake-codex-runtime.mjs` to prove OpenRouter's exact model/provider routing, canonical evidence projection, redaction, and restart replay without a real credential or provider request. Release acceptance reruns the complete suite against the extracted `.deb` with `MAT_ROOT` and `MAT_EXPECT_VERSION`.
 - **Acceptance**: `npm ci && npm run verify:version && npm run build && npm test && npm run typecheck && npm run evidence && npm run smoke:browser` green on the applicable CI lanes; `npm start` serves UI; §1 story executes with real provider runtimes; a finished run replays after server restart; crash sweep leaves no orphan processes/worktrees.
@@ -509,13 +509,13 @@ Evidence workbench: an 84 px icon+text navigation rail, collapsible Launchpad, c
 
 > **Historical record only.** This table and §12.1 describe the one-time initial
 > build-wave scaffold. They do not freeze files, grant current workers exclusive
-> ownership, or override `HANDOFF.md`, `AGENTS.md`, the current schemas, or the
+> ownership, or override `AGENTS.md`, the current schemas, or the
 > implementation. Do not use this section to plan present-day edits.
 
 | Wave | Worker | Initial assignment (historical) |
 |------|--------|------------------|
 | 0 | scaffold | whole tree; all package/tsconfig/tailwind/vite; shared/src COMPLETE; web/src/components/** COMPLETE; web/src/app/store.ts COMPLETE; api client/ws; mock adapter COMPLETE; eventLog + dataDir COMPLETE; stubs elsewhere; fixtures vendored; build+test green |
-| 1 | W-adapters | server/src/adapters/** (incl. mock.ts — keep wave-0 mock tests green), server/src/spawn.ts, server/test/adapters/** |
+| 1 | W-adapters | server/src/adapters/** (incl. mock.ts; keep wave-0 mock tests green), server/src/spawn.ts, server/test/adapters/** |
 | 1 | W-engine | server/src/engine/**, server/src/orchestrator/**, server/test/engine/** |
 | 1 | W-store-api | server/src/store/{workspaces,workflows,runs}.ts, server/src/api/**, server/src/index.ts, server/test/api/** |
 | 1 | W-web-shell | web/src/panels/workspace/**, web/src/panels/workflow/**, web/src/app/App.tsx + layout (NOT store.ts) |
@@ -524,12 +524,12 @@ Evidence workbench: an 84 px icon+text navigation rail, collapsible Launchpad, c
 
 ### 12.1 Historical internal seams used by the initial build
 
-- `store/eventLog.appendEvent(runId, partial: Omit<AgentEvent,'id'|'seq'|'ts'>): AgentEvent` — sync assign+append, THEN caller-visible; wsHub subscribes to appends (never broadcasts unappended events).
-- `engine/runManager`: `createRun(req: RunCreateRequest): Promise<RunSnapshot>`, `abortRun(runId)`, `killNode(runId, nodeRunId)`, `retryStage(runId, stageId, req)`, `applyPatch(runId, nodeRunId)`, `sweepOnBoot()` — the complete surface routes.ts consumes.
+- `store/eventLog.appendEvent(runId, partial: Omit<AgentEvent,'id'|'seq'|'ts'>): AgentEvent`: sync assign+append, THEN caller-visible; wsHub subscribes to appends (never broadcasts unappended events).
+- `engine/runManager`: `createRun(req: RunCreateRequest): Promise<RunSnapshot>`, `abortRun(runId)`, `killNode(runId, nodeRunId)`, `retryStage(runId, stageId, req)`, `applyPatch(runId, nodeRunId)`, `sweepOnBoot()` (the complete surface routes.ts consumes).
 - Adapter contract exactly §4.0; nodeRunner is the only event stamper; store.runs persists RunSnapshot atomically.
 - During that build only, wave-1 workers did not edit shared/src/**, web/src/components/**, web/src/app/store.ts, package.json, or another worker's files; contract gaps were reported and integrated centrally. This is not a current ownership rule.
 
-## v1.2 — Evidence plane (2026-07-19)
+## v1.2: Evidence plane (2026-07-19)
 
 Workspaces may configure `verifyCommand` and `verifyTimeoutSec` (effective engine default: 600 seconds). After a worktree-isolated Git candidate captures a non-empty patch, the engine runs the command in that candidate worktree and persists a strict normalized result (`passed | failed | error | skipped`), bounded output tail, and full atomic log artifact. No command, no changes, and non-completed nodes are explicit skipped states; stages without actual verification remain compatible.
 
@@ -539,7 +539,7 @@ Each node snapshot records its handoff inputs: prior node IDs and whether orches
 
 Explicitly deferred: human approval/pause nodes, pre-tool policy hooks, and live adapter contract tests. These require separate trust and lifecycle contracts and are not implicit in verification evidence.
 
-## v1.3 — Steering & debug plane (2026-07-20)
+## v1.3: Steering & debug plane (2026-07-20)
 
 An active run accepts up to eight FIFO steer messages. `interrupt` is the default: at a running-stage checkpoint it requests the existing SIGTERM process-tree kill, preserves partial transcripts, raw logs, patches, and verification evidence, executes the new instruction as a transient `steer-N` stage, then records a gate decision that retries the interrupted stage, advances, or aborts. `queue` does not kill work and applies at the next stage boundary. A retry chosen by steer review increments candidate attempts but does not consume the stage gate retry budget. Newer interrupts may supersede an active steer; messages still pending or active when a run ends become expired. Every terminal transition is durable and evented.
 
@@ -549,7 +549,7 @@ The debug plane writes best-effort JSONL diagnostics for run, stage, spawn/exit,
 
 Explicitly deferred: pause/resume, human approval nodes, and a steer-time agent picker.
 
-## v1.4 — Evidence-workbench UX (2026-07-20)
+## v1.4: Evidence-workbench UX (2026-07-20)
 
 The four equal-weight columns are replaced by an explicit information hierarchy: navigation rail → persistent Launchpad → activity inspector → Run Workspace. Basic launch configuration is visible first; advanced stage/agent editing is opt-in and preserves all existing workflow contracts. Conversation is the default evidence view and gives every message a stable node/provider/stage/attempt identity, while Timeline remains the complete technical renderer. Both views share one viewed-run selector and replay loader.
 
@@ -557,7 +557,7 @@ Live evidence is no longer silently trusted across a WebSocket sequence gap. The
 
 This amendment changes presentation and web-local state only. It adds no PTY, interactive terminal, pause/resume, human approval node, canvas/multi-pane workflow, or new shared persisted schema.
 
-## v1.5 — Provider recovery & localized UI (2026-07-21)
+## v1.5: Provider recovery & localized UI (2026-07-21)
 
 A field debug bundle proved that healthy Codex and Grok Windows shims could exceed the former five-second cold version probe, after which the failure was mislabeled as unavailable and cached for ten minutes. Version probes now allow 15 seconds on Windows and eight elsewhere, share only in-flight work, cache successful results for ten minutes, and cache failures for two seconds. `POST /api/providers/refresh` takes no user input, clears augmented-PATH and version caches, and reruns discovery. The UI exposes this as **Retry detection** in Setup and **Recheck providers** in Health; neither action installs software or changes a run.
 
@@ -567,6 +567,6 @@ The chrome follows the system language or persists English/Traditional Chinese, 
 
 ## BAT provider-runtime alignment (released through v0.2.10)
 
-Product releases v0.2.5–v0.2.9 added the catalog-pinned managed Claude/Codex runtime layer, persistent Codex app-server and Claude Agent SDK production paths, and BAT-aligned Codex/Claude account handling. Desktop startup may quietly bootstrap missing supported managed runtimes; downloads are pinned and integrity-verified before atomic publication under the data directory. Provider-specific recipes remain fixed server-side actions and accept no command input.
+Product releases v0.2.5 to v0.2.9 added the catalog-pinned managed Claude/Codex runtime layer, persistent Codex app-server and Claude Agent SDK production paths, and BAT-aligned Codex/Claude account handling. Desktop startup may quietly bootstrap missing supported managed runtimes; downloads are pinned and integrity-verified before atomic publication under the data directory. Provider-specific recipes remain fixed server-side actions and accept no command input.
 
 Product v0.2.10 wraps Grok and Agy transports in the common manager pattern, adds OpenRouter through Codex-as-runtime, and adds the canonical manager/evidence bridge defined in §3.1.1.

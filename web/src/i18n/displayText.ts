@@ -216,7 +216,7 @@ export function displayNodeError(text: string, locale: UiLocale): string {
   const race = AUTH_RACE_ERROR.exec(text);
   if (race) {
     const example = race[2] ? `（例如 \`${race[2]}\`）` : '';
-    return `${race[1]} 登入已過期——平行執行的 ${race[1]} 工作階段會互搶單次使用的 refresh token。請登出後重新登入 ${race[1]} CLI${example}，或改用 API 金鑰驗證以避免這個競爭。`;
+    return `${race[1]} 登入已過期：平行執行的 ${race[1]} 工作階段會互搶單次使用的 refresh token。請登出後重新登入 ${race[1]} CLI${example}，或改用 API 金鑰驗證以避免這個競爭。`;
   }
   const notFound = NOT_FOUND_DETAIL.exec(text);
   if (notFound) return `\`${notFound[1]}\` CLI 不在 PATH 中。請先安裝它，或從工作流程移除此代理程式。`;

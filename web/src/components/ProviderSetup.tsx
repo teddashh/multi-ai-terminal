@@ -188,7 +188,7 @@ export function ProviderSetupButton({ provider, api = apiClient }: { provider: P
       if (result.provider) setProviders(matStore.getState().providers.map((candidate) => candidate.id === provider.id ? result.provider! : candidate));
       const refreshed = await refreshAfterAction(result.provider);
       // Unlike install, the provider was already detected before this action,
-      // so a healthy refresh proves nothing — only the updater's own result does.
+      // so a healthy refresh proves nothing; only the updater's own result does.
       if (result.ok) {
         const version = refreshed?.version ?? result.provider?.version;
         setNotice({ tone: 'success', text: t('provider.updated', { provider: provider.id, version: version ? ` · ${version}` : '' }) });
@@ -322,7 +322,7 @@ export function ProviderSetupButton({ provider, api = apiClient }: { provider: P
     <button ref={triggerRef} type="button" onClick={() => setOpen((value) => !value)} onKeyDown={closeOnEscape} aria-label={t('provider.setupNamed', { provider: provider.id })} aria-haspopup="dialog" aria-controls={dialogId} aria-expanded={open} className="rounded border border-border px-2 py-1 text-[10px] text-accentForeground hover:border-accent">{t('provider.setup')}</button>
     {open && <div id={dialogId} role="dialog" aria-label={t('provider.setupNamed', { provider: provider.id })} onKeyDown={closeOnEscape} className="absolute right-0 top-full z-40 mt-2 w-72 rounded border border-accent bg-panel p-3 text-left shadow-2xl">
       <div className="flex items-center justify-between"><strong className="text-xs">{t('provider.setupNamed', { provider: provider.id })}</strong><button ref={closeRef} type="button" onClick={close} aria-label={t('provider.closeSetup', { provider: provider.id })} className="text-muted">×</button></div>
-      {runtime && runtimeFamily && <p className="mt-2 text-[10px] text-muted">{t('runtime.summary', { family: runtimeFamily, state: t(runtime.state === 'managed' ? 'runtime.state.managed' : runtime.state === 'external' ? 'runtime.state.external' : runtime.state === 'broken' ? 'runtime.state.broken' : 'runtime.state.missing'), version: runtime.managedVersion ?? '—' })}</p>}
+      {runtime && runtimeFamily && <p className="mt-2 text-[10px] text-muted">{t('runtime.summary', { family: runtimeFamily, state: t(runtime.state === 'managed' ? 'runtime.state.managed' : runtime.state === 'external' ? 'runtime.state.external' : runtime.state === 'broken' ? 'runtime.state.broken' : 'runtime.state.missing'), version: runtime.managedVersion ?? '-' })}</p>}
       <p className="mt-2 text-xs text-muted">{provider.version ?? (provider.detail
         ? displayProviderDetail(provider.id, provider.detail, locale)
         : runtimeFamily

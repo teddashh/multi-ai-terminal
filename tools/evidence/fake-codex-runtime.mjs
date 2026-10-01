@@ -2,7 +2,7 @@
 // Deterministic codex app-server stand-in for the independent runtime-contract
 // evidence instrument. It uses only Node core, performs no network or file
 // access beyond the caller-provided safe record, and records credential
-// presence booleans only — never environment values.
+// presence booleans only, never environment values.
 import { appendFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 

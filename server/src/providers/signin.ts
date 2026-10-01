@@ -9,7 +9,7 @@ import { clearAuthAlert } from './auth.js';
 import { captureCurrent, markActiveValid } from './codex/accounts.js';
 import { codexSessionRuntime } from './codex/runtime.js';
 
-// In-app sign-in drives each CLI's own login flow over piped stdio — the BAT
+// In-app sign-in drives each CLI's own login flow over piped stdio, the BAT
 // (better-agent-terminal) pattern. MAT spawns a fixed recipe, surfaces the
 // sign-in URL (and device code) the CLI prints, and either forwards the pasted
 // callback code to the CLI's stdin (paste-code mode) or waits for the CLI's own
@@ -32,7 +32,7 @@ export interface SignInRecipe {
 // Grounded against the real CLIs: `claude auth login` prints an OAuth URL over
 // piped stdio (hosted redirect) and then waits for the pasted callback code;
 // `codex login --device-auth` prints auth.openai.com/codex/device plus a
-// one-time code and polls by itself — and it clears the existing login the
+// one-time code and polls by itself, and it clears the existing login the
 // moment it starts. `grok login --device-code` is xAI's documented headless
 // flow with the same device shape.
 const recipes: Partial<Record<ProviderId, SignInRecipe>> = {
@@ -266,7 +266,7 @@ export async function startSignIn(providerId: ProviderId): Promise<ProviderSignI
   // supersede one that is mid-ceremony.
   if (activeSession) return { ok: false, error: SIGNIN_BUSY };
   // `codex login --device-auth` discards the live login at flow start and the
-  // completion recycle would drop the app-server mid-turn — refuse like BAT.
+  // completion recycle would drop the app-server mid-turn, so refuse like BAT.
   if (providerId === 'codex' && codexSessionRuntime().busy()) return { ok: false, error: SIGNIN_RUNTIME_BUSY };
 
   const session: SignInSession = {

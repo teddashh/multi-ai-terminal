@@ -92,7 +92,7 @@ export function fakeApiDependencies(run = runSnapshot()): ApiRouteDependencies {
     }),
     providerInstall: { plan: providerInstallPlan, updatePlan: providerUpdatePlan, spawn: spawnManaged, clearVersionCache, clearPathCache: clearAugmentedPathCache },
     providerSignIn: { start: startSignIn, status: signInStatus, submitCode: submitSignInCode, cancel: cancelSignIn },
-    report: (snapshot) => `# Run report — ${snapshot.workflow.name}\n`,
+    report: (snapshot) => `# Run report: ${snapshot.workflow.name}\n`,
     workspaces: {
       list: async () => workspaces,
       get: async (id) => {

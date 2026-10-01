@@ -25,8 +25,8 @@ const PORT = Number(process.env.MAT_PORT ?? 0);
 let baseUrl;
 const failures = [];
 const check = (name, ok, detail = '') => {
-  failures.push(...(ok ? [] : [name + (detail ? ` — ${detail}` : '')]));
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok || !detail ? '' : ` — ${detail}`}`);
+  failures.push(...(ok ? [] : [name + (detail ? `: ${detail}` : '')]));
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok || !detail ? '' : `: ${detail}`}`);
 };
 
 const api = async (path, init) => {

@@ -80,7 +80,7 @@ const workflow: WorkflowDef = {
 };
 
 const workspace: Workspace = {
-  id: 'w1', name: 'Castle', path: '/home/ted/projects/castle', isGit: true, defaultWorkflowId: 'planning',
+  id: 'w1', name: 'Demo', path: '/home/dev/projects/demo', isGit: true, defaultWorkflowId: 'planning',
 };
 
 const openRouterCatalog: OpenRouterModelCatalog = {
@@ -528,7 +528,7 @@ describe('WorkflowPanel', () => {
     renderPanel(<WorkflowPanel />);
     await screen.findByRole('heading', { name: 'Run task' });
 
-    act(() => fireEvent.change(screen.getByLabelText('Task'), { target: { value: 'Only for Castle' } }));
+    act(() => fireEvent.change(screen.getByLabelText('Task'), { target: { value: 'Only for Demo' } }));
     const drawer = await openCustomize();
     act(() => fireEvent.click(within(drawer).getByRole('button', { name: '+ add agent' })));
     expect(matStore.getState().ephemeralWorkflowEdits.planning).toBeDefined();

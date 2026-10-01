@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // v0.1.9 auth-visibility instrument (independent of repo tests).
-// H: providers contract — every real provider advertises a sign-in command
+// H: providers contract: every real provider advertises a sign-in command
 //    (the "where do I log in" discoverability), mock does not, and no alert
 //    exists on a fresh boot.
-// I: INV3 — a mock node emitting a textbook auth failure (MOCK_AUTHFAIL)
+// I: INV3: a mock node emitting a textbook auth failure (MOCK_AUTHFAIL)
 //    fails WITHOUT gaining errorReason or registering an auth alert, while
 //    the CLI's own text stays intact in the event transcript and the report
 //    still carries the failure line.
@@ -24,8 +24,8 @@ const PORT = Number(process.env.MAT_PORT ?? 0);
 let baseUrl;
 const failures = [];
 const check = (name, ok, detail = '') => {
-  failures.push(...(ok ? [] : [name + (detail ? ` — ${detail}` : '')]));
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok || !detail ? '' : ` — ${detail}`}`);
+  failures.push(...(ok ? [] : [name + (detail ? `: ${detail}` : '')]));
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok || !detail ? '' : `: ${detail}`}`);
 };
 
 const api = async (path, init) => {

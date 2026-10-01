@@ -35,7 +35,7 @@ function verificationLabel(node: NodeRun): string {
 }
 
 export function buildRunReport(run: RunSnapshot, workspace: Workspace, events: AgentEvent[]): string {
-  const lines: string[] = [`# Run report — ${run.workflow.name}`, ''];
+  const lines: string[] = [`# Run report: ${run.workflow.name}`, ''];
   lines.push(`- Task: ${run.task}`);
   lines.push(`- Workspace: ${workspace.name} (${workspace.path})`);
   lines.push(`- Run ID: ${run.runId}`);
@@ -69,7 +69,7 @@ export function buildRunReport(run: RunSnapshot, workspace: Workspace, events: A
       const model = node.agent.model ? `/${node.agent.model}` : '';
       const tokens = node.usage ? (node.usage.inputTokens ?? 0) + (node.usage.outputTokens ?? 0) : undefined;
       const tools = events.filter((event) => event.nodeRunId === node.nodeRunId && event.kind === 'tool_use').length;
-      lines.push(`- **${node.label}** — ${node.agent.provider}${model}; status ${node.status}; attempts ${node.attempt}; duration ${duration(node.startedAt === undefined || node.endedAt === undefined ? undefined : node.endedAt - node.startedAt)}; tokens ${tokens ?? 'n/a'}; diffstat ${patchStat(node.patchFile)}; verification ${verificationLabel(node)}; tool calls ${tools}`);
+      lines.push(`- **${node.label}**: ${node.agent.provider}${model}; status ${node.status}; attempts ${node.attempt}; duration ${duration(node.startedAt === undefined || node.endedAt === undefined ? undefined : node.endedAt - node.startedAt)}; tokens ${tokens ?? 'n/a'}; diffstat ${patchStat(node.patchFile)}; verification ${verificationLabel(node)}; tool calls ${tools}`);
       if (node.status === 'failed' && (node.errorReason || node.error)) lines.push(`  - Error: ${truncate(node.errorReason ?? node.error!, 200)}`);
       if (node.handoff) {
         const sources = node.handoff.priorNodeRunIds.length > 0 ? `← ${node.handoff.priorNodeRunIds.join(', ')}` : '← no upstream nodes';
@@ -91,10 +91,10 @@ export function buildRunReport(run: RunSnapshot, workspace: Workspace, events: A
       lines.push(`- Applied: ${iso(steer.appliedAt)}`);
       lines.push(`- Interrupted: ${steer.interruptedStageId ?? 'stage boundary'}`);
       lines.push(`- Instruction: ${truncate(steer.text, 300)}`);
-      if (decision) lines.push(`- Review: ${decision.action}${decision.degraded ? ' (degraded)' : ''} — ${decision.rationale}`);
+      if (decision) lines.push(`- Review (${decision.action}${decision.degraded ? ', degraded' : ''}): ${decision.rationale}`);
       for (const node of run.nodes.filter((candidate) => candidate.stageId === steer.steerStageId)) {
         const model = node.agent.model ? `/${node.agent.model}` : '';
-        lines.push(`- **${node.label}** — ${node.agent.provider}${model}; status ${node.status}; attempts ${node.attempt}; diffstat ${patchStat(node.patchFile)}; verification ${verificationLabel(node)}`);
+        lines.push(`- **${node.label}**: ${node.agent.provider}${model}; status ${node.status}; attempts ${node.attempt}; diffstat ${patchStat(node.patchFile)}; verification ${verificationLabel(node)}`);
       }
       lines.push('');
     }
@@ -110,7 +110,7 @@ export function buildRunReport(run: RunSnapshot, workspace: Workspace, events: A
     const verification = decision.verificationSummary
       ? ` [verification: ${decision.verificationSummary.passed} passed / ${decision.verificationSummary.failed} failed / ${decision.verificationSummary.skipped} skipped]`
       : '';
-    lines.push(`- **${stage}** — ${decision.action}${decision.degraded ? ' (degraded)' : ''}: ${decision.rationale}${verification}`);
+    lines.push(`- **${stage}** (${decision.action}${decision.degraded ? ', degraded' : ''}): ${decision.rationale}${verification}`);
     if (decision.contextForNext) lines.push(`  > ${truncate(decision.contextForNext, 600).replaceAll('\n', '\n  > ')}`);
   }
 

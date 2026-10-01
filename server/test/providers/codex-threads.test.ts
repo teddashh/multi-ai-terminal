@@ -476,7 +476,7 @@ describe('CodexThreadManager', () => {
         ] },
       ],
       // The interrupt reply is immediate but the interrupted completion lands
-      // 60ms later — the replacing turn must wait for it, not race it.
+      // 60ms later, so the replacing turn must wait for it, not race it.
       'turn/interrupt': { result: {}, notifications: [{ delayMs: 60, method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'interrupted' } } }] },
     } });
     const first = manager.startTurn('session', turnOptions);

@@ -130,7 +130,7 @@ export function humanizeError(value: unknown, provider?: string): string {
   if (provider && message.startsWith(`${provider} sign-in expired`)) return message;
   if (provider !== 'codex' || message.startsWith('codex: ')) return message;
   const detail = [extracted.status, extracted.type].filter(Boolean).join(' ');
-  return `codex: ${detail ? `${detail} — ` : ''}${message}`;
+  return `codex: ${detail ? `${detail}: ` : ''}${message}`;
 }
 
 /** Converts arbitrary stream chunks into complete lines and preserves a final partial line on end. */
@@ -305,7 +305,7 @@ export function probeVersion(command: string): Promise<{ ok: boolean; version?: 
     child.once('exit', (code) => {
       // 'close' additionally waits for every stdio pipe to drain, and a
       // background descendant that inherited the CLI's stdout can hold the
-      // pipe long past exit — a healthy CLI then reads as a probe timeout.
+      // pipe long past exit, so a healthy CLI then reads as a probe timeout.
       // The version line has already arrived by exit; flush briefly, settle,
       // and release our pipe ends.
       exitFlushTimer = setTimeout(() => {

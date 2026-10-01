@@ -74,7 +74,7 @@ describe('NarrativePanel', () => {
     apiMocks.getEvents.mockResolvedValue([{ ...events[1]!, seq: 2 }, withGap[1]!]);
     matStore.setState({ events: { r1: withGap }, evidenceIntegrity: { r1: { status: 'incomplete', expectedSeq: 2, receivedSeq: 3, message: 'Missing persisted evidence.' } } });
     renderPanel(<NarrativePanel />);
-    expect(screen.getByText(/Evidence gap: events 2–2/)).toBeTruthy();
+    expect(screen.getByText(/Evidence gap: events 2 to 2/)).toBeTruthy();
     expect(screen.getByText(/Live evidence is incomplete/)).toBeTruthy();
     act(() => fireEvent.click(screen.getByRole('button', { name: 'Retry' })));
     await waitFor(() => expect(apiMocks.getEvents).toHaveBeenCalledWith('r1', 1, 1000));

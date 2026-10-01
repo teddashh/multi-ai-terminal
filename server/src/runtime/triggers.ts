@@ -13,7 +13,7 @@ type Listener = (event: RuntimeChangedEvent) => void;
 const listeners = new Set<Listener>();
 let active: { family: ManagedRuntimeFamily; promise: Promise<unknown> } | undefined;
 let reserved: ManagedRuntimeFamily | undefined;
-// Keyed by family:operation — a clear requested during an install must queue
+// Keyed by family:operation, so a clear requested during an install must queue
 // behind it, not silently join the install's promise.
 const inFlight = new Map<string, Promise<unknown>>();
 let tail: Promise<unknown> = Promise.resolve();
