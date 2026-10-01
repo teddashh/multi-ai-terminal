@@ -5,7 +5,7 @@
   "mark": "MT",
   "palette": "graphite",
   "default_branch": "main",
-  "verified": "2026-09-30",
+  "verified": "2026-10-01",
   "language": "TypeScript",
   "license": {
     "spdx": "MIT",
@@ -550,8 +550,8 @@
       "zh": "目前的樣子。"
     },
     "intro": {
-      "en": "Built in six days: 21 releases, from v0.1.0 on July 18, 2026 to v0.2.10 on July 23. Nothing has landed on main since; one Dependabot pull request is open.",
-      "zh": "六天內做出來：從 2026 年 7 月 18 日的 v0.1.0 到 7 月 23 日的 v0.2.10，共 21 個版本。之後 main 沒有新的提交，目前有一個 Dependabot 的 PR 還沒合併。"
+      "en": "Built in six days: 21 releases, from v0.1.0 on July 18, 2026 to v0.2.10 on July 23. No feature changes since. An October 2026 cleanup removed personal notes, fixed the docs, and updated dependencies to close every open Dependabot alert; those updates are on main and not yet in a release.",
+      "zh": "六天內做出來：從 2026 年 7 月 18 日的 v0.1.0 到 7 月 23 日的 v0.2.10，共 21 個版本。之後沒有新功能。2026 年 10 月整理過一次，移除個人筆記、修正文件，並更新相依套件，關掉所有未處理的 Dependabot 警示；這些更新目前只在 main 上，還沒有包進新版本。"
     },
     "works": [
       {
@@ -653,7 +653,7 @@
         "en": "Verified",
         "zh": "查核日期"
       },
-      "value": "2026-09-30"
+      "value": "2026-10-01"
     }
   ],
   "links": [
