@@ -1,6 +1,6 @@
 # Instructions for coding agents
 
-**Read `HANDOFF.md` first** — full project state, architecture map, release playbook, and the history behind every rule below.
+**Read `SPEC.md` first**: the reviewed engineering contract (architecture, shared schemas, provider runtimes, testing and acceptance) behind the rules below. If your checkout has a local `HANDOFF.md` (gitignored, never committed), read it too.
 
 ## Hard rules
 

@@ -5,7 +5,7 @@ v0.1.9 handoff, the hardening implemented in the same working tree, and the
 subsequent v1.4 evidence-workbench slice packaged for v0.2.0. The product
 manifests report 0.2.0. It is a planning and risk record, not authorization to
 expand product scope; GitHub remains authoritative for publication state.
-`HANDOFF.md` remains the operational entry point and code remains authoritative.
+`AGENTS.md` remains the operational entry point and code remains authoritative.
 
 ## Product direction confirmed
 
@@ -289,7 +289,8 @@ v0.1.1 tag reported 0.1.1 in the JavaScript and Tauri manifests while
   non-normative; they no longer freeze the store or grant file ownership.
 - The Traditional Chinese README now covers Browse, provider Setup, augmented
   PATH, OAuth-race guidance, and v0.1.9 auth visibility.
-- HANDOFF records the actual release history and the draft-first playbook.
+- The maintainer handover notes record the actual release history and the
+  draft-first playbook.
 
 ## Open backlog, ordered by evidence risk
 

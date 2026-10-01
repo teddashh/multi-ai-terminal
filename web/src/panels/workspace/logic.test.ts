@@ -30,7 +30,7 @@ describe('workspace panel logic', () => {
   });
 
   it('shortens long paths and recognizes absolute paths', () => {
-    expect(shortPath('/home/ted/projects/mat')).toBe('…/projects/mat');
+    expect(shortPath('/home/dev/projects/mat')).toBe('…/projects/mat');
     expect(shortPath('/repo')).toBe('/repo');
     expect(shortPath('C:\\Users\\dev\\projects\\mat')).toBe('…/projects/mat');
     expect(isAbsolutePath('/repo')).toBe(true);

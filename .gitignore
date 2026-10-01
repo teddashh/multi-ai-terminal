@@ -13,3 +13,6 @@ coverage/
 desktop/resources/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
+
+# Local maintainer handover notes (never committed)
+HANDOFF.md

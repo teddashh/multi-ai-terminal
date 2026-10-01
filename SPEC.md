@@ -509,7 +509,7 @@ Evidence workbench: an 84 px icon+text navigation rail, collapsible Launchpad, c
 
 > **Historical record only.** This table and §12.1 describe the one-time initial
 > build-wave scaffold. They do not freeze files, grant current workers exclusive
-> ownership, or override `HANDOFF.md`, `AGENTS.md`, the current schemas, or the
+> ownership, or override `AGENTS.md`, the current schemas, or the
 > implementation. Do not use this section to plan present-day edits.
 
 | Wave | Worker | Initial assignment (historical) |

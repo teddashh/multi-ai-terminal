@@ -42,8 +42,8 @@ describe('server options and trust boundary', () => {
     const envDataDir = join(tmpdir(), 'from-env');
     const cliDataDir = join(tmpdir(), 'cli');
     expect(parseArgs([], {
-      MAT_PORT: '9000', MAT_HOST: '100.64.0.1', MAT_DATA_DIR: envDataDir, MAT_TOKEN: 'env-token',
-    })).toEqual({ port: 9000, host: '100.64.0.1', dataDir: envDataDir, token: 'env-token' });
+      MAT_PORT: '9000', MAT_HOST: '192.0.2.10', MAT_DATA_DIR: envDataDir, MAT_TOKEN: 'env-token',
+    })).toEqual({ port: 9000, host: '192.0.2.10', dataDir: envDataDir, token: 'env-token' });
     expect(parseArgs(['--port', '7789', '--host', '0.0.0.0', '--data-dir', cliDataDir, '--token', 'cli'], {
       MAT_PORT: '9000', MAT_HOST: '127.0.0.1',
     })).toEqual({ port: 7789, host: '0.0.0.0', dataDir: cliDataDir, token: 'cli' });
