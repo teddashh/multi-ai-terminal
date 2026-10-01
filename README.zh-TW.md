@@ -1,133 +1,149 @@
 # Multi-AI Terminal
 
-[English](./README.md) | **繁體中文**
+[English](README.md) · **繁體中文**
 
-在本機組合、執行**跨多個 headless coding-agent runtime 的多代理工作流**的工作台 — 支援 Claude Code、Codex、Grok、Antigravity(Gemini),以及透過 Codex-as-runtime 執行的 OpenRouter。把 agent 拖進工作流階段,讓真正的 LLM 調度者(Orchestrator)在每個階段把關,所有 agent 的輸出彙整成單一、分類、可回放的訊息流。
+在本機執行多階段、多 agent 的 coding 工作流程：Claude Code、Codex、Grok、Antigravity 與 OpenRouter 都以 headless runtime 執行，每個階段由協調者 agent 把關。
 
-[multi-ai-chat-desktop](https://github.com/teddashh/multi-ai-chat-desktop) 的後繼者:不再爬網頁聊天室,每個 agent 都由真實的 headless CLI、app-server 或 SDK runtime 驅動,其串流被正規化成同一套持久證據格式。
+**專案介紹頁：** https://teddashh.github.io/multi-ai-terminal/?lang=zh-TW
 
-最新公開發行版是 **v0.2.10**，加入透過 Codex-as-runtime 執行的 OpenRouter、統一的 Grok/Agy manager，以及 canonical provider contract。
+把 agent 拖進工作流程的各個階段，讓真正的 LLM 協調者替每個階段把關，所有 agent 的輸出會匯成一條分類清楚、可以回放的訊息流。OpenRouter 的模型借用 Codex 當 runtime 執行。
+
+前一代是 [multi-ai-chat-desktop](https://teddashh.github.io/multi-ai-chat-desktop/?lang=zh-TW)：MAT 不再操作網頁聊天室，而是透過真正的 headless CLI、app-server 或 SDK runtime 驅動每個 agent，再把各家的串流整理成同一套可以長期保存的證據格式。
+
+最新版本是 [**v0.2.10**](https://github.com/teddashh/multi-ai-terminal/releases/tag/v0.2.10)（2026 年 7 月 23 日），加入以 Codex 當 runtime 的 OpenRouter、Grok 與 Agy 共用的 headless manager，以及一套不分 provider 的事件契約。
 
 ## 運作方式
 
-- **專案 + Launchpad** — 每個工作區指向一個目錄(可感知 git)。左側 rail 同時顯示 icon 與文字,可在專案選擇與啟動設定間切換且不清除草稿;常用的模式、readiness、任務直接可見,進階階段編輯收在 **Customize**。
-- **工作流(Workflows)** — 由有序階段組成;每個階段放置 agent 槽位(從進階調色盤拖入;同供應商可放多個實例,每階段 Σ ≤ 12)。每個槽位可設定:模型、推理力度、權限層級、提示模板、數量。
-- **調度者(Orchestrator)** — 一個真實的 CLI agent(任一供應商),接收每個把關階段候選結果的摘要,回覆嚴格 JSON 的閘門決策:前進 / 重試(可指定節點並附加提示)/ 中止。確定性的預算上限;解析失敗時安全降級為前進。
-- **階段隔離** — 每個節點可選 git worktree 隔離;每次嘗試的改動會擷取成二進位 patch,可在 UI 中檢視並套用。
-- **Run Workspace** — 預設的 **Conversation** 讓每個節點的回答、決策、驗證與失敗一眼可讀;**Timeline** 保留原始四類事件、虛擬化捲動、節點/角色/搜尋過濾與持久事件完整回放。
-- **Health & diagnostics** — 整理 server、provider、workspace、run、驗證與 evidence continuity;提供安全的 Setup、重新偵測、Inspect、遮罩日誌與 debug bundle。偵測到 CLI 絕不冒充已登入。
-- **語言與主題** — 可跟隨系統或切換 English／繁體中文,並提供會永久記住的午夜深色、日光淺色、紫／金／青極光三套主題。
+- **專案與啟動**：每個工作區指向一個目錄（會辨識 git）。左側的圖示加文字側欄可以在選專案與啟動設定之間切換，草稿不會遺失。常用的模式、就緒狀態與任務設定一直看得到，進階的階段編輯則放在「進階設定」（Customize）。
+- **工作流程**：由依序排列的階段組成，每個階段放 agent 槽位。從進階面板把 agent 拖進來；同一家 provider 可以放好幾個，每個階段最多 12 個 agent。每個槽位可以設定模型、推理強度、權限層級、提示範本與數量。
+- **協調者**：一個真正的 CLI agent（哪家 provider 都可以），讀取每個關卡階段候選結果的摘要，用嚴格的 JSON 回覆關卡決策：繼續、重試（可以指定節點並附加提示）或中止。預算上限是固定的；回覆無法解析時，階段會繼續往下，並標示為降級。
+- **階段隔離**：每個節點可以選擇用 git worktree 隔離。每次嘗試的修改都會存成二進位 patch，可以在介面上檢視並套用。
+- **執行工作區**：「對話」（Conversation）放在最前面，每個節點的回答、決策、驗證與失敗一眼就能看清楚。「時間軸」（Timeline）保留原始事件分類、虛擬捲動、節點／角色／搜尋篩選，以及從持久事件紀錄完整回放。
+- **健康狀態與除錯**：整理伺服器、provider、工作區、執行、驗證與證據連續性的檢查結果，並提供安全的「設定」、重新偵測、查看、遮蔽後的日誌與除錯套件。偵測到 CLI，絕不等於已經登入。
+- **語言與主題**：跟隨系統語言，或在英文與繁體中文之間切換；主題有午夜深色、日光淺色與 AI-Sister 紀念版三種，選擇會被記住。
 
 ## 驗證（證據層）
 
-工作區可設定驗證指令（例如 `npm test`）與選用的逾時秒數（預設 600 秒）。使用 worktree 隔離且產生非空 patch 的候選項，會在擷取成品後執行該指令；正規化的通過、失敗、錯誤或略過結果，以及完整日誌，都會隨執行紀錄持久保存。把關階段可啟用 `requireVerified`；當沒有候選項通過、但有檢查失敗時，會在既有重試預算內重試失敗節點。
+工作區可以設定驗證指令（例如 `npm test`）和逾時秒數（預設 600 秒）。使用 worktree 隔離、而且 patch 不是空的候選結果，會在擷取成品後執行這個指令；正規化後的通過、失敗、錯誤或略過結果，連同完整日誌，都會跟著這次執行保存下來。有關卡的階段可以開啟 `requireVerified`：如果沒有任何候選結果通過，就在既有的重試額度內重試沒過的部分。
 
-UI 與產生的 Markdown 報告會區分「已產生、已審查、已前進、已驗證」。降級或未驗證的前進會明確標示，絕不隱藏。可在執行面板開啟 **Report**，或呼叫 `GET /api/runs/:id/report`，取得適合 PR 與回顧使用的結果、交接、決策、供應商 CLI 版本、用量、patch 與驗證證據。內建的 **Pipeline: Implement → Test → Review** 預設是最短的證據把關生產線。
+介面和產生的 Markdown 報告會分開標示已產生、已審查、已放行與已驗證的工作。降級放行或未經驗證的結果，都會清楚標示，絕不藏起來。在執行面板按「報告」（Report），或呼叫 `GET /api/runs/:id/report`，就能拿到可以直接用在 PR 或回顧的紀錄：結果、交接、決策、provider CLI 版本、用量、patch 與驗證證據。內建的「流程：實作 → 測試 → 審查」（Pipeline: Implement → Test → Review）是最短的證據把關生產線。
 
-## 導引（Steering）
+## 追加指示（Steering）
 
-執行進行中時，可在執行面板輸入新指示。預設的 **Interrupt** 會終止目前候選項的整個行程樹、保留部分日誌與 patch，讓新指示走過相同的證據流程，之後以閘門式審查決定重做被中斷階段、繼續或中止。**Queue** 會等到下一個階段邊界再套用，不終止目前工作。導引訊息依 FIFO 處理，每次執行最多八則；停用調度者時仍採確定性政策。此功能不使用 PTY，也不會寫入執行中子行程的 stdin。
+執行進行中時，可以在執行面板輸入新的指示。預設的「立即插入」（interrupt）會結束目前候選結果的整個行程樹，保留已產生的日誌與 patch，讓新指示走一樣的證據流程，再用關卡式的審查決定要重做被中斷的階段、繼續還是中止。「排隊」（queue）會等到下一個階段交界才套用，不中斷目前的工作。追加指示先進先出，每次執行最多 8 則；停用協調者時，處理方式仍是固定的。這個功能不用 PTY，也不會寫進執行中子行程的 stdin。
 
 ## 除錯套件
 
-按 **Report** 旁的 **Debug**，或從唯讀 **Health** drawer，即可下載單一 `mat-debug-<runId>.zip`。內容包括完整執行快照、事件、診斷日誌、Markdown 報告、adapter 原始輸出、patch、驗證日誌、執行環境與供應商版本，以及伺服器診斷日誌尾端。瀏覽器錯誤也會以 best-effort 方式送入伺服器日誌；系統不會刻意記錄環境變數值。
+在「報告」旁按「除錯」（Debug），或從唯讀的「健康狀態」（Health）面板，下載一個 `mat-debug-<runId>.zip`。內容包括完整的執行快照、事件、診斷紀錄、Markdown 報告、adapter 原始輸出、patch、驗證日誌、runtime 與 provider 版本，以及伺服器診斷日誌的最後一段。瀏覽器端的錯誤也會盡量回報到伺服器紀錄；系統不會刻意記錄環境變數的值。
 
 ## 快速開始
 
-需求:Node.js ≥ 20、建議 Git ≥ 2.32(較舊的 Git 會退回純 `git apply --check`),以及所選 provider 的 runtime:Claude 與 Codex 可使用 MAT 管理的固定版本 runtime;Grok 使用 `grok`;Antigravity 使用 `agy`。OpenRouter 沒有自己的 CLI,必須使用 Codex runtime,並在 MAT 的環境中設定 `OPENROUTER_API_KEY`。編輯器會先選 OpenRouter 模型、再選版本;MAT 持久化並送出所選版本的精確 OpenRouter request slug。
+需求：Node.js 20 以上，建議 Git 2.32 以上（較舊的 Git 會退回單純的 `git apply --check`）。另外要裝好你會用到的 provider runtime：Claude 與 Codex 可以使用 MAT 代管、鎖定版本的 runtime；Grok 用 `grok`；Antigravity 用 `agy`。OpenRouter 沒有自己的 CLI，需要 Codex runtime，並在 MAT 的環境裡設定 `OPENROUTER_API_KEY`。在編輯器裡先選 OpenRouter 模型、再選版本；MAT 會保存並送出該版本精確的 OpenRouter request slug。
 
 ```sh
 npm install
 npm run build
-npm start                      # 在 http://127.0.0.1:7788 提供網頁 UI + API
-# 選項:--port N --host H --data-dir DIR --token SECRET
+npm start                      # 網頁介面與 API 開在 http://127.0.0.1:7788
+# 參數：--port N --host H --data-dir DIR --token SECRET
+# 或設定環境變數 MAT_PORT、MAT_HOST、MAT_DATA_DIR、MAT_TOKEN
 ```
 
-打開 UI,從 **Projects** 新增工作區(絕對路徑),回到 **Launch**,挑一個內建工作流(Planning / Build / Review / Pipeline),寫下任務並按 Start。只有需要更改階段或 agent 綁定時才打開 **Customize**。
+打開介面，在「專案」（Projects）新增工作區（絕對路徑），回到「啟動」（Launch），挑一個內建工作流程（規劃模式、建置模式、審查模式或 Pipeline 流程），寫下任務後按「開始執行」（Start）。只有要改階段或 agent 設定時，才需要打開「進階設定」（Customize）。
 
-頂部的 **語言・主題** 可覆蓋系統語言並選擇三套主題;兩項選擇在重開後都會保留。
+頂端的「語言・主題」（Language · Theme）可以覆蓋系統語言，或選三種主題之一；兩個選擇在重新啟動後都會保留。
 
-開發模式:`npm run dev`(vite + API 熱重載)。測試:`npm test`。型別檢查:`npm run typecheck`。版本一致性:`npm run verify:version`。建置後的 server 證據套件:`npm run evidence`。
+開發模式：`npm run dev`（Vite 與 API 熱重載）。測試：`npm test`。型別檢查：`npm run typecheck`。版本一致性檢查：`npm run verify:version`。建置後伺服器的證據測試：先 `npm run build`，再 `npm run evidence`。
 
 ## 桌面版
 
-從本倉庫的 GitHub Releases 頁面下載安裝。桌面版需要 `PATH` 上有 Node.js ≥ 20;必要時可設 `MAT_NODE` 指向特定的 Node.js 執行檔。
+從 [GitHub Releases](https://github.com/teddashh/multi-ai-terminal/releases) 下載安裝檔。桌面版需要 `PATH` 上有 Node.js 20 以上；必要時可以用 `MAT_NODE` 指定某個相容的 Node.js 執行檔。安裝檔沒有程式碼簽章，也沒有經過 Apple 公證。
 
-- **Windows**:下載 `-setup.exe`(NSIS)或 `.msi` 執行安裝。WebView2 執行環境在 Windows 10/11 已內建,缺少時安裝程式會自動補裝。用 `winget install OpenJS.NodeJS.LTS` 安裝 Node.js ≥ 20;worktree 隔離功能需要 Git for Windows。必要時設 `MAT_NODE` 指向特定的 `node.exe`。
-- **Debian/Ubuntu**:下載 `.deb`,執行 `sudo apt install ./檔名.deb`。
-- **其他 Linux 發行版**:下載 `.AppImage`,`chmod +x ./Multi-AI-Terminal*.AppImage` 後直接執行。也提供 RPM 套件。
-- **macOS**:打開下載的 `.dmg`,把 app 拖進「應用程式」。v1 版未簽章、未公證,首次啟動請對 Multi-AI Terminal 按右鍵選**打開**以通過 Gatekeeper。
+- **Windows**：下載 `Multi-AI.Terminal_<版本>_x64-setup.exe`（NSIS）或 `.msi` 並執行。因為安裝檔沒有簽章，SmartScreen 可能會先要求你確認。Windows 10 與 11 已內建 WebView2 執行環境，缺少時安裝程式會自動補裝。用 `winget install OpenJS.NodeJS.LTS` 安裝 Node.js 20 以上；worktree 隔離功能還需要 Git for Windows。必要時用 `MAT_NODE` 指定特定的 `node.exe`。
+- **Debian 與 Ubuntu**：下載 `.deb`，執行 `sudo apt install ./Multi-AI.Terminal_<版本>_amd64.deb`。
+- **其他 Linux 發行版**：下載 `.AppImage`，執行 `chmod +x ./Multi-AI.Terminal_*_amd64.AppImage` 後直接開啟。另外也有 `.rpm` 套件。
+- **macOS**：依機型下載 `.dmg`（Apple silicon 選 `aarch64`，Intel 選 `x64`），打開後把 app 拖進「應用程式」。第一次開啟時，對 Multi-AI Terminal 按右鍵並選「打開」；macOS 15 以後的版本，請先試著開啟一次，再到「系統設定」的「隱私權與安全性」按「強制打開」（Open Anyway）。
 
-桌面外殼跑的是與網頁版完全相同的打包 server,監聽隨機的 `127.0.0.1` 埠,資料同樣存在 `~/.multi-ai-terminal/`。本機建置桌面資源:先 `npm run build` 再 `npm run desktop:bundle`;`npm run desktop:build` 另需 Rust 與 Tauri 原生建置環境。
+桌面外殼跑的是同一個打包好的伺服器，只是改用隨機的 `127.0.0.1` 連接埠，資料一樣放在 `~/.multi-ai-terminal/`，和網頁版相同。要在本機建置桌面資源，先 `npm run build` 再 `npm run desktop:bundle`；`npm run desktop:build` 另外需要 Rust 與 Tauri 的原生建置環境。
 
-新增工作區時,桌面版提供原生 **Browse…** 資料夾選擇器;純瀏覽器模式仍保留手動輸入絕對路徑,不會載入桌面 dialog integration。
+新增工作區時，桌面版提供原生的「瀏覽…」（Browse…）資料夾選擇器；純瀏覽器模式則手動輸入絕對路徑，也不會載入桌面版的對話框整合。
 
-## Agent 驅動啟動(agent-ready 原始碼發行版)
+## 讓 agent 啟動（agent-ready 原始碼發行）
 
-這個 repo 可以由 Claude Code、Codex 等 coding agent 驅動。[`agent-release.json`](./agent-release.json) 是機器可讀的契約(依 [`agent-release.schema.json`](./agent-release.schema.json) 驗證),宣告 source-web 通道的進入點、權限、副作用、runtime 狀態與結束碼;對應的 skill 隨 repo 提供,位於 `.claude/skills/launch-multi-ai-terminal/` 與 `.agents/skills/launch-multi-ai-terminal/`。skill 僅限明確指示:只有你主動要求時 agent 才能使用,永不隱式觸發。
+這個 repo 可以交給 Claude Code、Codex 這類 coding agent 操作。[`agent-release.json`](agent-release.json) 是機器可讀的契約（依 [`agent-release.schema.json`](agent-release.schema.json) 驗證），宣告 source-web 通道的進入點、權限、副作用、runtime 狀態與結束碼；對應的 skill 放在 repo 裡的 `.claude/skills/launch-multi-ai-terminal/` 與 `.agents/skills/launch-multi-ai-terminal/`。這些 skill 只能明確呼叫：只有你開口要求時，agent 才能使用，不會自動觸發。
 
 ```sh
-npm run agent:doctor -- --json           # 檢查前置需求(Node 20+、npm);永不代為安裝
-npm run agent:launch -- --wait --json    # 需要時 npm ci、建置、在空閒的 127.0.0.1 埠啟動
-npm run agent:status -- --json           # 狀態 + URL;只有出現「[MAT_AGENT] READY url=...」才算就緒
-npm run agent:stop -- --json             # 只停止身分已驗證的 launcher process tree
-npm run agent:audit -- --json            # 宣告的權限/副作用 vs 實際觀察到的產物
+npm run agent:doctor -- --json           # 檢查前置需求（Node 20+、npm），不會代為安裝任何東西
+npm run agent:launch -- --wait --json    # 需要時先 npm ci，建置後在空閒的 127.0.0.1 連接埠啟動
+npm run agent:status -- --json           # 狀態與 URL；出現「[MAT_AGENT] READY url=...」才算就緒
+npm run agent:stop -- --json             # 只停止身分驗證過的 launcher 行程樹
+npm run agent:audit -- --json            # 比對宣告的權限／副作用與實際觀察到的產物
 ```
 
-此通道僅限 source-web:不用 Rust toolchain、不產生安裝包、不下載 release 資產。生命週期紀錄保存在已被 gitignore 的 `.agent-runtime/`。生命週期腳本永不讀取 provider 憑證;skill 也被禁止代替你操作已啟動 server 的 provider 安裝/更新/登入 API。安裝版桌面 App 開啟時請勿同時執行此通道 — 兩者共用同一資料目錄(`MAT_DATA_DIR` 或 `~/.multi-ai-terminal/`),兩個 server 同時寫入會造成儲存競爭。
+這個通道只走 source-web：不用 Rust toolchain、不產生安裝檔、不下載 release 資產。生命週期紀錄放在已列入 gitignore 的 `.agent-runtime/`。生命週期腳本不會讀取 provider 憑證，skill 也禁止代替你操作已啟動伺服器的 provider 安裝、更新或登入 API。已安裝的桌面版開著時，請不要同時跑這個通道：兩者共用同一個資料目錄（`MAT_DATA_DIR` 或 `~/.multi-ai-terminal/`），兩個伺服器同時寫入會互相搶寫。
 
 ## Provider 設定
 
-桌面版第一次啟動時,會安靜地補齊缺少且受支援的 Claude/Codex managed runtime,也包含 OpenRouter 共用的 Codex runtime。這些檔案都使用 MAT 固定 catalog 版本、先驗證完整性,而且只寫入 `<dataDir>/runtimes/`;不會在全域安裝 `@latest`,也不會修改主機 `PATH`。無法使用的 provider 仍會在 agent palette 顯示 **Setup**,作為修復入口,或執行沒有 managed artifact 時的 provider 專屬固定 recipe。這些 recipe 不接受任何命令列輸入;各 provider 的授權與登入仍彼此獨立。
+桌面版第一次啟動時，會在背景補齊缺少且有支援的 Claude 與 Codex 代管 runtime，也包含 OpenRouter 共用的 Codex runtime。這些檔案都鎖定在 MAT catalog 指定的版本、先驗證完整性，而且只寫入 `<dataDir>/runtimes/`；不會在全域安裝 `@latest`，也不會修改主機的 `PATH`。無法使用的 provider 仍會顯示「設定」（Setup），作為修復入口；沒有代管檔案的 provider，則改用該 provider 專屬的固定安裝步驟。這些步驟不接受任何指令輸入；各 provider 的授權與登入仍各自獨立。
 
-自動 bootstrap 與 Setup 都會在安裝完成後重新偵測 runtime/provider;Setup 另外顯示已經過的安裝時間,並保留清楚的完成／是否需要重開提示。**重新偵測**只會清除 MAT 本機的 PATH／版本快取,不會再次安裝。Windows 的版本檢查會給冷啟動 CLI shim 15 秒;暫時性失敗只快取 2 秒,成功版本則快取 10 分鐘。
+自動補齊與「設定」都會在安裝完成後重新偵測 runtime 與 provider；「設定」還會顯示已經過的時間，並保留完成與是否需要重新啟動的提示。「重新偵測」（Retry detection）只清除 MAT 本機的 PATH 與版本快取，不會重新安裝。Windows 的版本檢查給冷啟動的 CLI shim 15 秒；暫時性的失敗只快取 2 秒，成功的版本則快取 10 分鐘。
 
-MAT 會在子行程 `PATH` 後補上既有的常見 CLI 位置:Windows 的 `%LOCALAPPDATA%\Antigravity`、`%APPDATA%\npm`;其他平台的 `~/.local/bin`、`/usr/local/bin`、`/opt/homebrew/bin`。這讓桌面 server 找得到常見的使用者層級安裝,但不會把環境變數值寫進診斷紀錄。
+MAT 會把存在的常見 CLI 位置補在子行程 `PATH` 的後面：Windows 是 `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin`、`%LOCALAPPDATA%\Antigravity`、`%APPDATA%\npm` 與 `%USERPROFILE%\.local\bin`；其他平台是 `~/.local/bin`、`/usr/local/bin` 與 `/opt/homebrew/bin`。目錄不存在就不加。這讓桌面版伺服器找得到常見的使用者層級安裝，又不會把環境變數的值帶進診斷紀錄。
 
 ## Provider 登入與平行 session
 
-Codex 的部分登入失敗來自多個 CLI session 同時輪替單次使用的 OAuth refresh token。MAT 會讓同一個真實 provider 的啟動至少間隔 1.5 秒(包含 orchestrator),以降低競態,但無法讓上游 token rotation 變成原子操作。相關上游議題:[openai/codex#9634](https://github.com/openai/codex/issues/9634)、[openai/codex#15502](https://github.com/openai/codex/issues/15502)。
+Codex 有些登入失敗，是多個 CLI session 同時輪替只能用一次的 OAuth refresh token 所造成。MAT 讓同一家真實 provider 的啟動至少間隔 1.5 秒（協調者也算在內）來降低競爭，但沒辦法讓上游的 token 輪替變成原子操作。相關的上游 issue：[openai/codex#9634](https://github.com/openai/codex/issues/9634)、[openai/codex#15502](https://github.com/openai/codex/issues/15502)。
 
-長期穩定的做法是 API-key auth 或把同一 provider 串行使用。Codex 支援 API-key login,Claude Code 會讀取 `ANTHROPIC_API_KEY`;refresh token 已撤銷時,先直接用該 CLI 登出再登入,Codex 可執行 `codex logout && codex login`。
+長久的解法是改用 API key 驗證，或依序使用同一家 provider。Codex 支援 API key 登入，Claude Code 會讀取 `ANTHROPIC_API_KEY`。如果 OAuth refresh token 已經被撤銷，先用該 CLI 登出再登入；Codex 是 `codex logout && codex login`。
 
-真實 provider 若命中已知登入錯誤,失敗節點卡會顯示多行琥珀色指引與查證過的登入命令,provider chip 會出現 `auth` 徽章,Setup 也會提供可複製的 **Sign in** 區塊。Composer 會在再次使用該 provider 前提出非阻擋式警告;之後任一成功節點會清除此警示。
+真實 provider 出現可以辨識的登入錯誤時，節點卡會顯示多行琥珀色的提示與確認過的指令，provider 標籤會多一個 `auth` 標記，「設定」也會提供可以複製的「登入」（Sign in）區塊。之後再用這家 provider 執行時，編輯區會先提醒但不阻擋；之後任何一個節點成功，就會清除這個提醒。
 
-OpenRouter 只使用環境認證:啟動 MAT 前設定 `OPENROUTER_API_KEY`,變更後重新啟動 MAT。MAT 只回報此變數是否存在,絕不暴露或持久保存它的值。
+OpenRouter 只用環境變數驗證：啟動 MAT 前先設定 `OPENROUTER_API_KEY`，改了之後要重新啟動 MAT。MAT 只回報這個變數有沒有設定，絕不顯示或保存它的值。
 
 ## Provider 與 runtime 路徑
 
-| 供應商 | Runtime／傳輸 | 串流 | 備註 |
+| Provider | Runtime／傳輸方式 | 串流 | 備註 |
 |---|---|---|---|
-| claude | Agent SDK 驅動解析後的 `claude` runtime | 完整(文字/思考/工具/用量) | 持久 session runtime;仍保留明確選用的 legacy CLI 模式 |
-| codex | 持久 `codex app-server` JSON-RPC/JSONL controller | 完整(思考/工具/用量) | 單一共享 controller 管理可續談 thread |
-| grok | `grok --prompt-file F --output-format streaming-json`,外包一層 FIFO manager | 僅思考/文字(工具靜默執行) | grok ≥ 0.2.93:`--prompt-file` 不可再加 `-p` |
-| agy | `agy -p "PROMPT" --model "Gemini 3.1 Pro (High)"`,外包一層 FIFO manager | 純文字 | 模型用顯示名稱;無 JSON 模式、無法續談 |
-| openrouter | 沒有 OpenRouter CLI;使用隔離 OpenRouter config 的持久 Codex app-server | 所選模型支援時為完整串流 | 需要 `OPENROUTER_API_KEY`;先選模型 → 再選版本;送出精確版本 slug |
-| mock | 行程內 | 腳本化 | 確定性;測試用 `MOCK_REPLY:` 回聲模式 |
+| claude | Agent SDK 驅動解析出的 `claude` runtime | 完整（文字、思考、工具、用量） | 持續的 session runtime；仍保留可以明確選用的舊版 CLI 模式 |
+| codex | 常駐的 `codex app-server` JSON-RPC／JSONL controller | 完整（思考、工具、用量） | 由一個共用的 controller 管理可以接續的 thread |
+| grok | `grok --prompt-file F --output-format streaming-json`，前面有一個 FIFO manager | 只有思考與文字（工具在背景執行） | grok 0.2.93 以上：用 `--prompt-file` 時不要再加 `-p` |
+| agy | `agy -p "PROMPT" --model "Gemini 3.1 Pro (High)" --print-timeout 45m`，前面有一個 FIFO manager | 純文字 | 模型用顯示名稱；沒有 JSON 模式，也無法接續 session |
+| openrouter | 沒有 OpenRouter CLI；使用設定獨立的常駐 Codex app-server | 所選模型支援時為完整串流 | 需要 `OPENROUTER_API_KEY`；先選模型再選版本，送出精確的版本 slug |
+| mock | 在伺服器行程內執行 | 照腳本 | 結果固定；測試用的 `MOCK_REPLY:` 回聲模式 |
 
-每個槽位的權限層級:`safe`(唯讀)、`auto`(自動接受編輯)、`full`(繞過沙箱)— 對應各 runtime 的原生政策(SPEC §4.6)。
+每個槽位的權限層級：`safe`（唯讀）、`auto`（自動接受編輯）、`full`（略過沙箱），對應各 runtime 原生的權限政策（SPEC §4.6）。
 
 ## 信任模型
 
-預設綁定 `127.0.0.1`。`--host 0.0.0.0` 會把 API/UI 暴露到你的網路 — 請設定 `--token`(REST bearer + WS query token)。能連上這個埠的人就能在你的工作區執行任意 CLI agent;請據此看待這個埠(建議只透過 Tailscale 暴露)。
+預設綁定 `127.0.0.1`。`--host 0.0.0.0` 會把 API 與介面開放到你的網路，這時請一併設定 `--token`（REST 用 bearer token，WebSocket 用 query token）。MAT 不會強制非 loopback 位址一定要設 token，這要由你決定。能連到這個連接埠的人，就能在你的工作區執行任意 CLI agent，請比照看待（建議只透過 Tailscale 開放）。
 
 ## 資料
 
-`~/.multi-ai-terminal/`(可用 `--data-dir` / `MAT_DATA_DIR` 覆蓋):`workspaces.json`、`workflows/*.json`、`runs/<runId>/run.json` + `events.jsonl` + `raw/*.jsonl`(每次嘗試均先移除環境變數值的 CLI 輸出)+ `artifacts/*.patch` + `artifacts/*.verify.log`。保留策略:每個工作區最近 100 次執行,刪除時一併清理 worktree 與分支。
+`~/.multi-ai-terminal/`（可用 `--data-dir` 或 `MAT_DATA_DIR` 改位置）：`workspaces.json`、`workflows/*.json`、`runs/<runId>/run.json`、`events.jsonl`、`raw/*.jsonl`（每次嘗試的 CLI 輸出，已先移除環境變數的值）、`artifacts/*.patch` 與 `artifacts/*.verify.log`。保留規則：每個工作區保留最近 100 次執行，刪除時一併清掉對應的 worktree 與分支。
 
 ## 文件
 
-- [SPEC.md](./SPEC.md) — 工程契約(v1.5,含 BAT runtime alignment)
-- [docs/project-audit-2026-07-20.md](./docs/project-audit-2026-07-20.md) — 本次 hardening 記錄與依風險排序的後續 backlog
-- [docs/spec-review-panel.md](./docs/spec-review-panel.md) — 4 模型規格審查記錄
-- [docs/code-review-panel.md](./docs/code-review-panel.md) — 4 模型程式碼審查記錄(25 項發現已修復、3 項駁回)
+- [SPEC.md](SPEC.md)：工程規格（v1.5，含 BAT runtime 對齊）
+- [docs/project-audit-2026-07-20.md](docs/project-audit-2026-07-20.md)：強化工作紀錄，以及依序排列的後續待辦
+- [docs/spec-review-panel.md](docs/spec-review-panel.md)：4 個模型的規格審查紀錄
+- [docs/code-review-panel.md](docs/code-review-panel.md)：4 個模型的程式碼審查紀錄（25 項已修正、3 項駁回）
 
-由 4 模型評審流程打造:規格與程式碼審查由 Claude Fable 5、Codex GPT-5.6-sol、Gemini 3.1 Pro、Grok 4.5 共同執行;實作由平行的 Codex worker 在隔離的 git worktree 中完成。
+開發流程採 4 模型評審：規格與程式碼由 Claude Fable 5、Codex GPT-5.6-sol、Gemini 3.1 Pro 與 Grok 4.5 審查；實作由多個平行的 Codex worker 在各自隔離的 git worktree 完成。
 
-## 已知限制(v1)
+## 致謝
 
-- Grok 的串流 JSON 不含工具事件 — grok 節點只顯示思考/文字;摘要中工具數顯示「n/a」。
-- Antigravity(`agy`)無 headless JSON 模式 — 純文字串流、無法續談(調度者每次把關都重新簡報)。
-- 機器重開後,崩潰復原依持久化的 PID 終止殘留 process group;接受 PID 重用的風險。
-- 事件環在瀏覽器記憶體保留 2 萬筆;更舊的歷史從伺服器分頁載入,並明確標示截斷。
-- Windows 上的進程終止使用 `taskkill /T /F`(強制樹狀終止);若 node 先行退出,已脫離的孫進程由下次啟動時的清掃回收。
+- [Better Agent Terminal](https://github.com/tony1223/better-agent-terminal) 是 provider runtime 處理方式的架構參考：常駐的 `codex app-server` controller 與 Claude Agent SDK session。MAT 不是 fork，而是把這套做法移植到純 Node 的伺服器，也套用到 grok 與 agy。
+- [TempoTerm](https://github.com/mukiwu/tempo-term) 是介面參考：以專案為主的導覽，以及一眼就看得懂的狀態。
+
+## 授權
+
+MIT © 2026 Ted Huang，見 [LICENSE](LICENSE)。`web/src/assets/themes/ai-sister/` 裡的五張 AI-Sister 角色圖不適用 MIT 授權，請見該目錄的 [NOTICE.md](web/src/assets/themes/ai-sister/NOTICE.md)。
+
+## 已知限制
+
+- Grok 的串流 JSON 沒有工具事件，所以 grok 節點只顯示思考與文字，摘要裡的工具數會顯示「n/a」。
+- Antigravity（`agy`）沒有 headless JSON 模式：串流是純文字，也無法接續 session（協調者每次把關都要重新交代背景）。
+- 桌面版沒有程式碼簽章，也沒有經過 Apple 公證，而且 `PATH` 上仍需要 Node.js 20 以上（或設定 `MAT_NODE`）。
+- CI 與證據測試用的是 mock provider；實際登入 Codex、Claude 或 OpenRouter 帳號的執行不在 CI 範圍內。
+- 機器重開後，崩潰復原會依保存的 PID 結束殘留的行程群組，並接受 PID 被重複使用的風險。
+- 瀏覽器記憶體裡的事件環最多保留 20,000 筆；更早的紀錄會從伺服器分頁載入，並明確標示有截斷。
+- Windows 上結束行程用的是 `taskkill /T /F`（強制結束整個行程樹）；如果 node 先自行結束，已脫離的孫行程會在下次伺服器啟動時，由殘留 PID 的清理流程回收。
