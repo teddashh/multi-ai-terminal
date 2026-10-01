@@ -288,7 +288,7 @@
         },
         "body": {
           "en": "Interrupt stops the active candidates, keeps their partial logs and patches, and runs your instruction. Queue waits for the next stage boundary. Up to 8 per run, first in, first out, never typed into a running process.",
-          "zh": "「立即插入」會停下正在執行的候選，保留已產生的日誌與 patch，再執行你的新指示；「排隊」則等到下一個階段交界。每次執行最多 8 則，先進先出，絕不會寫進執行中程序的 stdin。"
+          "zh": "「立即插入」會停下正在執行的候選，保留已產生的日誌與 patch，再執行你的新指示；「排隊」則等到下一個階段交界。每次執行最多 8 則，先進先出，絕不會寫進執行中行程的 stdin。"
         },
         "tag": "server/src/engine/steer.ts"
       },
@@ -316,7 +316,7 @@
     },
     "intro": {
       "en": "The browser UI and the desktop shell talk to the same Node server. It owns runs, gates, and storage, and starts and stops each provider's runtime as a child process or SDK session.",
-      "zh": "瀏覽器介面和桌面版都連到同一個 Node 伺服器。執行、關卡與儲存都由它負責，各家 provider 的 runtime 也由它以子程序或 SDK session 的形式啟動與停止。"
+      "zh": "瀏覽器介面和桌面版都連到同一個 Node 伺服器。執行、關卡與儲存都由它負責，各家 provider 的 runtime 也由它以子行程或 SDK session 的形式啟動與停止。"
     },
     "label": {
       "en": "REST + WebSocket → engine → agents → disk",
@@ -602,7 +602,7 @@
       },
       {
         "en": "After a reboot, crash recovery kills stale process groups by saved PID and accepts the risk of PID reuse",
-        "zh": "機器重開後，崩潰復原會依記錄的 PID 結束殘留的程序群組，並接受 PID 被重複使用的風險"
+        "zh": "機器重開後，崩潰復原會依記錄的 PID 結束殘留的行程群組，並接受 PID 被重複使用的風險"
       }
     ]
   },

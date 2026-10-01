@@ -30,7 +30,7 @@
 
 ## 追加指示（Steering）
 
-執行進行中時，可以在執行面板輸入新的指示。預設的「立即插入」（interrupt）會結束目前候選結果的整個程序樹，保留已產生的日誌與 patch，讓新指示走一樣的證據流程，再用關卡式的審查決定要重做被中斷的階段、繼續還是中止。「排隊」（queue）會等到下一個階段交界才套用，不中斷目前的工作。追加指示先進先出，每次執行最多 8 則；停用協調者時，處理方式仍是固定的。這個功能不用 PTY，也不會寫進執行中子程序的 stdin。
+執行進行中時，可以在執行面板輸入新的指示。預設的「立即插入」（interrupt）會結束目前候選結果的整個行程樹，保留已產生的日誌與 patch，讓新指示走一樣的證據流程，再用關卡式的審查決定要重做被中斷的階段、繼續還是中止。「排隊」（queue）會等到下一個階段交界才套用，不中斷目前的工作。追加指示先進先出，每次執行最多 8 則；停用協調者時，處理方式仍是固定的。這個功能不用 PTY，也不會寫進執行中子行程的 stdin。
 
 ## 除錯套件
 
@@ -75,7 +75,7 @@ npm start                      # 網頁介面與 API 開在 http://127.0.0.1:778
 npm run agent:doctor -- --json           # 檢查前置需求（Node 20+、npm），不會代為安裝任何東西
 npm run agent:launch -- --wait --json    # 需要時先 npm ci，建置後在空閒的 127.0.0.1 連接埠啟動
 npm run agent:status -- --json           # 狀態與 URL；出現「[MAT_AGENT] READY url=...」才算就緒
-npm run agent:stop -- --json             # 只停止身分驗證過的 launcher 程序樹
+npm run agent:stop -- --json             # 只停止身分驗證過的 launcher 行程樹
 npm run agent:audit -- --json            # 比對宣告的權限／副作用與實際觀察到的產物
 ```
 
@@ -87,7 +87,7 @@ npm run agent:audit -- --json            # 比對宣告的權限／副作用與�
 
 自動補齊與「設定」都會在安裝完成後重新偵測 runtime 與 provider；「設定」還會顯示已經過的時間，並保留完成與是否需要重新啟動的提示。「重新偵測」（Retry detection）只清除 MAT 本機的 PATH 與版本快取，不會重新安裝。Windows 的版本檢查給冷啟動的 CLI shim 15 秒；暫時性的失敗只快取 2 秒，成功的版本則快取 10 分鐘。
 
-MAT 會把存在的常見 CLI 位置補在子程序 `PATH` 的後面：Windows 是 `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin`、`%LOCALAPPDATA%\Antigravity`、`%APPDATA%\npm` 與 `%USERPROFILE%\.local\bin`；其他平台是 `~/.local/bin`、`/usr/local/bin` 與 `/opt/homebrew/bin`。目錄不存在就不加。這讓桌面版伺服器找得到常見的使用者層級安裝，又不會把環境變數的值帶進診斷紀錄。
+MAT 會把存在的常見 CLI 位置補在子行程 `PATH` 的後面：Windows 是 `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin`、`%LOCALAPPDATA%\Antigravity`、`%APPDATA%\npm` 與 `%USERPROFILE%\.local\bin`；其他平台是 `~/.local/bin`、`/usr/local/bin` 與 `/opt/homebrew/bin`。目錄不存在就不加。這讓桌面版伺服器找得到常見的使用者層級安裝，又不會把環境變數的值帶進診斷紀錄。
 
 ## Provider 登入與平行 session
 
@@ -108,7 +108,7 @@ OpenRouter 只用環境變數驗證：啟動 MAT 前先設定 `OPENROUTER_API_KE
 | grok | `grok --prompt-file F --output-format streaming-json`，前面有一個 FIFO manager | 只有思考與文字（工具在背景執行） | grok 0.2.93 以上：用 `--prompt-file` 時不要再加 `-p` |
 | agy | `agy -p "PROMPT" --model "Gemini 3.1 Pro (High)" --print-timeout 45m`，前面有一個 FIFO manager | 純文字 | 模型用顯示名稱；沒有 JSON 模式，也無法接續 session |
 | openrouter | 沒有 OpenRouter CLI；使用設定獨立的常駐 Codex app-server | 所選模型支援時為完整串流 | 需要 `OPENROUTER_API_KEY`；先選模型再選版本，送出精確的版本 slug |
-| mock | 在程序內執行 | 照腳本 | 結果固定；測試用的 `MOCK_REPLY:` 回聲模式 |
+| mock | 在伺服器行程內執行 | 照腳本 | 結果固定；測試用的 `MOCK_REPLY:` 回聲模式 |
 
 每個槽位的權限層級：`safe`（唯讀）、`auto`（自動接受編輯）、`full`（略過沙箱），對應各 runtime 原生的權限政策（SPEC §4.6）。
 
@@ -144,6 +144,6 @@ MIT © 2026 Ted Huang，見 [LICENSE](LICENSE)。`web/src/assets/themes/ai-siste
 - Antigravity（`agy`）沒有 headless JSON 模式：串流是純文字，也無法接續 session（協調者每次把關都要重新交代背景）。
 - 桌面版沒有程式碼簽章，也沒有經過 Apple 公證，而且 `PATH` 上仍需要 Node.js 20 以上（或設定 `MAT_NODE`）。
 - CI 與證據測試用的是 mock provider；實際登入 Codex、Claude 或 OpenRouter 帳號的執行不在 CI 範圍內。
-- 機器重開後，崩潰復原會依保存的 PID 結束殘留的程序群組，並接受 PID 被重複使用的風險。
+- 機器重開後，崩潰復原會依保存的 PID 結束殘留的行程群組，並接受 PID 被重複使用的風險。
 - 瀏覽器記憶體裡的事件環最多保留 20,000 筆；更早的紀錄會從伺服器分頁載入，並明確標示有截斷。
-- Windows 上結束程序用的是 `taskkill /T /F`（強制結束整個程序樹）；如果 node 先自行結束，已脫離的孫程序會在下次伺服器啟動時，由殘留 PID 的清理流程回收。
+- Windows 上結束行程用的是 `taskkill /T /F`（強制結束整個行程樹）；如果 node 先自行結束，已脫離的孫行程會在下次伺服器啟動時，由殘留 PID 的清理流程回收。
