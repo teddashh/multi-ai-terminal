@@ -1,0 +1,689 @@
+{
+  "repo": "teddashh/multi-ai-terminal",
+  "slug": "multi-ai-terminal",
+  "name": "Multi-AI Terminal",
+  "mark": "MT",
+  "palette": "graphite",
+  "default_branch": "main",
+  "verified": "2026-09-30",
+  "language": "TypeScript",
+  "license": {
+    "spdx": "MIT",
+    "label": {
+      "en": "MIT License",
+      "zh": "MIT 授權"
+    },
+    "href": "LICENSE"
+  },
+  "title": {
+    "en": "A local workbench for multi-agent coding workflows",
+    "zh": "在本機編排多個 coding agent 的工作台"
+  },
+  "description": {
+    "en": "Runs Claude Code, Codex, Grok, Antigravity, and OpenRouter models through headless runtimes in staged workflows, with orchestrator gates, git worktree isolation, your own verification command, and a replayable event log.",
+    "zh": "用分階段的工作流，透過 headless runtime 執行 Claude Code、Codex、Grok、Antigravity 與 OpenRouter 模型，並提供協調者關卡、git worktree 隔離、自訂的驗證指令，以及可以回放的事件紀錄。"
+  },
+  "hero": {
+    "eyebrow": {
+      "en": "Multi-agent workbench · desktop and web",
+      "zh": "多 agent 工作台 · 桌面版與網頁版"
+    },
+    "headline": {
+      "en": "Stage your coding agents. <em>Gate</em> every handoff.",
+      "zh": "讓 agent 接力，交接都要<em>過關</em>。"
+    },
+    "lede": {
+      "en": "Claude Code, Codex, Grok, and Antigravity run through their own headless runtimes, and OpenRouter models run through Codex. An orchestrator agent gates each stage, your test command can check each patch, and the whole run stays replayable.",
+      "zh": "Claude Code、Codex、Grok、Antigravity 都透過各自的 headless runtime 執行，OpenRouter 的模型則借用 Codex 執行。每個階段由協調者 agent 把關，patch 可以交給你自己的測試指令檢查，整個執行過程都能回放。"
+    },
+    "primary": {
+      "href": "#start",
+      "label": {
+        "en": "Get started",
+        "zh": "開始使用"
+      }
+    },
+    "secondary": {
+      "href": "https://github.com/teddashh/multi-ai-terminal",
+      "label": {
+        "en": "View source",
+        "zh": "查看原始碼"
+      }
+    },
+    "notes": [
+      "MIT",
+      "TypeScript · Tauri 2",
+      {
+        "en": "Binds 127.0.0.1 by default",
+        "zh": "預設只綁定 127.0.0.1"
+      }
+    ],
+    "visual": {
+      "type": "receipt",
+      "top": {
+        "en": "Run workspace",
+        "zh": "執行工作區"
+      },
+      "badge": {
+        "en": "Running",
+        "zh": "執行中"
+      },
+      "name": "Implement → Test → Review",
+      "meta": {
+        "en": "Pipeline preset · verify command: npm test",
+        "zh": "內建 Pipeline 流程 · 驗證指令：npm test"
+      },
+      "rows": [
+        {
+          "state": "ok",
+          "label": {
+            "en": "Implement · verified",
+            "zh": "實作 · 驗證通過"
+          },
+          "detail": "claude · sonnet · worktree"
+        },
+        {
+          "state": "ok",
+          "label": {
+            "en": "Gate · advance",
+            "zh": "關卡 · 繼續"
+          },
+          "detail": "orchestrator · claude sonnet"
+        },
+        {
+          "state": "wait",
+          "label": {
+            "en": "Test · running",
+            "zh": "測試 · 執行中"
+          },
+          "detail": "codex · gpt-5.6-sol · worktree"
+        },
+        {
+          "state": "wait",
+          "label": {
+            "en": "Review · queued",
+            "zh": "審查 · 排隊中"
+          },
+          "detail": "claude · sonnet · safe"
+        }
+      ],
+      "footer": {
+        "left": {
+          "en": "requireVerified on",
+          "zh": "已開啟 requireVerified"
+        },
+        "right": {
+          "en": "Stage 2 of 3",
+          "zh": "第 2 / 3 階段"
+        }
+      }
+    }
+  },
+  "stats": [
+    {
+      "value": "v0.2.10",
+      "label": {
+        "en": "Latest release, July 2026",
+        "zh": "最新版本，2026 年 7 月"
+      }
+    },
+    {
+      "value": "5",
+      "label": {
+        "en": "Providers, plus a test mock",
+        "zh": "個 provider，另有測試用 mock"
+      }
+    },
+    {
+      "value": "4",
+      "label": {
+        "en": "Builtin workflows",
+        "zh": "個內建工作流"
+      }
+    },
+    {
+      "value": "12",
+      "label": {
+        "en": "Agents per stage, at most",
+        "zh": "每個階段最多的 agent 數"
+      }
+    }
+  ],
+  "problem": {
+    "kicker": {
+      "en": "Why it exists",
+      "zh": "為什麼要做"
+    },
+    "title": {
+      "en": "Side-by-side answers are not a workflow.",
+      "zh": "並排的答案，還不是工作流程。"
+    },
+    "body": {
+      "en": "Its predecessor, multi-ai-chat-desktop, orchestrated web chats. That is fine for comparing answers, but a chat window cannot edit your repository, run your tests, or record who decided what. Multi-AI Terminal (MAT) drives each agent's headless runtime inside your workspace, so every edit, check, and decision is kept as data.",
+      "zh": "前一代的 multi-ai-chat-desktop 串的是網頁聊天。拿來比較答案沒問題，但聊天視窗改不了你的 repo、跑不了你的測試，也記不下誰做了什麼決定。Multi-AI Terminal（MAT）直接驅動各家 agent 的 headless runtime，在你的工作區裡動手，每一次修改、檢查與決策都會存成資料。"
+    },
+    "quote": {
+      "en": "A degraded or unverified advance is labeled, never hidden.",
+      "zh": "降級放行或未經驗證的結果，都會清楚標示，絕不藏起來。"
+    }
+  },
+  "flow": {
+    "kicker": {
+      "en": "How it works",
+      "zh": "運作方式"
+    },
+    "title": {
+      "en": "Compose, run, gate, record.",
+      "zh": "組流程、跑 agent、過關卡、留紀錄。"
+    },
+    "intro": {
+      "en": "A run applies a workflow to a workspace: ordered stages, each holding one or more agent slots, with an optional gate after each stage.",
+      "zh": "一次執行，就是把一個工作流套用到一個工作區：依序排好的階段，每個階段放一個以上的 agent 槽位，階段結束後可以設一道關卡。"
+    },
+    "steps": [
+      {
+        "title": {
+          "en": "Add a workspace",
+          "zh": "加入工作區"
+        },
+        "body": {
+          "en": "Point MAT at a project directory by absolute path, or pick it with Browse in the desktop app. Optionally set a verification command such as npm test.",
+          "zh": "用絕對路徑指定專案目錄，桌面版也可以用 Browse 選資料夾。可以順便設定驗證指令，例如 npm test。"
+        }
+      },
+      {
+        "title": {
+          "en": "Pick or shape a workflow",
+          "zh": "挑選或調整工作流"
+        },
+        "body": {
+          "en": "Start from Planning, Build, Review, or Pipeline. Under Customize, each slot sets provider, model, reasoning effort, permission tier, prompt template, and count.",
+          "zh": "從規劃、建置、審查或 Pipeline 四個內建流程開始。在「進階設定」裡，每個槽位可以指定 provider、模型、推理強度、權限層級、提示範本與數量。"
+        }
+      },
+      {
+        "title": {
+          "en": "Agents work, a gate decides",
+          "zh": "agent 動手，關卡決定"
+        },
+        "body": {
+          "en": "A stage's agents run in parallel, each optionally in its own git worktree. At a gated stage, an orchestrator agent reads a digest of the candidates and answers advance, retry, or abort in strict JSON.",
+          "zh": "同一階段的 agent 平行執行，也可以各自在獨立的 git worktree 裡動手。遇到有關卡的階段，協調者 agent 會讀取候選結果的摘要，用嚴格的 JSON 回覆繼續、重試或中止。"
+        }
+      },
+      {
+        "title": {
+          "en": "Read the record",
+          "zh": "回頭看紀錄"
+        },
+        "body": {
+          "en": "Conversation lists each answer, decision, check, and failure. Timeline replays the raw event log. Export a Markdown report or a debug bundle when you hand the work on.",
+          "zh": "「對話」列出每個回答、決策、檢查與失敗，「時間軸」回放原始事件紀錄。要交接時，可以匯出 Markdown 報告或除錯套件。"
+        }
+      }
+    ]
+  },
+  "capabilities": {
+    "kicker": {
+      "en": "What you get",
+      "zh": "你會得到什麼"
+    },
+    "title": {
+      "en": "Every step leaves evidence.",
+      "zh": "每一步都留下證據。"
+    },
+    "intro": {
+      "en": "MAT treats agent output as evidence to check, not as an answer to trust.",
+      "zh": "MAT 把 agent 的輸出當成要查核的證據，而不是直接採信的答案。"
+    },
+    "items": [
+      {
+        "title": {
+          "en": "A real runtime per provider",
+          "zh": "每家都用真正的 runtime"
+        },
+        "body": {
+          "en": "Claude runs through the Agent SDK and Codex through a persistent codex app-server. Grok and Antigravity run as headless CLIs behind FIFO managers, and OpenRouter models run through Codex with an isolated config.",
+          "zh": "Claude 透過 Agent SDK 執行，Codex 透過常駐的 codex app-server。Grok 與 Antigravity 以 headless CLI 執行，前面各有一個 FIFO manager 排隊；OpenRouter 的模型則借用 Codex 執行，並使用獨立的設定。"
+        },
+        "tag": "server/src/providers/"
+      },
+      {
+        "title": {
+          "en": "An orchestrator with a budget",
+          "zh": "有額度上限的協調者"
+        },
+        "body": {
+          "en": "Any provider can orchestrate. A retry can target specific nodes and add a prompt addendum. If the answer cannot be parsed or the retry budget runs out (2 per stage by default), the stage advances and is marked degraded.",
+          "zh": "任何 provider 都能擔任協調者。重試可以只針對特定節點，並附上補充提示。回覆無法解析，或用完重試額度（預設每階段 2 次）時，階段會繼續往下，並標為降級。"
+        },
+        "tag": "server/src/orchestrator/"
+      },
+      {
+        "title": {
+          "en": "Worktrees and patches",
+          "zh": "Worktree 與 patch"
+        },
+        "body": {
+          "en": "Nodes can run in their own git worktree, and each attempt is captured as a binary patch. Apply one from the UI: MAT checks it with git apply first and lists conflicts instead of forcing it.",
+          "zh": "節點可以在獨立的 git worktree 裡執行，每次嘗試的修改都存成二進位 patch。從介面套用時，MAT 會先用 git apply 檢查，有衝突就列出來，不會硬套。"
+        },
+        "tag": "server/src/engine/worktree.ts"
+      },
+      {
+        "title": {
+          "en": "Verification you define",
+          "zh": "驗證指令由你決定"
+        },
+        "body": {
+          "en": "Each workspace can set a command such as npm test, with a 600-second default timeout. Worktree candidates with a non-empty patch run it, and a stage with requireVerified retries failed checks when nothing passed.",
+          "zh": "每個工作區可以設定一個驗證指令，例如 npm test，預設逾時 600 秒。使用 worktree 且 patch 不是空的候選結果會執行它；開啟 requireVerified 的階段，如果沒有任何候選通過，就會重試沒過的那些。"
+        },
+        "tag": "server/src/engine/verify.ts"
+      },
+      {
+        "title": {
+          "en": "Steering mid-run",
+          "zh": "執行中途追加指示"
+        },
+        "body": {
+          "en": "Interrupt stops the active candidates, keeps their partial logs and patches, and runs your instruction. Queue waits for the next stage boundary. Up to 8 per run, first in, first out, never typed into a running process.",
+          "zh": "「立即插入」會停下正在執行的候選，保留已產生的日誌與 patch，再執行你的新指示；「排隊」則等到下一個階段交界。每次執行最多 8 則，先進先出，絕不會寫進執行中程序的 stdin。"
+        },
+        "tag": "server/src/engine/steer.ts"
+      },
+      {
+        "title": {
+          "en": "Reports and debug bundles",
+          "zh": "報告與除錯套件"
+        },
+        "body": {
+          "en": "The Markdown report separates generated, reviewed, advanced, and verified work, with CLI versions, usage, patches, and checks. The debug bundle is one zip of the whole run, with environment variable values redacted.",
+          "zh": "Markdown 報告會分開標示已產生、已審查、已放行與已驗證的工作，並附上 CLI 版本、用量、patch 與驗證結果。除錯套件把整次執行打包成一個 zip，環境變數的值都會遮蔽。"
+        },
+        "tag": "GET /api/runs/:id/report"
+      }
+    ]
+  },
+  "architecture": {
+    "kicker": {
+      "en": "Architecture",
+      "zh": "系統架構"
+    },
+    "title": {
+      "en": "One local server, many runtimes.",
+      "zh": "一個本機伺服器，多種 runtime。"
+    },
+    "intro": {
+      "en": "The browser UI and the desktop shell talk to the same Node server. It owns runs, gates, and storage, and starts and stops each provider's runtime as a child process or SDK session.",
+      "zh": "瀏覽器介面和桌面版都連到同一個 Node 伺服器。執行、關卡與儲存都由它負責，各家 provider 的 runtime 也由它以子程序或 SDK session 的形式啟動與停止。"
+    },
+    "label": {
+      "en": "REST + WebSocket → engine → agents → disk",
+      "zh": "REST + WebSocket → 引擎 → agent → 磁碟"
+    },
+    "nodes": [
+      {
+        "name": {
+          "en": "Web UI",
+          "zh": "網頁介面"
+        },
+        "lines": [
+          "React + Vite",
+          {
+            "en": "Conversation",
+            "zh": "對話"
+          },
+          {
+            "en": "Timeline",
+            "zh": "時間軸"
+          },
+          {
+            "en": "Health",
+            "zh": "健康狀態"
+          }
+        ]
+      },
+      {
+        "name": {
+          "en": "Server",
+          "zh": "伺服器"
+        },
+        "core": true,
+        "lines": [
+          "Fastify + WS",
+          {
+            "en": "Stage engine",
+            "zh": "階段引擎"
+          },
+          {
+            "en": "Gates",
+            "zh": "關卡"
+          },
+          {
+            "en": "Verification",
+            "zh": "驗證"
+          }
+        ]
+      },
+      {
+        "name": {
+          "en": "Agents",
+          "zh": "Agent"
+        },
+        "lines": [
+          "claude",
+          "codex",
+          "grok · agy",
+          "openrouter"
+        ]
+      },
+      {
+        "name": {
+          "en": "Data",
+          "zh": "資料"
+        },
+        "lines": [
+          "run.json",
+          "events.jsonl",
+          {
+            "en": "patches, logs",
+            "zh": "patch、日誌"
+          }
+        ]
+      }
+    ],
+    "return": {
+      "en": "Data lives in ~/.multi-ai-terminal. The Tauri 2 desktop app runs the same server on a random loopback port.",
+      "zh": "資料放在 ~/.multi-ai-terminal。Tauri 2 桌面版跑的是同一個伺服器，只是改用隨機的 loopback 連接埠。"
+    },
+    "principles": {
+      "title": {
+        "en": "Local by default.",
+        "zh": "預設只在本機。"
+      },
+      "items": [
+        {
+          "en": "Binds 127.0.0.1; set a token before switching the host to 0.0.0.0",
+          "zh": "預設綁定 127.0.0.1；改用 0.0.0.0 之前，先設定 token"
+        },
+        {
+          "en": "Agents start from argv arrays; only your verification command runs in a shell",
+          "zh": "agent 一律以參數陣列啟動，只有你設定的驗證指令會經過 shell"
+        },
+        {
+          "en": "Managed runtimes are pinned, integrity-checked, and kept under the data directory",
+          "zh": "代管的 runtime 鎖定版本並驗證完整性，只裝在資料目錄內"
+        },
+        {
+          "en": "No global @latest installs and no edits to the host PATH",
+          "zh": "不在全域安裝 @latest，也不修改主機的 PATH"
+        },
+        {
+          "en": "Environment variable values are redacted before anything is written to disk",
+          "zh": "寫進磁碟之前，環境變數的值都會先遮蔽"
+        }
+      ]
+    }
+  },
+  "decisions": {
+    "nav": false,
+    "kicker": {
+      "en": "Design decisions",
+      "zh": "設計取捨"
+    },
+    "title": {
+      "en": "Deliberate trade-offs.",
+      "zh": "刻意做的取捨。"
+    },
+    "items": [
+      {
+        "title": {
+          "en": "Headless runtimes, not web chats",
+          "zh": "用 headless runtime，不用網頁聊天"
+        },
+        "body": {
+          "en": "Driving each vendor's CLI, app-server, or SDK gives MAT tool events, usage, patches, and exit codes it can normalize into one schema. The cost: every provider needs its own install and sign-in, and the Grok and agy streams carry less detail.",
+          "zh": "直接驅動各家的 CLI、app-server 或 SDK，MAT 才拿得到工具事件、用量、patch 與結束代碼，並整理成同一套格式。代價是每個 provider 都得各自安裝、登入，而 Grok 與 agy 的串流細節也比較少。"
+        }
+      },
+      {
+        "title": {
+          "en": "Advance degraded, never hang",
+          "zh": "寧可降級放行，也不卡住"
+        },
+        "body": {
+          "en": "If the orchestrator's answer cannot be parsed, or a stage spends its retry budget, the run moves on and the decision is marked degraded in the UI and the report. A run that finishes with a visible caveat beats one that never finishes.",
+          "zh": "協調者的回覆無法解析，或某個階段用完重試額度時，執行會繼續往下，這個決策會在介面與報告裡標為降級。帶著明確註記跑完，總比永遠跑不完好。"
+        }
+      },
+      {
+        "title": {
+          "en": "Space out same-provider launches",
+          "zh": "同一家 provider 錯開啟動"
+        },
+        "body": {
+          "en": "Parallel Codex sessions on one OAuth login can race the single-use refresh token. MAT starts sessions of the same provider at least 1.5 seconds apart, orchestrator included. That narrows the race without removing it, so API keys or serial use stay the durable fix.",
+          "zh": "同一個 OAuth 登入下平行跑多個 Codex session，可能會搶著輪替只能用一次的 refresh token。MAT 讓同一家 provider 的啟動至少間隔 1.5 秒，協調者也算在內。這只能縮小競爭，無法根除，長久的解法還是改用 API key 或依序使用。"
+        }
+      },
+      {
+        "title": {
+          "en": "Follow BAT for runtime handling",
+          "zh": "runtime 處理跟著 BAT 走"
+        },
+        "body": {
+          "en": "Provider sessions follow <a href=\"https://github.com/tony1223/better-agent-terminal\">Better Agent Terminal</a>: a persistent codex app-server controller and Claude Agent SDK sessions. MAT is not a fork. It ports that pattern to a Node-only server and applies it to grok and agy as well.",
+          "zh": "provider session 的處理方式參考 <a href=\"https://github.com/tony1223/better-agent-terminal\">Better Agent Terminal</a>：常駐的 codex app-server controller，加上 Claude Agent SDK session。MAT 不是 fork，而是把這套做法移植到純 Node 的伺服器，也套用到 grok 與 agy。"
+        }
+      }
+    ]
+  },
+  "quickstart": {
+    "kicker": {
+      "en": "Start here",
+      "zh": "從這裡開始"
+    },
+    "title": {
+      "en": "Desktop app, or from source.",
+      "zh": "桌面版，或原始碼。"
+    },
+    "intro": {
+      "en": "Both need Node.js 20 or newer, Git (2.32+ recommended), and sign-in or an API key for each provider you use. Claude and Codex can use runtimes MAT downloads for you; Grok needs grok, Antigravity needs agy, and OpenRouter needs OPENROUTER_API_KEY.",
+      "zh": "兩種方式都需要 Node.js 20 以上、Git（建議 2.32 以上），以及你要用的每家 provider 的登入或 API key。Claude 與 Codex 可以使用 MAT 代為下載的 runtime；Grok 需要 grok，Antigravity 需要 agy，OpenRouter 則需要 OPENROUTER_API_KEY。"
+    },
+    "primary": {
+      "href": "https://github.com/teddashh/multi-ai-terminal/releases/tag/v0.2.10",
+      "label": {
+        "en": "Download v0.2.10",
+        "zh": "下載 v0.2.10"
+      }
+    },
+    "secondary": {
+      "href": "https://github.com/teddashh/multi-ai-terminal#readme",
+      "label": {
+        "en": "Read the README",
+        "zh": "閱讀 README"
+      }
+    },
+    "steps": [
+      {
+        "title": {
+          "en": "Desktop app",
+          "zh": "桌面版"
+        },
+        "body": {
+          "en": "Windows: the setup .exe or the .msi. macOS: the .dmg for Apple silicon or Intel; it is not signed or notarized, so allow the first launch under System Settings, Privacy & Security. Linux: .deb, .AppImage, or .rpm.",
+          "zh": "Windows 用 setup .exe 或 .msi。macOS 依晶片選 Apple silicon 或 Intel 的 .dmg；它沒有簽章也沒有經過公證，第一次開啟要到「系統設定」的「隱私權與安全性」允許。Linux 可選 .deb、.AppImage 或 .rpm。"
+        }
+      },
+      {
+        "title": {
+          "en": "From source",
+          "zh": "從原始碼執行"
+        },
+        "body": {
+          "en": "Clone the repository, then build and start it. The UI and API come up on http://127.0.0.1:7788. Port, host, data directory, and token can each be set with a flag or an environment variable.",
+          "zh": "先 clone 這個 repo，再建置並啟動。網頁介面與 API 會開在 http://127.0.0.1:7788。連接埠、位址、資料目錄與 token 都可以用參數或環境變數設定。"
+        },
+        "code": "npm install\nnpm run build\nnpm start"
+      },
+      {
+        "title": {
+          "en": "First run",
+          "zh": "第一次執行"
+        },
+        "body": {
+          "en": "In Projects, add a workspace. Back in Launch, pick Planning, Build, Review, or Pipeline, describe the task, and press Start. Open Customize only to change stages or agents.",
+          "zh": "在「專案」加入工作區，回到「啟動」選規劃、建置、審查或 Pipeline，寫下任務後按「開始執行」。要改階段或 agent 時，才需要打開「進階設定」。"
+        }
+      }
+    ]
+  },
+  "status": {
+    "kicker": {
+      "en": "Honest status",
+      "zh": "誠實的現況"
+    },
+    "title": {
+      "en": "Where it stands.",
+      "zh": "目前的樣子。"
+    },
+    "intro": {
+      "en": "Built in six days: 21 releases, from v0.1.0 on July 18, 2026 to v0.2.10 on July 23. Nothing has landed on main since; one Dependabot pull request is open.",
+      "zh": "六天內做出來：從 2026 年 7 月 18 日的 v0.1.0 到 7 月 23 日的 v0.2.10，共 21 個版本。之後 main 沒有新的提交，目前有一個 Dependabot 的 PR 還沒合併。"
+    },
+    "works": [
+      {
+        "en": "Desktop installers for Windows, macOS (Apple silicon and Intel), and Linux (.deb, .AppImage, .rpm)",
+        "zh": "Windows、macOS（Apple silicon 與 Intel）、Linux（.deb、.AppImage、.rpm）都有桌面版安裝檔"
+      },
+      {
+        "en": "Five providers (claude, codex, grok, agy, openrouter) plus a deterministic mock for tests",
+        "zh": "五個 provider（claude、codex、grok、agy、openrouter），另有測試用、結果固定的 mock"
+      },
+      {
+        "en": "Custom stages, worktree isolation, patch apply, verification, steering, reports, and debug bundles",
+        "zh": "自訂階段、worktree 隔離、套用 patch、驗證、追加指示、報告與除錯套件"
+      },
+      {
+        "en": "AI-Sister, Midnight, and Daylight themes, in English or Traditional Chinese",
+        "zh": "AI-Sister 紀念版、午夜深色、日光淺色三種主題，介面可切換英文或繁體中文"
+      },
+      {
+        "en": "CI passed on Ubuntu and Windows for the release commit: npm test (620 passing on Ubuntu), agent-lane tests, typecheck, a browser smoke test, and 5 evidence scenarios on Linux",
+        "zh": "release 的 commit 在 Ubuntu 與 Windows 的 CI 都通過：npm test（Ubuntu 上 620 項通過）、agent 通道測試、型別檢查、瀏覽器冒煙測試，Linux 另外跑 5 個證據情境"
+      }
+    ],
+    "limits": [
+      {
+        "en": "Grok's stream has no tool events, so grok nodes show thinking and text only",
+        "zh": "Grok 的串流沒有工具事件，grok 節點只看得到思考與文字"
+      },
+      {
+        "en": "agy has no JSON mode or session resume: its stream is plain text, and as orchestrator it is re-briefed at every gate",
+        "zh": "agy 沒有 JSON 模式，也不能接續 session：串流只有純文字，擔任協調者時每道關卡都要重新交代背景"
+      },
+      {
+        "en": "Desktop builds are not code-signed or notarized, and still need Node.js 20+ on PATH (or MAT_NODE)",
+        "zh": "桌面版沒有程式碼簽章，也沒有經過 Apple 公證，而且 PATH 上仍需要 Node.js 20 以上（或設定 MAT_NODE）"
+      },
+      {
+        "en": "CI and the evidence suite use the mock provider; runs with real signed-in Codex, Claude, or OpenRouter accounts are not part of CI",
+        "zh": "CI 與證據測試用的是 mock provider，實際登入 Codex、Claude 或 OpenRouter 帳號的執行不在 CI 範圍內"
+      },
+      {
+        "en": "Parallel sessions on one Codex OAuth login can still race refresh-token rotation; API keys or serial use avoid it",
+        "zh": "同一個 Codex OAuth 登入下的平行 session，仍可能搶著輪替 refresh token；改用 API key 或依序使用就能避開"
+      },
+      {
+        "en": "Do not run a source build while the desktop app is open: both use the same data directory and race its stores",
+        "zh": "桌面版開著時，不要再從原始碼啟動一份：兩者共用同一個資料目錄，會互相搶寫"
+      },
+      {
+        "en": "After a reboot, crash recovery kills stale process groups by saved PID and accepts the risk of PID reuse",
+        "zh": "機器重開後，崩潰復原會依記錄的 PID 結束殘留的程序群組，並接受 PID 被重複使用的風險"
+      }
+    ]
+  },
+  "facts": [
+    {
+      "label": {
+        "en": "Version",
+        "zh": "版本"
+      },
+      "value": "v0.2.10"
+    },
+    {
+      "label": {
+        "en": "License",
+        "zh": "授權"
+      },
+      "value": {
+        "en": "MIT, theme artwork excluded",
+        "zh": "MIT，主題角色圖除外"
+      }
+    },
+    {
+      "label": {
+        "en": "Stack",
+        "zh": "技術"
+      },
+      "value": "TypeScript · Fastify · React · Tauri 2"
+    },
+    {
+      "label": {
+        "en": "Platform",
+        "zh": "平台"
+      },
+      "value": "Windows · macOS · Linux"
+    },
+    {
+      "label": {
+        "en": "Requires",
+        "zh": "需求"
+      },
+      "value": {
+        "en": "Node.js 20+ and Git",
+        "zh": "Node.js 20+ 與 Git"
+      }
+    },
+    {
+      "label": {
+        "en": "Verified",
+        "zh": "查核日期"
+      },
+      "value": "2026-09-30"
+    }
+  ],
+  "links": [
+    {
+      "href": "https://github.com/teddashh/multi-ai-terminal/releases",
+      "label": {
+        "en": "Releases",
+        "zh": "版本"
+      }
+    },
+    {
+      "href": "https://github.com/teddashh/multi-ai-terminal/blob/main/SPEC.md",
+      "label": {
+        "en": "Engineering spec",
+        "zh": "工程規格"
+      }
+    },
+    {
+      "href": "https://github.com/teddashh/multi-ai-terminal/blob/main/README.zh-TW.md",
+      "label": {
+        "en": "中文 README",
+        "zh": "中文 README"
+      }
+    },
+    {
+      "href": "https://teddashh.github.io/multi-ai-chat-desktop/",
+      "label": {
+        "en": "Predecessor: multi-ai-chat-desktop",
+        "zh": "前一代：multi-ai-chat-desktop"
+      }
+    }
+  ]
+}
