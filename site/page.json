@@ -244,7 +244,7 @@
         },
         "body": {
           "en": "Claude runs through the Agent SDK and Codex through a persistent codex app-server. Grok and Antigravity run as headless CLIs behind FIFO managers, and OpenRouter models run through Codex with an isolated config.",
-          "zh": "Claude 透過 Agent SDK 執行，Codex 透過常駐的 codex app-server。Grok 與 Antigravity 以 headless CLI 執行，前面各有一個 FIFO manager 排隊；OpenRouter 的模型則借用 Codex 執行，並使用獨立的設定。"
+          "zh": "Claude 透過 Agent SDK 執行，Codex 透過常駐的 codex app-server。Grok 與 Antigravity 以 headless CLI 執行，各自前面有一個 FIFO manager 負責排隊；OpenRouter 的模型則借用 Codex 執行，並使用獨立的設定。"
         },
         "tag": "server/src/providers/"
       },
@@ -277,7 +277,7 @@
         },
         "body": {
           "en": "Each workspace can set a command such as npm test, with a 600-second default timeout. Worktree candidates with a non-empty patch run it, and a stage with requireVerified retries failed checks when nothing passed.",
-          "zh": "每個工作區可以設定一個驗證指令，例如 npm test，預設逾時 600 秒。使用 worktree 且 patch 不是空的候選結果會執行它；開啟 requireVerified 的階段，如果沒有任何候選通過，就會重試沒過的那些。"
+          "zh": "每個工作區可以設定一個驗證指令，例如 npm test，預設逾時 600 秒。若候選結果使用 worktree 且 patch 不是空的，就會執行這個指令；開啟 requireVerified 的階段，如果沒有任何候選通過，就會重試沒過的那些。"
         },
         "tag": "server/src/engine/verify.ts"
       },
@@ -464,7 +464,7 @@
         },
         "body": {
           "en": "Parallel Codex sessions on one OAuth login can race the single-use refresh token. MAT starts sessions of the same provider at least 1.5 seconds apart, orchestrator included. That narrows the race without removing it, so API keys or serial use stay the durable fix.",
-          "zh": "同一個 OAuth 登入下平行跑多個 Codex session，可能會搶著輪替只能用一次的 refresh token。MAT 讓同一家 provider 的啟動至少間隔 1.5 秒，協調者也算在內。這只能縮小競爭，無法根除，長久的解法還是改用 API key 或依序使用。"
+          "zh": "同一個 OAuth 登入下平行跑多個 Codex session，可能會搶著輪替只能用一次的 refresh token。MAT 讓同一家 provider 的啟動至少間隔 1.5 秒，協調者也算在內。這只能減少互搶，無法根除，長久的解法還是改用 API key 或依序使用。"
         }
       },
       {
