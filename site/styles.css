@@ -378,6 +378,9 @@ h1 em::after {
   text-transform: uppercase;
 }
 
+/* a long file name in the panel title wraps instead of widening the hero */
+.panel-top > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+
 .live-dot {
   display: inline-flex;
   align-items: center;
@@ -1398,7 +1401,7 @@ h2.lang-zh {
   .language-switch, .github-link { width: max-content; }
 
   .hero {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     padding-top: 76px;
   }
 
