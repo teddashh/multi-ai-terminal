@@ -5,7 +5,7 @@ description: Audit, launch, verify, inspect, or stop the local Multi-AI Terminal
 
 Operate the source-web lane defined by `agent-release.json`. It builds this repository with npm and serves the built web UI from the local MAT server on a loopback port. It is not an installer, release bundle, container, Tauri desktop window, or remote GUI, and it never uses a Rust toolchain.
 
-Source launch executes code from the checked-out repository and its locked JavaScript dependencies. Keep all lifecycle records local. Never read provider credentials, cookies, storage, or profiles, and never drive the launched server's provider install, update, or sign-in APIs on the user's behalf — those actions belong to the user in their own browser.
+Source launch executes code from the checked-out repository and its locked JavaScript dependencies. Keep all lifecycle records local. Never read provider credentials, cookies, storage, or profiles, and never drive the launched server's provider install, update, or sign-in APIs on the user's behalf: those actions belong to the user in their own browser.
 
 For an explicit launch request:
 

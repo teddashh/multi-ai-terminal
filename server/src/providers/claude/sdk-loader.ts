@@ -18,7 +18,7 @@ let sdkOverride: AgentSdkModule | null = null;
 
 export async function loadAgentSdk(): Promise<AgentSdkModule | null> {
   if (sdkOverrideSet) return sdkOverride;
-  // Single-flight: concurrent cold-start callers share one import attempt —
+  // Single-flight: concurrent cold-start callers share one import attempt;
   // a parallel caller must never observe null while the import is in flight.
   sdkLoadPromise ??= (async () => {
     if (process.env.MAT_DISABLE_AGENT_SDK === '1') return null;

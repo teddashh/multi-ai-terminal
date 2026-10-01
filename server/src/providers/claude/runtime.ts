@@ -105,7 +105,7 @@ class SessionRuntime implements ClaudeSessionRuntime {
         if (killed) return;
         killed = true;
         // The flag alone covers a turn that has not started (queued behind
-        // another run of the same session) — it must still classify as killed.
+        // another run of the same session); it must still classify as killed.
         killFlag.requested = true;
         if (!state.active || state.activeIo !== io) return;
         state.interruptRequested = true;
@@ -136,7 +136,7 @@ class SessionRuntime implements ClaudeSessionRuntime {
       if (state.active || Date.now() - state.lastActivity < idleMs) continue;
       if (state.live) this.closeLive(state);
       // One-shot keys are unreachable after their run (resume goes through the
-      // adopted sdk session id under a new key) — drop them or the map grows forever.
+      // adopted sdk session id under a new key), so drop them or the map grows forever.
       if (key.startsWith('run-')) this.sessions.delete(key);
     }
   }
@@ -172,7 +172,7 @@ class SessionRuntime implements ClaudeSessionRuntime {
       if (killFlag.requested) return this.killed(state);
       const sdk = await loadAgentSdk();
       if (killFlag.requested) return this.killed(state);
-      if (!sdk) return { exitCode: 1, error: 'Claude Agent SDK unavailable — set MAT_CLAUDE_RUNTIME=cli to use the legacy CLI path' };
+      if (!sdk) return { exitCode: 1, error: 'Claude Agent SDK unavailable: set MAT_CLAUDE_RUNTIME=cli to use the legacy CLI path' };
       if (spec.resumeSessionRef && !state.sdkSessionId) state.sdkSessionId = spec.resumeSessionRef;
       const existing = state.live && !state.live.isClosed ? state.live : undefined;
       const live = existing ?? await this.buildLive(sessionKey, state, spec, sdk);

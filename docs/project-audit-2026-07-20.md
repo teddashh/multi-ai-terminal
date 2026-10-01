@@ -1,4 +1,4 @@
-# Project audit and continuation backlog — 2026-07-20
+# Project audit and continuation backlog (2026-07-20)
 
 This document records the whole-project audit performed immediately after the
 v0.1.9 handoff, the hardening implemented in the same working tree, and the
@@ -128,9 +128,9 @@ The GitHub release state was checked directly:
 
 - v0.1.0 predates Windows packaging. It has Linux and both macOS architectures,
   seven assets total, and no release notes.
-- v0.1.1–v0.1.3 have the four supported platforms and nine assets, but no
+- v0.1.1 to v0.1.3 have the four supported platforms and nine assets, but no
   release notes.
-- v0.1.4–v0.1.9 have four-platform artifacts and bilingual release notes.
+- v0.1.4 to v0.1.9 have four-platform artifacts and bilingual release notes.
 - v0.1.9 became public at 10:31:59Z, before the last matrix assets arrived at
   10:34:14Z. This concrete partial-release window is why publishing is now
   draft-first.
@@ -347,7 +347,7 @@ probe per platform, starting with Windows, without removing the Chrome smoke.
 
 Shared zod contracts are strict and may evolve only additively, while current
 tests mostly round-trip current objects. Check in sanitized persisted
-workspace/workflow/run/event fixtures from v0.1.6–v0.1.9 and require current
+workspace/workflow/run/event fixtures from v0.1.6 to v0.1.9 and require current
 schemas and loaders to accept them. Include legacy runs without
 `workspaceSnapshot` and new snapshot-bearing runs.
 
@@ -386,7 +386,7 @@ evidence, and publish are separate human gates. If this is later automated,
 verify uploaded artifacts in one final dependent job and never trade away the
 atomic publication boundary merely to reduce clicks.
 
-## Explicitly deferred — do not implement without Ted asking
+## Explicitly deferred: do not implement without Ted asking
 
 - pause/resume
 - human-approval nodes

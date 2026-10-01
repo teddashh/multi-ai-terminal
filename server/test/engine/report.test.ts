@@ -36,7 +36,7 @@ describe('run report', () => {
     const events: AgentEvent[] = [{ id: 'e', seq: 1, runId: 'run-1', stageId: 'review', nodeRunId: 'review.r.0', attempt: 2, role: 'tool', kind: 'tool_use', text: 'test', ts: 2000 }];
     const report = buildRunReport(run, workspace, events);
     expect(buildRunReport(run, workspace, events)).toBe(report);
-    expect(report).toContain('# Run report — Pipeline');
+    expect(report).toContain('# Run report: Pipeline');
     expect(report).toContain('## Outcome');
     expect(report).toContain('degraded at stage Review');
     expect(report).toContain('Handoff: ← implement.i.0 + orchestrator context');

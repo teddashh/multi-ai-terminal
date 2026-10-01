@@ -136,7 +136,7 @@ export class CodexConnection {
 
   private busy(): boolean {
     // An in-flight RPC (login can pend 300 s without a single output line) is
-    // busy even before session wiring exists — the reaper must not SIGTERM a
+    // busy even before session wiring exists: the reaper must not SIGTERM a
     // child mid-request.
     if (this.slot && this.slot.pending.size > 0) return true;
     try {
@@ -235,7 +235,7 @@ export class CodexConnection {
       setImmediate(() => this.lose(slot, connectionLostError('stdout closed', this.sinkEnvironment)));
     });
     // BAT runs the app-server with inherited stderr; spawnManaged pipes it, so
-    // forward complete, redacted lines — an unconsumed pipe would eventually
+    // forward complete, redacted lines: an unconsumed pipe would eventually
     // block a chatty child, while raw forwarding could expose an env-sourced
     // provider credential in server logs.
     let stderrPending = '';

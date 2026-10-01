@@ -234,7 +234,7 @@ export class CodexThreadManager {
       : undefined;
     const request: CodexApprovalRequest = { toolUseId: `codex-approval-${requestId}`, toolName, detail, ...(reason ? { reason } : {}) };
     // Keyed by a local counter: two id-less wire requests must never collide in
-    // the map — an overwritten entry would leave its reply promise unsettled
+    // the map: an overwritten entry would leave its reply promise unsettled
     // and block the turn forever.
     const approvalKey = this.approvalSeq++;
     return new Promise<'accept' | 'acceptForSession' | 'decline' | 'cancel'>((resolve) => {

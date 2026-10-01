@@ -21,7 +21,7 @@
         show('Startup rejection: ' + (reason && reason.stack ? reason.stack : String(reason)));
       });
       setTimeout(function () {
-        show('UI did not mount within 6 seconds — the script bundle failed to load or crashed without an error event.');
+        show('UI did not mount within 6 seconds: the script bundle failed to load or crashed without an error event.');
       }, 6000);
     })();
   </script>

@@ -142,7 +142,7 @@ describe('localized display text', () => {
 
   it('translates the canonical refresh-token race guidance and keeps commands verbatim', () => {
     const race = 'codex sign-in expired — parallel codex sessions can race single-use refresh tokens. Sign out and back in with the codex CLI (e.g. `codex logout && codex login`), or switch to API-key auth to avoid the race.';
-    expect(displayNodeError(race, 'zh-TW')).toBe('codex 登入已過期——平行執行的 codex 工作階段會互搶單次使用的 refresh token。請登出後重新登入 codex CLI（例如 `codex logout && codex login`），或改用 API 金鑰驗證以避免這個競爭。');
+    expect(displayNodeError(race, 'zh-TW')).toBe('codex 登入已過期：平行執行的 codex 工作階段會互搶單次使用的 refresh token。請登出後重新登入 codex CLI（例如 `codex logout && codex login`），或改用 API 金鑰驗證以避免這個競爭。');
     const bareRace = 'grok sign-in expired — parallel grok sessions can race single-use refresh tokens. Sign out and back in with the grok CLI, or switch to API-key auth to avoid the race.';
     expect(displayNodeError(bareRace, 'zh-TW')).toContain('grok 登入已過期');
     expect(displayNodeError(bareRace, 'zh-TW')).not.toContain('例如');

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // v0.1.8 provider-onboarding instrument (independent of repo tests).
-// F: augmented PATH end-to-end — a fake HOME carries ~/.local/bin/agy; the
+// F: augmented PATH end-to-end: a fake HOME carries ~/.local/bin/agy; the
 //    server must discover it (ok + stub version) without it being on PATH.
 //    Providers contract: installable flags, manualCommand, failure detail.
-//    Install endpoint guards: 409 for ok providers, 4xx for unknown ids —
+//    Install endpoint guards: 409 for ok providers, 4xx for unknown ids;
 //    never runs a real recipe.
 // G: mock stays exempt from the same-provider spawn stagger (2-node stage
 //    spawns < 1s apart) and a 0.1.8 run completes end-to-end.
@@ -21,8 +21,8 @@ const REQUEST_TIMEOUT_MS = 10_000;
 const failures = [];
 let baseUrl;
 const check = (name, ok, detail = '') => {
-  failures.push(...(ok ? [] : [name + (detail ? ` — ${detail}` : '')]));
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok || !detail ? '' : ` — ${detail}`}`);
+  failures.push(...(ok ? [] : [name + (detail ? `: ${detail}` : '')]));
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok || !detail ? '' : `: ${detail}`}`);
 };
 
 const api = async (path, init) => {

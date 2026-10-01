@@ -1,6 +1,6 @@
 # Evidence instruments
 
-Independent black-box verifiers, deliberately separate from the vitest suites. Each boots a built server (`server/dist/index.js`) on an OS-assigned loopback port with a throwaway data directory and temp git workspace, accepts readiness only from its own child process, drives it purely over timeout-bounded HTTP, and asserts observable behavior — including against an extracted release artifact, which is how every release since v0.1.6 has been verified before its final report.
+Independent black-box verifiers, deliberately separate from the vitest suites. Each boots a built server (`server/dist/index.js`) on an OS-assigned loopback port with a throwaway data directory and temp git workspace, accepts readiness only from its own child process, drives it purely over timeout-bounded HTTP, and asserts observable behavior, including against an extracted release artifact, which is how every release since v0.1.6 has been verified before its final report.
 
 | Script | Guards (introduced in) |
 | --- | --- |
@@ -46,9 +46,9 @@ browser smoke; it does not run `npm run evidence`.
 
 Environment:
 
-- `MAT_ROOT` — directory containing `server/dist/index.js` (defaults to this repo).
-- `MAT_REPO` — repo root used to resolve devDependencies the shipped artifact lacks (adm-zip in `repro-v017`); defaults to this repo.
-- `MAT_EXPECT_VERSION` — expected `/api/health` version where a script asserts it (`repro-v018`, `repro-v019`, `repro-runtime-contract`); older scripts are version-agnostic.
-- `MAT_PORT` — optional fixed-port override; every instrument defaults to an OS-assigned port.
+- `MAT_ROOT`: directory containing `server/dist/index.js` (defaults to this repo).
+- `MAT_REPO`: repo root used to resolve devDependencies the shipped artifact lacks (adm-zip in `repro-v017`); defaults to this repo.
+- `MAT_EXPECT_VERSION`: expected `/api/health` version where a script asserts it (`repro-v018`, `repro-v019`, `repro-runtime-contract`); older scripts are version-agnostic.
+- `MAT_PORT`: optional fixed-port override; every instrument defaults to an OS-assigned port.
 
 Exit code 0 means every check passed; failures are listed at the end of the output.

@@ -41,8 +41,8 @@ const failures = [];
 let baseUrl;
 
 const check = (name, ok, detail = '') => {
-  failures.push(...(ok ? [] : [name + (detail ? ` — ${detail}` : '')]));
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok || !detail ? '' : ` — ${detail}`}`);
+  failures.push(...(ok ? [] : [name + (detail ? `: ${detail}` : '')]));
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok || !detail ? '' : `: ${detail}`}`);
 };
 const safeText = (value) => String(value).replaceAll(ENV_SENTINEL, '[REDACTED_ENV]');
 
