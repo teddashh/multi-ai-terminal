@@ -167,12 +167,15 @@ export function displayPermission(permission: AgentBinding['permission'], locale
   return locale === 'zh-TW' ? PERMISSION_ZH_TW[permission] : permission;
 }
 
-const NOT_FOUND_DETAIL = /^`([^`]+)` CLI not found on PATH — install it or remove this agent from the workflow\.$/;
+// NOT_FOUND_DETAIL and AUTH_RACE_ERROR accept a colon, or U+2014 for runs
+// saved before that change. The older separator is escaped so this file
+// stores no literal dash.
+const NOT_FOUND_DETAIL = /^`([^`]+)` CLI not found on PATH(?::| \u2014) install it or remove this agent from the workflow\.$/;
 const PROBE_TIMEOUT_DETAIL = /^Version check timed out after (\d+(?:\.\d+)?)s\. The CLI may be starting slowly; retry detection\.$/;
 const BARE_EXIT_DETAIL = /^exit (-?\d+|null)$/;
 const AUTH_EXPIRED_LINE = /^(\S+) sign-in expired\.$/;
 const AUTH_NOT_SIGNED_IN_LINE = /^(\S+) is not signed in\.$/;
-const AUTH_RACE_ERROR = /^(\S+) sign-in expired — parallel \1 sessions can race single-use refresh tokens\. Sign out and back in with the \1 CLI(?: \(e\.g\. `([^`]+)`\))?, or switch to API-key auth to avoid the race\.$/;
+const AUTH_RACE_ERROR = /^(\S+) sign-in expired(?::| \u2014) parallel \1 sessions can race single-use refresh tokens\. Sign out and back in with the \1 CLI(?: \(e\.g\. `([^`]+)`\))?, or switch to API-key auth to avoid the race\.$/;
 const OPENROUTER_AUTH_LINE = 'openrouter authentication failed.';
 const OPENROUTER_AUTH_FIX = "Fix: Set OPENROUTER_API_KEY in MAT's environment, then restart MAT.";
 const OPENROUTER_AUTH_ERROR = "openrouter authentication failed. Set OPENROUTER_API_KEY in MAT's environment, then restart MAT.";

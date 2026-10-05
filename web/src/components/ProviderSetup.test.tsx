@@ -60,7 +60,7 @@ describe('ProviderSetupButton', () => {
     const codex: ProviderInfo = {
       ...unavailable,
       id: 'codex',
-      detail: '`codex` CLI not found on PATH — install it or remove this agent from the workflow.',
+      detail: '`codex` CLI not found on PATH: install it or remove this agent from the workflow.',
     };
     render(<UiPreferencesProvider><ProviderSetupButton provider={codex} api={api} /></UiPreferencesProvider>);
     act(() => fireEvent.click(screen.getByRole('button', { name: '設定 codex' })));

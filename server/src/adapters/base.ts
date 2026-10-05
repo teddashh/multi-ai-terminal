@@ -114,7 +114,7 @@ export function humanizeError(value: unknown, provider?: string): string {
   const original = typeof value === 'string' ? value : (value instanceof Error ? value.message : String(value));
   const message = extracted.message ?? original;
   const spawn = /spawn (\S+) ENOENT/.exec(message);
-  if (spawn?.[1]) return `\`${spawn[1]}\` CLI not found on PATH — install it or remove this agent from the workflow.`;
+  if (spawn?.[1]) return `\`${spawn[1]}\` CLI not found on PATH: install it or remove this agent from the workflow.`;
   if (provider === 'openrouter' && (
     /401 Unauthorized|invalid api key/i.test(message)
     || /OPENROUTER_API_KEY[\s\S]{0,120}(?:not set|missing|required)/i.test(message)
@@ -125,8 +125,9 @@ export function humanizeError(value: unknown, provider?: string): string {
     const relogin = provider === 'codex'
       ? 'Sign out and back in with the codex CLI (e.g. `codex logout && codex login`)'
       : `Sign out and back in with the ${provider} CLI`;
-    return `${provider} sign-in expired — parallel ${provider} sessions can race single-use refresh tokens. ${relogin}, or switch to API-key auth to avoid the race.`;
+    return `${provider} sign-in expired: parallel ${provider} sessions can race single-use refresh tokens. ${relogin}, or switch to API-key auth to avoid the race.`;
   }
+  // Already written in the current colon wording or the older saved wording.
   if (provider && message.startsWith(`${provider} sign-in expired`)) return message;
   if (provider !== 'codex' || message.startsWith('codex: ')) return message;
   const detail = [extracted.status, extracted.type].filter(Boolean).join(' ');

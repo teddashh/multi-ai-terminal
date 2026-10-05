@@ -71,8 +71,15 @@ describe('IncrementalLineBuffer', () => {
 });
 
 describe('humanizeError', () => {
+  const legacySeparator = ` ${String.fromCharCode(0x2014)} `;
+
   it('turns missing CLI spawn errors into an actionable instruction', () => {
-    expect(humanizeError('spawn grok ENOENT')).toBe('`grok` CLI not found on PATH — install it or remove this agent from the workflow.');
+    const current = '`grok` CLI not found on PATH: install it or remove this agent from the workflow.';
+    expect(humanizeError('spawn grok ENOENT')).toBe(current);
+    expect(current).not.toContain(legacySeparator.trim());
+    const saved = '`grok` CLI not found on PATH' + legacySeparator + 'install it or remove this agent from the workflow.';
+    expect(humanizeError(saved)).toBe(saved);
+    expect(humanizeError(saved, 'grok')).toBe(saved);
   });
 
   it('unwraps double-encoded Codex API failures', () => {
@@ -85,13 +92,18 @@ describe('humanizeError', () => {
   });
 
   it('humanizes revoked Codex refresh tokens with a verified relogin command', () => {
-    const expected = 'codex sign-in expired — parallel codex sessions can race single-use refresh tokens. Sign out and back in with the codex CLI (e.g. `codex logout && codex login`), or switch to API-key auth to avoid the race.';
+    const expected = 'codex sign-in expired: parallel codex sessions can race single-use refresh tokens. Sign out and back in with the codex CLI (e.g. `codex logout && codex login`), or switch to API-key auth to avoid the race.';
     expect(humanizeError('Your access token could not be refreshed because your refresh token was revoked.', 'codex')).toBe(expected);
     expect(humanizeError(expected, 'codex')).toBe(expected);
+    const saved = 'codex sign-in expired' + legacySeparator + 'parallel codex sessions can race single-use refresh tokens. Sign out and back in with the codex CLI (e.g. `codex logout && codex login`), or switch to API-key auth to avoid the race.';
+    expect(humanizeError(saved, 'codex')).toBe(saved);
   });
 
   it('humanizes unauthorized failures generically for other real providers', () => {
-    expect(humanizeError('401 Unauthorized', 'claude')).toBe('claude sign-in expired — parallel claude sessions can race single-use refresh tokens. Sign out and back in with the claude CLI, or switch to API-key auth to avoid the race.');
+    const current = 'claude sign-in expired: parallel claude sessions can race single-use refresh tokens. Sign out and back in with the claude CLI, or switch to API-key auth to avoid the race.';
+    expect(humanizeError('401 Unauthorized', 'claude')).toBe(current);
+    const saved = 'claude sign-in expired' + legacySeparator + 'parallel claude sessions can race single-use refresh tokens. Sign out and back in with the claude CLI, or switch to API-key auth to avoid the race.';
+    expect(humanizeError(saved, 'claude')).toBe(saved);
   });
 
   it('humanizes OpenRouter authentication without Codex account guidance', () => {

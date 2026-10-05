@@ -167,7 +167,7 @@ describe('health logic', () => {
   it('uses natural Traditional Chinese for health concepts and canonical CLI guidance', () => {
     const unavailable = providerFinding(provider({
       id: 'codex', ok: false,
-      detail: '`codex` CLI not found on PATH — install it or remove this agent from the workflow.',
+      detail: '`codex` CLI not found on PATH: install it or remove this agent from the workflow.',
     }), 'zh-TW');
     expect(unavailable.detail).toContain('`codex` CLI 不在 PATH 中');
     expect(unavailable.detail).toContain('從工作流程移除此代理程式');
