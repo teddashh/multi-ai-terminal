@@ -43,6 +43,8 @@ const node = (overrides: Partial<NodeRun> = {}): NodeRun => ({
   ...overrides,
 });
 
+const legacySeparator = ` ${String.fromCharCode(0x2014)} `;
+
 describe('localized display text', () => {
   it('localizes built-in workflow chrome without changing its source object', () => {
     expect(displayWorkflowName(pipeline, 'zh-TW')).toBe('流程：實作 → 測試 → 審查');
@@ -112,10 +114,15 @@ describe('localized display text', () => {
   });
 
   it('translates only the canonical missing-CLI detail and leaves arbitrary errors intact', () => {
-    const detail = '`codex` CLI not found on PATH — install it or remove this agent from the workflow.';
-    expect(displayProviderDetail('codex', detail, 'zh-TW')).toBe('`codex` CLI 不在 PATH 中。請先安裝它，或從工作流程移除此代理程式。');
+    const translated = '`codex` CLI 不在 PATH 中。請先安裝它，或從工作流程移除此代理程式。';
+    const current = '`codex` CLI not found on PATH: install it or remove this agent from the workflow.';
+    const saved = '`codex` CLI not found on PATH' + legacySeparator + 'install it or remove this agent from the workflow.';
+    expect(displayProviderDetail('codex', current, 'zh-TW')).toBe(translated);
+    expect(displayProviderDetail('codex', saved, 'zh-TW')).toBe(translated);
     expect(displayProviderDetail('codex', 'upstream said something else', 'zh-TW')).toBe('upstream said something else');
-    expect(displayProviderDetail('codex', detail, 'en')).toBe(detail);
+    expect(displayProviderDetail('codex', '`codex` CLI not found on PATH - install it or remove this agent from the workflow.', 'zh-TW')).toBe('`codex` CLI not found on PATH - install it or remove this agent from the workflow.');
+    expect(displayProviderDetail('codex', current, 'en')).toBe(current);
+    expect(displayProviderDetail('codex', saved, 'en')).toBe(saved);
   });
 
   it('translates the canonical probe-timeout and bare-exit details', () => {
@@ -141,12 +148,18 @@ describe('localized display text', () => {
   });
 
   it('translates the canonical refresh-token race guidance and keeps commands verbatim', () => {
-    const race = 'codex sign-in expired — parallel codex sessions can race single-use refresh tokens. Sign out and back in with the codex CLI (e.g. `codex logout && codex login`), or switch to API-key auth to avoid the race.';
-    expect(displayNodeError(race, 'zh-TW')).toBe('codex 登入已過期：平行執行的 codex 工作階段會互搶單次使用的 refresh token。請登出後重新登入 codex CLI（例如 `codex logout && codex login`），或改用 API 金鑰驗證以避免這個競爭。');
-    const bareRace = 'grok sign-in expired — parallel grok sessions can race single-use refresh tokens. Sign out and back in with the grok CLI, or switch to API-key auth to avoid the race.';
+    const race = 'codex sign-in expired: parallel codex sessions can race single-use refresh tokens. Sign out and back in with the codex CLI (e.g. `codex logout && codex login`), or switch to API-key auth to avoid the race.';
+    const savedRace = 'codex sign-in expired' + legacySeparator + 'parallel codex sessions can race single-use refresh tokens. Sign out and back in with the codex CLI (e.g. `codex logout && codex login`), or switch to API-key auth to avoid the race.';
+    const translatedRace = 'codex 登入已過期：平行執行的 codex 工作階段會互搶單次使用的 refresh token。請登出後重新登入 codex CLI（例如 `codex logout && codex login`），或改用 API 金鑰驗證以避免這個競爭。';
+    expect(displayNodeError(race, 'zh-TW')).toBe(translatedRace);
+    expect(displayNodeError(savedRace, 'zh-TW')).toBe(translatedRace);
+    const bareRace = 'grok sign-in expired: parallel grok sessions can race single-use refresh tokens. Sign out and back in with the grok CLI, or switch to API-key auth to avoid the race.';
+    const savedBareRace = 'grok sign-in expired' + legacySeparator + 'parallel grok sessions can race single-use refresh tokens. Sign out and back in with the grok CLI, or switch to API-key auth to avoid the race.';
     expect(displayNodeError(bareRace, 'zh-TW')).toContain('grok 登入已過期');
     expect(displayNodeError(bareRace, 'zh-TW')).not.toContain('例如');
-    expect(displayNodeError('`codex` CLI not found on PATH — install it or remove this agent from the workflow.', 'zh-TW')).toBe('`codex` CLI 不在 PATH 中。請先安裝它，或從工作流程移除此代理程式。');
+    expect(displayNodeError(savedBareRace, 'zh-TW')).toBe(displayNodeError(bareRace, 'zh-TW'));
+    expect(displayNodeError('`codex` CLI not found on PATH: install it or remove this agent from the workflow.', 'zh-TW')).toBe('`codex` CLI 不在 PATH 中。請先安裝它，或從工作流程移除此代理程式。');
+    expect(displayNodeError('`codex` CLI not found on PATH' + legacySeparator + 'install it or remove this agent from the workflow.', 'zh-TW')).toBe('`codex` CLI 不在 PATH 中。請先安裝它，或從工作流程移除此代理程式。');
     expect(displayNodeError('codex sign-in expired.\nFix: codex login', 'zh-TW')).toBe('codex 登入已過期。\n修正：codex login');
     expect(displayNodeError(
       "openrouter authentication failed. Set OPENROUTER_API_KEY in MAT's environment, then restart MAT.",
@@ -154,6 +167,7 @@ describe('localized display text', () => {
     )).toBe('openrouter 驗證失敗。請在啟動 MAT 前設定 OPENROUTER_API_KEY 環境變數，然後重新啟動 MAT。');
     expect(displayNodeError('some raw CLI stderr', 'zh-TW')).toBe('some raw CLI stderr');
     expect(displayNodeError(race, 'en')).toBe(race);
+    expect(displayNodeError(savedRace, 'en')).toBe(savedRace);
   });
 
   it('translates the canonical evidence-integrity messages', () => {
