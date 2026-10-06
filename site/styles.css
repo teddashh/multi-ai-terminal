@@ -1520,3 +1520,16 @@ h2.lang-zh {
 
   .footer-links { justify-content: flex-start; }
 }
+
+.fd {
+  --fd-surface: var(--paper-strong);
+  --fd-edge: var(--line);
+  --fd-text: var(--ink);
+  --fd-faint: var(--ink-faint);
+  --fd-accent: var(--signal);
+  --fd-accent-ink: color-mix(in srgb, var(--signal) 60%, var(--ink));
+  --fd-warn: var(--kicker);
+  --fd-info: color-mix(in srgb, var(--accent-2) 40%, var(--ink));
+  --fd-font: inherit;
+  --fd-mono: var(--mono);
+}

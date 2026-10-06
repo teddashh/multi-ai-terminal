@@ -5,7 +5,7 @@
   "mark": "MT",
   "palette": "graphite",
   "default_branch": "main",
-  "verified": "2026-10-01",
+  "verified": "2026-10-06",
   "language": "TypeScript",
   "license": {
     "spdx": "MIT",
@@ -653,7 +653,7 @@
         "en": "Verified",
         "zh": "查核日期"
       },
-      "value": "2026-10-01"
+      "value": "2026-10-06"
     }
   ],
   "links": [
@@ -683,6 +683,503 @@
       "label": {
         "en": "Predecessor: multi-ai-chat-desktop",
         "zh": "前一代：multi-ai-chat-desktop"
+      }
+    }
+  ],
+  "flows": [
+    {
+      "id": "stage",
+      "heading": {
+        "en": "One stage, then a gate",
+        "zh": "一個階段，然後一道關"
+      },
+      "intro": {
+        "en": "Agents in a stage run in parallel. A gated stage asks the orchestrator for one fenced JSON block.",
+        "zh": "同一階段的 agent 平行執行。有關卡的階段會要求協調者給出一個圍起來的 JSON。"
+      },
+      "after": "how",
+      "spec": {
+        "columns": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ]
+        ],
+        "core": 2
+      },
+      "steps": [
+        {
+          "title": {
+            "en": "Stage",
+            "zh": "階段"
+          },
+          "note": {
+            "en": "Slots run in parallel, at most 12 agents in the stage, and the same provider starts at least 1.5 seconds apart.",
+            "zh": "槽位平行執行，一個階段最多 12 個 agent，同一家 provider 至少間隔 1.5 秒才啟動。"
+          },
+          "tone": "neutral",
+          "icon": "people"
+        },
+        {
+          "title": {
+            "en": "Candidates",
+            "zh": "候選結果"
+          },
+          "note": {
+            "en": "Each attempt keeps the answer and, when isolation is worktree, a binary patch.",
+            "zh": "每次嘗試留下回答；隔離設成 worktree 時，還會留下二進位 patch。"
+          },
+          "tone": "info",
+          "icon": "code"
+        },
+        {
+          "title": {
+            "en": "Gate",
+            "zh": "關卡"
+          },
+          "note": {
+            "en": "The orchestrator answers advance, retry, or abort in one fenced JSON block.",
+            "zh": "協調者在一個圍起來的 JSON 裡回答 advance、retry 或 abort。"
+          },
+          "tone": "accent",
+          "icon": "check"
+        }
+      ],
+      "ticks": [
+        {
+          "en": "agents started apart",
+          "zh": "agent 已錯開啟動"
+        },
+        {
+          "en": "attempt text kept",
+          "zh": "嘗試的文字已留下"
+        },
+        {
+          "en": "gate json required",
+          "zh": "關卡要有 JSON"
+        }
+      ],
+      "caption": {
+        "en": "A stage runs its agent slots in parallel, with at most 12 agents, and waits at least 1.5 seconds between launches of the same provider, orchestrator included. Each attempt keeps its text. A worktree stage also stores a binary patch. At a gated stage the orchestrator reads a digest and must answer advance, retry, or abort in one fenced JSON block.",
+        "zh": "一個階段平行跑槽位裡的 agent，最多 12 個，同一家 provider 的啟動至少間隔 1.5 秒，協調者也算在內。每次嘗試留下文字。設成 worktree 的階段還會存二進位 patch。有關卡時，協調者讀取摘要，並必須在一個圍起來的 JSON 裡回答 advance、retry 或 abort。"
+      }
+    },
+    {
+      "id": "record",
+      "heading": {
+        "en": "Where a run is written",
+        "zh": "一次執行寫到哪"
+      },
+      "intro": {
+        "en": "Environment values are redacted before they are written. The debug bundle is one zip of the run.",
+        "zh": "寫入前會遮蔽環境變數的值。除錯套件是整次執行的一個 zip。"
+      },
+      "after": "how",
+      "spec": {
+        "columns": [
+          [
+            0
+          ],
+          [
+            1
+          ]
+        ],
+        "core": 1,
+        "sinks": [
+          2,
+          3,
+          4
+        ]
+      },
+      "steps": [
+        {
+          "title": {
+            "en": "Engine",
+            "zh": "引擎"
+          },
+          "note": {
+            "en": "The stage engine appends events as the run moves.",
+            "zh": "階段引擎隨著執行推進，把事件追加進去。"
+          },
+          "tone": "neutral",
+          "icon": "gear"
+        },
+        {
+          "title": {
+            "en": "Data dir",
+            "zh": "資料目錄"
+          },
+          "note": {
+            "en": "The web UI and the desktop app share one data directory.",
+            "zh": "網頁介面與桌面版共用同一個資料目錄。"
+          },
+          "tone": "accent",
+          "icon": "database"
+        },
+        {
+          "title": {
+            "en": "Event log",
+            "zh": "事件紀錄"
+          },
+          "note": {
+            "en": "Timeline replays events.jsonl.",
+            "zh": "時間軸回放的是 events.jsonl。"
+          },
+          "tone": "info",
+          "icon": "ledger"
+        },
+        {
+          "title": {
+            "en": "Patches",
+            "zh": "patch"
+          },
+          "note": {
+            "en": "Each attempt's binary patch is kept with the run.",
+            "zh": "每次嘗試的二進位 patch 跟這次執行放在一起。"
+          },
+          "tone": "info",
+          "icon": "doc"
+        },
+        {
+          "title": {
+            "en": "Report",
+            "zh": "報告"
+          },
+          "note": {
+            "en": "The Markdown report separates generated, reviewed, advanced, and verified work, and the zip redacts environment values.",
+            "zh": "Markdown 報告分開已產生、已審查、已放行與已驗證的工作，zip 會遮蔽環境變數的值。"
+          },
+          "tone": "info",
+          "icon": "download"
+        }
+      ],
+      "ticks": [
+        {
+          "en": "events appended",
+          "zh": "事件已追加"
+        },
+        {
+          "en": "patches kept",
+          "zh": "patch 已保留"
+        },
+        {
+          "en": "env values redacted",
+          "zh": "環境變數值已遮蔽"
+        }
+      ],
+      "caption": {
+        "en": "The engine writes the run under the shared data directory used by both the web UI and the desktop app. events.jsonl is the replay log, each attempt can keep a binary patch, and the Markdown report separates generated, reviewed, advanced, and verified work. Environment variable values are redacted before they are written, including inside the debug zip.",
+        "zh": "引擎把這次執行寫進網頁介面與桌面版共用的資料目錄。events.jsonl 是回放用的紀錄，每次嘗試可以留下二進位 patch，Markdown 報告則分開已產生、已審查、已放行與已驗證的工作。環境變數的值在寫入前會遮蔽，除錯 zip 裡也一樣。"
+      }
+    },
+    {
+      "id": "providers",
+      "heading": {
+        "en": "How each provider runs",
+        "zh": "每家 provider 怎麼跑"
+      },
+      "intro": {
+        "en": "OpenRouter models run through Codex with an isolated config. The mock provider exists for tests.",
+        "zh": "OpenRouter 的模型透過 Codex 跑，並使用獨立設定。mock provider 是給測試用的。"
+      },
+      "after": "features",
+      "spec": {
+        "columns": [
+          [
+            0
+          ],
+          [
+            1
+          ]
+        ],
+        "core": 1,
+        "lanes": [
+          "claude",
+          "codex",
+          "grok",
+          "agy",
+          "openrouter"
+        ]
+      },
+      "steps": [
+        {
+          "title": {
+            "en": "Workflow slot",
+            "zh": "流程槽位"
+          },
+          "note": {
+            "en": "The slot names a provider, a model, an effort, and a permission of safe, auto, or full.",
+            "zh": "槽位指定 provider、模型、推理強度，以及 safe、auto 或 full 的權限。"
+          },
+          "tone": "neutral",
+          "icon": "people"
+        },
+        {
+          "title": {
+            "en": "Runtime",
+            "zh": "執行期"
+          },
+          "note": {
+            "en": "Claude uses the Agent SDK, Codex a persistent app-server, and grok and agy are headless CLIs behind a FIFO manager.",
+            "zh": "Claude 用 Agent SDK，Codex 用常駐的 app-server，grok 與 agy 是 FIFO manager 後面的 headless CLI。"
+          },
+          "tone": "accent",
+          "icon": "terminal"
+        }
+      ],
+      "ticks": [
+        {
+          "en": "provider named on the slot",
+          "zh": "槽位已指定 provider"
+        },
+        {
+          "en": "runtime follows the name",
+          "zh": "runtime 跟著名稱走"
+        },
+        {
+          "en": "mock is for tests",
+          "zh": "mock 只供測試"
+        }
+      ],
+      "caption": {
+        "en": "A slot binds one of claude, codex, grok, agy, or openrouter, plus a permission of safe, auto, or full. Claude runs through the Agent SDK, Codex through a persistent app-server, and grok and agy through headless CLIs coordinated by a FIFO manager. OpenRouter models run through Codex with an isolated config. The mock provider is deterministic and used by tests.",
+        "zh": "一個槽位綁定 claude、codex、grok、agy 或 openrouter 之一，再加上 safe、auto 或 full 的權限。Claude 走 Agent SDK，Codex 走常駐的 app-server，grok 與 agy 走由 FIFO manager 協調的 headless CLI。OpenRouter 的模型透過 Codex 執行，並使用獨立設定。mock provider 結果固定，給測試用。"
+      }
+    },
+    {
+      "id": "verify",
+      "heading": {
+        "en": "Your command checks the patch",
+        "zh": "用你的指令檢查 patch"
+      },
+      "intro": {
+        "en": "Verification runs only for a worktree candidate whose patch is not empty.",
+        "zh": "只有使用 worktree、而且 patch 不是空的候選結果，才會跑驗證。"
+      },
+      "after": "features",
+      "spec": {
+        "columns": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ]
+        ],
+        "core": 1
+      },
+      "steps": [
+        {
+          "title": {
+            "en": "Patch",
+            "zh": "patch"
+          },
+          "note": {
+            "en": "An empty patch skips the command.",
+            "zh": "空的 patch 會跳過指令。"
+          },
+          "tone": "neutral",
+          "icon": "doc"
+        },
+        {
+          "title": {
+            "en": "Your command",
+            "zh": "你的指令"
+          },
+          "note": {
+            "en": "The workspace command, such as npm test, times out at 600 seconds unless you set another limit.",
+            "zh": "工作區的指令，例如 npm test，除非你另設上限，否則 600 秒逾時。"
+          },
+          "tone": "accent",
+          "icon": "terminal"
+        },
+        {
+          "title": {
+            "en": "Result",
+            "zh": "結果"
+          },
+          "note": {
+            "en": "Passed, failed, error, or skipped is stored with the log, and requireVerified retries when nothing passed.",
+            "zh": "通過、失敗、錯誤或略過會連同日誌存下，requireVerified 在沒有人通過時會重試。"
+          },
+          "tone": "info",
+          "icon": "check"
+        }
+      ],
+      "ticks": [
+        {
+          "en": "empty patch skipped",
+          "zh": "空 patch 已略過"
+        },
+        {
+          "en": "timeout defaults to 600s",
+          "zh": "預設逾時 600 秒"
+        },
+        {
+          "en": "result stored with the log",
+          "zh": "結果與日誌已存下"
+        }
+      ],
+      "caption": {
+        "en": "When a workspace has a verification command, MAT runs it on a worktree candidate with a non empty patch. The default timeout is 600 seconds. The result is passed, failed, error, or skipped, stored with the log. If the stage has requireVerified and no candidate passed, failing candidates are retried within the stage retry budget.",
+        "zh": "工作區有驗證指令時，MAT 會對使用 worktree 且 patch 不是空的候選結果執行它。預設逾時 600 秒。結果是通過、失敗、錯誤或略過，並連同日誌存下。階段開了 requireVerified 且沒有人通過時，會在該階段的重試額度內重試沒過的候選。"
+      }
+    },
+    {
+      "id": "bound",
+      "heading": {
+        "en": "What stays on this machine",
+        "zh": "什麼留在這台機器"
+      },
+      "intro": {
+        "en": "The server binds to loopback unless you change the host. Agent processes start from argument arrays.",
+        "zh": "除非你改位址，伺服器只綁定本機迴圈。agent 行程以參數陣列啟動。"
+      },
+      "after": "architecture",
+      "spec": {
+        "columns": [
+          [
+            0
+          ],
+          [
+            1
+          ]
+        ],
+        "core": 0,
+        "boundaryAfter": 0
+      },
+      "zones": {
+        "en": [
+          "Loopback",
+          "Bind choice",
+          "Wider host"
+        ],
+        "zh": [
+          "本機迴圈",
+          "綁定選擇",
+          "對外位址"
+        ]
+      },
+      "steps": [
+        {
+          "title": {
+            "en": "Default bind",
+            "zh": "預設綁定"
+          },
+          "note": {
+            "en": "A source run listens on loopback port 7788, and the desktop app picks a free loopback port.",
+            "zh": "從原始碼啟動時聽本機迴圈連接埠 7788，桌面版改挑一個空的本機迴圈連接埠。"
+          },
+          "tone": "accent",
+          "icon": "lock"
+        },
+        {
+          "title": {
+            "en": "Wider host",
+            "zh": "對外位址"
+          },
+          "note": {
+            "en": "Binding every interface does not require a token, so anyone who can reach the port can run agents in the workspace.",
+            "zh": "綁到所有介面時不會強制要 token，連得到該連接埠的人就能在工作區裡跑 agent。"
+          },
+          "tone": "warn",
+          "icon": "globe"
+        }
+      ],
+      "ticks": [
+        {
+          "en": "default is loopback",
+          "zh": "預設是本機迴圈"
+        },
+        {
+          "en": "token is not forced",
+          "zh": "token 不會被強制"
+        },
+        {
+          "en": "shell is the verify command",
+          "zh": "shell 只留給驗證指令"
+        }
+      ],
+      "caption": {
+        "en": "By default the server binds to loopback, port 7788 from source and a random loopback port in the desktop app. If you bind a wider host, MAT does not require a token. Set one yourself: REST uses a bearer token and WebSocket a query token. Agents start from argument arrays. Only the verification command runs in a shell.",
+        "zh": "伺服器預設綁定本機迴圈：原始碼是連接埠 7788，桌面版是隨機的本機迴圈連接埠。若改綁更寬的位址，MAT 不會強制 token。要自己設定：REST 用 bearer token，WebSocket 用 query token。agent 以參數陣列啟動。只有驗證指令會經過 shell。"
+      }
+    },
+    {
+      "id": "retry",
+      "heading": {
+        "en": "Retry, then advance anyway",
+        "zh": "重試完仍會往下"
+      },
+      "intro": {
+        "en": "The default budget is 2 retries per stage. A spent budget advances the stage and marks it degraded.",
+        "zh": "預設每個階段可重試 2 次。額度用完會繼續往下，並標成降級。"
+      },
+      "after": "decisions",
+      "spec": {
+        "columns": [
+          [
+            0
+          ],
+          [
+            1
+          ]
+        ],
+        "core": 1,
+        "loop": true,
+        "meter": true
+      },
+      "steps": [
+        {
+          "title": {
+            "en": "Stage result",
+            "zh": "階段結果"
+          },
+          "note": {
+            "en": "Candidates finish with text, and maybe a patch and a verification result.",
+            "zh": "候選結果結束時帶有文字，也可能帶有 patch 與驗證結果。"
+          },
+          "tone": "neutral",
+          "icon": "doc"
+        },
+        {
+          "title": {
+            "en": "Retry budget",
+            "zh": "重試額度"
+          },
+          "note": {
+            "en": "An unparsed answer advances at once and is marked degraded, and further retries stop after the budget, which defaults to 2.",
+            "zh": "無法解析的回答會立刻放行並標成降級，重試在額度用完後停止，預設是 2 次。"
+          },
+          "tone": "accent",
+          "icon": "route"
+        }
+      ],
+      "ticks": [
+        {
+          "en": "fenced json or degraded",
+          "zh": "有 JSON 或標降級"
+        },
+        {
+          "en": "two retries by default",
+          "zh": "預設可重試兩次"
+        },
+        {
+          "en": "degraded stays visible",
+          "zh": "降級會被標出來"
+        }
+      ],
+      "caption": {
+        "en": "The orchestrator must return advance, retry, or abort as fenced JSON. If that JSON cannot be parsed, or a retry names no valid node, the stage advances immediately and the decision is marked degraded. Otherwise retry repeats the stage until maxRetriesPerStage, which defaults to 2, and the next retry advances as degraded. Abort still stops the run.",
+        "zh": "協調者必須以圍起來的 JSON 回答 advance、retry 或 abort。JSON 無法解析，或 retry 沒有有效的節點時，階段會立刻放行，並把決策標成降級。否則 retry 會重複該階段，直到 maxRetriesPerStage（預設 2）用完，下一次就以降級放行。abort 仍然會停下這次執行。"
       }
     }
   ]
