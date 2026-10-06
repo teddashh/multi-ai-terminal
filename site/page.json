@@ -828,7 +828,7 @@
           },
           "note": {
             "en": "The timeline replays whatever landed in events.jsonl.",
-            "zh": "時間軸要回放，讀的是 events.jsonl。"
+            "zh": "events.jsonl 裡有什麼，時間軸就回放什麼。"
           },
           "tone": "info",
           "icon": "ledger"
