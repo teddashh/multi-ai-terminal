@@ -1522,14 +1522,14 @@ h2.lang-zh {
 }
 
 .fd {
-  --fd-surface: var(--paper-strong);
-  --fd-edge: var(--line);
-  --fd-text: var(--ink);
-  --fd-faint: var(--ink-faint);
-  --fd-accent: var(--signal);
-  --fd-accent-ink: color-mix(in srgb, var(--signal) 60%, var(--ink));
-  --fd-warn: var(--kicker);
-  --fd-info: color-mix(in srgb, var(--accent-2) 40%, var(--ink));
+  --fd-surface: #fbfbfa;
+  --fd-edge: rgb(20 20 20 / 0.14);
+  --fd-text: #141414;
+  --fd-faint: #7f7f7e;
+  --fd-accent: #ff5a36;
+  --fd-accent-ink: #a13e28;
+  --fd-warn: #4a4a4a;
+  --fd-info: #5d6172;
   --fd-font: inherit;
   --fd-mono: var(--mono);
 }
